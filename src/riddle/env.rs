@@ -1,9 +1,23 @@
 use std::collections::HashMap;
 
-pub struct Item {}
+pub trait Item {
+    fn as_env(&self) -> Option<&Env> {
+        None
+    }
+}
+
+pub struct Component {
+    env: Env,
+}
 
 pub struct Env {
-    items: HashMap<String, Item>,
+    items: HashMap<String, Box<dyn Item>>,
+}
+
+impl Item for Component {
+    fn as_env(&self) -> Option<&Env> {
+        Some(&self.env)
+    }
 }
 
 impl Env {
@@ -13,7 +27,7 @@ impl Env {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Item> {
+    pub fn get(&self, key: &str) -> Option<&Box<dyn Item>> {
         self.items.get(key)
     }
 }
