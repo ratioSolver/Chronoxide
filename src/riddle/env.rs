@@ -27,7 +27,7 @@ impl Env {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Box<dyn Item>> {
-        self.items.get(key)
+    pub fn get(&self, key: &str) -> Option<&dyn Item> {
+        self.items.get(key).map(|item| item.as_ref())
     }
 }
