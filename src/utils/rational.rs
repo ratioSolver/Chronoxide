@@ -23,6 +23,24 @@ impl Rational {
     }
 }
 
+impl std::cmp::PartialOrd for Rational {
+    fn partial_cmp(&self, other: &Rational) -> Option<std::cmp::Ordering> {
+        (self.num * other.den).partial_cmp(&(other.num * self.den))
+    }
+}
+
+impl std::cmp::PartialEq<i64> for Rational {
+    fn eq(&self, other: &i64) -> bool {
+        self.num == other * self.den
+    }
+}
+
+impl std::cmp::PartialOrd<i64> for Rational {
+    fn partial_cmp(&self, other: &i64) -> Option<std::cmp::Ordering> {
+        (self.num).partial_cmp(&(other * self.den))
+    }
+}
+
 impl std::ops::AddAssign<&Rational> for Rational {
     fn add_assign(&mut self, other: &Rational) {
         self.num = self.num * other.den + other.num * self.den;
@@ -299,5 +317,31 @@ mod tests {
         assert_eq!(format!("{}", Rational::new(2, 1)), "2");
         assert_eq!(format!("{}", Rational::new(0, 5)), "0");
         assert_eq!(format!("{}", Rational::new(-1, 2)), "-1/2");
+    }
+
+    #[test]
+    fn test_comparison() {
+        let a = Rational::new(1, 2);
+        let b = Rational::new(1, 3);
+        let c = Rational::new(1, 2);
+
+        assert!(a > b);
+        assert!(b < a);
+        assert!(a >= b);
+        assert!(b <= a);
+        assert!(a >= c);
+        assert!(a <= c);
+
+        // Comparison with i64
+        let d = Rational::new(4, 2); // 2
+        assert!(d == 2);
+        assert!(d <= 2);
+        assert!(d >= 2);
+        assert!(d < 3);
+        assert!(d > 1);
+
+        let e = Rational::new(1, 2);
+        assert!(e < 1);
+        assert!(e > 0);
     }
 }
