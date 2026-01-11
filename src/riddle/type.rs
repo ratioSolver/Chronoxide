@@ -8,4 +8,8 @@ impl Type {
             name: name.to_string(),
         }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }

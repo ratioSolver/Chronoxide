@@ -1,12 +1,16 @@
-use std::collections::HashMap;
+use crate::riddle::r#type::Type;
+use std::{collections::HashMap, rc::Weak};
 
 pub trait Item {
+    fn get_type(&self) -> std::rc::Rc<Type>;
+
     fn as_env(&self) -> Option<&Env> {
         None
     }
 }
 
 pub struct Component {
+    component_type: Weak<Type>,
     env: Env,
 }
 
@@ -15,6 +19,12 @@ pub struct Env {
 }
 
 impl Item for Component {
+    fn get_type(&self) -> std::rc::Rc<Type> {
+        self.component_type
+            .upgrade()
+            .expect("Type has been dropped")
+    }
+
     fn as_env(&self) -> Option<&Env> {
         Some(&self.env)
     }
