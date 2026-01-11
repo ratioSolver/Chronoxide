@@ -210,3 +210,16 @@ impl<'a> Lexer<'a> {
         }
     }
 }
+
+impl Iterator for Lexer<'_> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let token = self.next_token();
+        if token == Token::EOF {
+            None
+        } else {
+            Some(token)
+        }
+    }
+}
