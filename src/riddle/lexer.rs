@@ -29,6 +29,15 @@ pub enum Token {
     String,
     Class,
     Predicate,
+    Enum,
+    New,
+    For,
+    This,
+    Void,
+    Return,
+    Fact,
+    Goal,
+    Or,
     EOF,
 }
 
@@ -188,6 +197,15 @@ impl<'a> Lexer<'a> {
             "string" => Token::String,
             "class" => Token::Class,
             "predicate" => Token::Predicate,
+            "enum" => Token::Enum,
+            "new" => Token::New,
+            "for" => Token::For,
+            "this" => Token::This,
+            "void" => Token::Void,
+            "return" => Token::Return,
+            "fact" => Token::Fact,
+            "goal" => Token::Goal,
+            "or" => Token::Or,
             _ => Token::Identifier(identifier),
         }
     }
