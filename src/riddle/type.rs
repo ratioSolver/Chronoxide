@@ -1,15 +1,17 @@
-pub struct Type {
-    name: String,
+use crate::riddle::env::Component;
+use std::rc::Rc;
+
+pub trait Type {
+    fn get_name(&self) -> &str;
 }
 
-impl Type {
-    pub fn new(name: &str) -> Self {
-        Type {
-            name: name.to_string(),
-        }
-    }
+pub struct ComponentType {
+    name: String,
+    instances: Vec<Rc<Component>>,
+}
 
-    pub fn name(&self) -> &str {
+impl Type for ComponentType {
+    fn get_name(&self) -> &str {
         &self.name
     }
 }
