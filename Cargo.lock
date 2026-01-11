@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "Chronoxide"
+name = "chronoxide"
 version = "0.1.0"
