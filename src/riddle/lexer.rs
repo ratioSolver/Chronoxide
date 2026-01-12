@@ -223,3 +223,81 @@ impl Iterator for Lexer<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lexer_basic_tokens() {
+        let input = "+ - * / ( ) { } [ ] , ; = == != < <= > >= ";
+        let mut lexer = Lexer::new(input);
+        let expected_tokens = vec![
+            Token::Plus,
+            Token::Minus,
+            Token::Asterisk,
+            Token::Slash,
+            Token::LParen,
+            Token::RParen,
+            Token::LBrace,
+            Token::RBrace,
+            Token::LBracket,
+            Token::RBracket,
+            Token::Comma,
+            Token::Semicolon,
+            Token::Equal,
+            Token::EqualEqual,
+            Token::NotEqual,
+            Token::LessThan,
+            Token::LessEqual,
+            Token::GreaterThan,
+            Token::GreaterEqual,
+        ];
+        for expected in expected_tokens {
+            let token = lexer.next_token();
+            assert_eq!(token, expected);
+        }
+    }
+
+    #[test]
+    fn test_lexer_identifiers_and_numbers() {
+        let input = "var1 var_2 123 45.67";
+        let mut lexer = Lexer::new(input);
+        let expected_tokens = vec![
+            Token::Identifier("var1".to_string()),
+            Token::Identifier("var_2".to_string()),
+            Token::Number("123".to_string()),
+            Token::Number("45.67".to_string()),
+        ];
+        for expected in expected_tokens {
+            let token = lexer.next_token();
+            assert_eq!(token, expected);
+        }
+    }
+
+    #[test]
+    fn test_lexer_keywords() {
+        let input = "int real string class predicate enum new for this void return fact goal or";
+        let mut lexer = Lexer::new(input);
+        let expected_tokens = vec![
+            Token::Integer,
+            Token::Real,
+            Token::String,
+            Token::Class,
+            Token::Predicate,
+            Token::Enum,
+            Token::New,
+            Token::For,
+            Token::This,
+            Token::Void,
+            Token::Return,
+            Token::Fact,
+            Token::Goal,
+            Token::Or,
+        ];
+        for expected in expected_tokens {
+            let token = lexer.next_token();
+            assert_eq!(token, expected);
+        }
+    }
+}
