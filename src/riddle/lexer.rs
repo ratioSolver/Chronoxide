@@ -4,11 +4,16 @@ use std::str::Chars;
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Identifier(String),
-    Number(String),
+    BoolLiteral(bool),
+    IntLiteral(i64),
+    RealLiteral(i64, i64),
     Plus,
     Minus,
     Asterisk,
     Slash,
+    Amp,
+    Bar,
+    Dot,
     LParen,
     RParen,
     LBracket,
@@ -24,6 +29,7 @@ pub enum Token {
     GreaterThan,
     GreaterEqual,
     Semicolon,
+    Bool,
     Integer,
     Real,
     String,
@@ -71,6 +77,29 @@ impl<'a> Lexer<'a> {
                 '/' => {
                     self.input.next();
                     Token::Slash
+                }
+                '&' => {
+                    self.input.next();
+                    Token::Amp
+                }
+                '|' => {
+                    self.input.next();
+                    Token::Bar
+                }
+                '.' => {
+                    let mut lookahead = self.input.clone();
+                    lookahead.next();
+                    if let Some(&ch) = lookahead.peek() {
+                        if ch.is_digit(10) {
+                            self.read_number()
+                        } else {
+                            self.input.next();
+                            Token::Dot
+                        }
+                    } else {
+                        self.input.next();
+                        Token::Dot
+                    }
                 }
                 '(' => {
                     self.input.next();
@@ -140,7 +169,7 @@ impl<'a> Lexer<'a> {
                     self.input.next();
                     Token::Semicolon
                 }
-                '0'..='9' | '.' => self.read_number(),
+                '0'..='9' => self.read_number(),
                 'a'..='z' | 'A'..='Z' | '_' => self.read_identifier(),
                 _ => {
                     self.input.next();
@@ -178,7 +207,20 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Token::Number(number)
+        if has_decimal_point {
+            let mut parts = number.splitn(2, '.');
+            let int_part = parts.next().unwrap_or("0");
+            let frac_part = parts.next().unwrap_or("0");
+            let int_value = int_part.parse::<i64>().unwrap_or(0);
+            let frac_value = frac_part.parse::<i64>().unwrap_or(0);
+            let frac_len = frac_part.len() as u32;
+            let numerator = int_value * 10_i64.pow(frac_len) + frac_value;
+            let denominator = 10_i64.pow(frac_len);
+            Token::RealLiteral(numerator, denominator)
+        } else {
+            let int_value = number.parse::<i64>().unwrap_or(0);
+            Token::IntLiteral(int_value)
+        }
     }
 
     fn read_identifier(&mut self) -> Token {
@@ -192,6 +234,9 @@ impl<'a> Lexer<'a> {
             }
         }
         match identifier.as_str() {
+            "true" => Token::BoolLiteral(true),
+            "false" => Token::BoolLiteral(false),
+            "bool" => Token::Bool,
             "int" => Token::Integer,
             "real" => Token::Real,
             "string" => Token::String,
@@ -266,8 +311,8 @@ mod tests {
         let expected_tokens = vec![
             Token::Identifier("var1".to_string()),
             Token::Identifier("var_2".to_string()),
-            Token::Number("123".to_string()),
-            Token::Number("45.67".to_string()),
+            Token::IntLiteral(123),
+            Token::RealLiteral(4567, 100),
         ];
         for expected in expected_tokens {
             let token = lexer.next_token();
@@ -321,5 +366,23 @@ mod tests {
             let token = lexer.next_token();
             assert_eq!(token, expected);
         }
+    }
+
+    #[test]
+    fn test_lexer_dot_numbers() {
+        let input = ".5 . .123 0.5";
+        let mut lexer = Lexer::new(input);
+
+        // .5 -> RealLiteral(5, 10)
+        assert_eq!(lexer.next_token(), Token::RealLiteral(5, 10));
+
+        // . -> Dot
+        assert_eq!(lexer.next_token(), Token::Dot);
+
+        // .123 -> RealLiteral(123, 1000)
+        assert_eq!(lexer.next_token(), Token::RealLiteral(123, 1000));
+
+        // 0.5 -> RealLiteral(5, 10)
+        assert_eq!(lexer.next_token(), Token::RealLiteral(5, 10));
     }
 }
