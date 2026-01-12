@@ -1,19 +1,11 @@
-use std::collections::HashMap;
+use crate::riddle::r#type::Type;
+use std::rc::Weak;
 
-pub struct Field {}
-
-pub struct Scope {
-    fields: HashMap<String, Field>,
+pub struct Field {
+    component_type: Weak<dyn Type>,
+    name: String,
 }
 
-impl Scope {
-    pub fn new() -> Self {
-        Scope {
-            fields: HashMap::new(),
-        }
-    }
-
-    pub fn get_field(&self, key: &str) -> Option<&Field> {
-        self.fields.get(key)
-    }
+pub trait Scope {
+    fn get_field(&self, key: &str) -> Option<&Field>;
 }

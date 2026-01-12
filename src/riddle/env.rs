@@ -4,18 +4,27 @@ use std::{collections::HashMap, rc::Rc, rc::Weak};
 pub trait Item {
     fn get_type(&self) -> Rc<dyn Type>;
 
-    fn as_env(&self) -> Option<&Env> {
+    fn as_env(&self) -> Option<&dyn Env> {
         None
     }
 }
 
-pub struct Component {
-    component_type: Weak<dyn Type>,
-    env: Env,
+pub trait Env {
+    fn get(&self, key: &str) -> Option<&dyn Item>;
 }
 
-pub struct Env {
+pub struct Component {
+    component_type: Weak<dyn Type>,
     items: HashMap<String, Rc<dyn Item>>,
+}
+
+impl Component {
+    pub fn new(component_type: Weak<dyn Type>, items: HashMap<String, Rc<dyn Item>>) -> Self {
+        Self {
+            component_type,
+            items,
+        }
+    }
 }
 
 impl Item for Component {
@@ -25,19 +34,13 @@ impl Item for Component {
             .expect("Type has been dropped")
     }
 
-    fn as_env(&self) -> Option<&Env> {
-        Some(&self.env)
+    fn as_env(&self) -> Option<&dyn Env> {
+        Some(self)
     }
 }
 
-impl Env {
-    pub fn new() -> Self {
-        Env {
-            items: HashMap::new(),
-        }
-    }
-
-    pub fn get(&self, key: &str) -> Option<&dyn Item> {
+impl Env for Component {
+    fn get(&self, key: &str) -> Option<&dyn Item> {
         self.items.get(key).map(|item| item.as_ref())
     }
 }
