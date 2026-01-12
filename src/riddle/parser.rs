@@ -1,6 +1,7 @@
 use crate::riddle::lexer::{Lexer, Token};
 use std::iter::Peekable;
 
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Bool(bool),
     Int(i64),
@@ -205,7 +206,26 @@ impl<'a> Parser<'a> {
                         return Err("Expected identifier after '.'".to_string());
                     }
                 }
-                Ok(Expr::QualifiedId { ids })
+                if let Some(Token::LParen) = self.peek() {
+                    self.next(); // consume '('
+                    let mut args = Vec::new();
+                    if let Some(Token::RParen) = self.peek() {
+                        self.next(); // consume ')'
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Token::Comma) = self.peek() {
+                                self.next(); // consume ','
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                    }
+                    Ok(Expr::Function { name: ids, args })
+                } else {
+                    Ok(Expr::QualifiedId { ids })
+                }
             }
             Some(Token::LParen) => {
                 let expr = self.parse_expression()?;
@@ -215,5 +235,219 @@ impl<'a> Parser<'a> {
             Some(token) => Err(format!("Unexpected token: {:?}", token)),
             None => Err("Unexpected end of input".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(input: &str) -> Expr {
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        parser
+            .parse_expression()
+            .expect("Failed to parse expression")
+    }
+
+    #[test]
+    fn test_literals() {
+        assert_eq!(parse("true"), Expr::Bool(true));
+        assert_eq!(parse("false"), Expr::Bool(false));
+        assert_eq!(parse("123"), Expr::Int(123));
+        assert_eq!(parse("12.34"), Expr::Real(1234, 100));
+    }
+
+    #[test]
+    fn test_identifiers() {
+        assert_eq!(
+            parse("foo"),
+            Expr::QualifiedId {
+                ids: vec!["foo".to_string()]
+            }
+        );
+        assert_eq!(
+            parse("foo.bar"),
+            Expr::QualifiedId {
+                ids: vec!["foo".to_string(), "bar".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parentheses() {
+        assert_eq!(parse("(123)"), Expr::Int(123));
+    }
+
+    #[test]
+    fn test_function_calls() {
+        assert_eq!(
+            parse("f()"),
+            Expr::Function {
+                name: vec!["f".to_string()],
+                args: vec![]
+            }
+        );
+        assert_eq!(
+            parse("g(1, true)"),
+            Expr::Function {
+                name: vec!["g".to_string()],
+                args: vec![Expr::Int(1), Expr::Bool(true)],
+            }
+        );
+        assert_eq!(
+            parse("Math.max(1, 2)"),
+            Expr::Function {
+                name: vec!["Math".to_string(), "max".to_string()],
+                args: vec![Expr::Int(1), Expr::Int(2)],
+            }
+        );
+    }
+
+    #[test]
+    fn test_arithmetic() {
+        // 1 + 2
+        assert_eq!(
+            parse("1 + 2"),
+            Expr::Sum {
+                terms: vec![Expr::Int(1), Expr::Int(2)],
+            }
+        );
+
+        // 1 * 2
+        assert_eq!(
+            parse("1 * 2"),
+            Expr::Mul {
+                factors: vec![Expr::Int(1), Expr::Int(2)],
+            }
+        );
+
+        // 1 + 2 * 3
+        assert_eq!(
+            parse("1 + 2 * 3"),
+            Expr::Sum {
+                terms: vec![
+                    Expr::Int(1),
+                    Expr::Mul {
+                        factors: vec![Expr::Int(2), Expr::Int(3)],
+                    },
+                ],
+            }
+        );
+
+        // (1 + 2) * 3
+        assert_eq!(
+            parse("(1 + 2) * 3"),
+            Expr::Mul {
+                factors: vec![
+                    Expr::Sum {
+                        terms: vec![Expr::Int(1), Expr::Int(2)],
+                    },
+                    Expr::Int(3),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_relational() {
+        assert_eq!(
+            parse("1 < 2"),
+            Expr::Lt {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(2)),
+            }
+        );
+        assert_eq!(
+            parse("1 <= 2"),
+            Expr::Leq {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(2)),
+            }
+        );
+        assert_eq!(
+            parse("1 > 2"),
+            Expr::Gt {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(2)),
+            }
+        );
+        assert_eq!(
+            parse("1 >= 2"),
+            Expr::Geq {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(2)),
+            }
+        );
+        assert_eq!(
+            parse("1 = 1"),
+            Expr::Eq {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(1)),
+            }
+        );
+        assert_eq!(
+            parse("1 != 2"),
+            Expr::Neq {
+                left: Box::new(Expr::Int(1)),
+                right: Box::new(Expr::Int(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_logical() {
+        assert_eq!(
+            parse("true & false"),
+            Expr::And {
+                terms: vec![Expr::Bool(true), Expr::Bool(false)],
+            }
+        );
+        assert_eq!(
+            parse("true | false"),
+            Expr::Or {
+                terms: vec![Expr::Bool(true), Expr::Bool(false)],
+            }
+        );
+
+        // n-ary logical ops
+        assert_eq!(
+            parse("a & b & c"),
+            Expr::And {
+                terms: vec![
+                    Expr::QualifiedId {
+                        ids: vec!["a".to_string()]
+                    },
+                    Expr::QualifiedId {
+                        ids: vec!["b".to_string()]
+                    },
+                    Expr::QualifiedId {
+                        ids: vec!["c".to_string()]
+                    },
+                ]
+            }
+        );
+
+        // Mixed precedence: & binds tighter than |
+        assert_eq!(
+            parse("a | b & c"),
+            Expr::Or {
+                terms: vec![
+                    Expr::QualifiedId {
+                        ids: vec!["a".to_string()]
+                    },
+                    Expr::And {
+                        terms: vec![
+                            Expr::QualifiedId {
+                                ids: vec!["b".to_string()]
+                            },
+                            Expr::QualifiedId {
+                                ids: vec!["c".to_string()]
+                            },
+                        ]
+                    }
+                ]
+            }
+        );
     }
 }
