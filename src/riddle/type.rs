@@ -1,4 +1,5 @@
 use crate::riddle::{
+    core::Core,
     env::Component,
     scope::{Field, Scope},
 };
@@ -11,6 +12,28 @@ pub trait Type {
     fn get_name(&self) -> &str;
 
     fn new_instance(&mut self) -> Rc<Component>;
+}
+
+pub struct BoolType {
+    core: Weak<Core>,
+}
+
+impl BoolType {
+    pub fn new(core: &Rc<Core>) -> Rc<Self> {
+        Rc::new(BoolType {
+            core: Rc::downgrade(core),
+        })
+    }
+}
+
+impl Type for BoolType {
+    fn get_name(&self) -> &str {
+        "bool"
+    }
+
+    fn new_instance(&mut self) -> Rc<Component> {
+        unimplemented!()
+    }
 }
 
 pub trait ComplexType: Type + Scope {}
