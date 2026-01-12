@@ -300,4 +300,26 @@ mod tests {
             assert_eq!(token, expected);
         }
     }
+
+    #[test]
+    fn test_lexer_riddle() {
+        let input = "class Person { int age; string name; }";
+        let mut lexer = Lexer::new(input);
+        let expected_tokens = vec![
+            Token::Class,
+            Token::Identifier("Person".to_string()),
+            Token::LBrace,
+            Token::Integer,
+            Token::Identifier("age".to_string()),
+            Token::Semicolon,
+            Token::String,
+            Token::Identifier("name".to_string()),
+            Token::Semicolon,
+            Token::RBrace,
+        ];
+        for expected in expected_tokens {
+            let token = lexer.next_token();
+            assert_eq!(token, expected);
+        }
+    }
 }
