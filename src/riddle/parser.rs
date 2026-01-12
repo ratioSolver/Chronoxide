@@ -22,6 +22,30 @@ pub enum Expr {
     And { terms: Vec<Expr> },
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Statement {
+    Expr(Expr),
+    LocalField {
+        field_type: Vec<String>,
+        fields: Vec<(String, Option<Expr>)>,
+    },
+    Assign {
+        name: Vec<String>,
+        value: Expr,
+    },
+    ForAll {
+        var_type: Vec<String>,
+        var_name: String,
+        statements: Vec<Statement>,
+    },
+    Disjunction {
+        disjuncts: Vec<(Vec<Statement>, Expr)>,
+    },
+    Return {
+        value: Expr,
+    },
+}
+
 pub struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
 }
