@@ -1,3 +1,9 @@
+/// Represents a rational number defined by a numerator and a denominator.
+///
+/// The number is always stored in normalized form:
+/// - The denominator is always non-negative.
+/// - It is reduced to lowest terms.
+/// - A denominator of 0 represents infinity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rational {
     num: i64,
@@ -5,6 +11,16 @@ pub struct Rational {
 }
 
 impl Rational {
+    /// Creates a new `Rational` number.
+    ///
+    /// # Arguments
+    ///
+    /// * `num` - The numerator.
+    /// * `den` - The denominator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if both `num` and `den` are zero.
     pub fn new(num: i64, den: i64) -> Self {
         assert!(num != 0 || den != 0);
         let mut rat = Rational { num, den };
@@ -12,6 +28,8 @@ impl Rational {
         rat
     }
 
+    /// Normalizes the rational number by dividing numerator and denominator by their GCD.
+    /// Also ensures that the denominator is non-negative.
     fn normalize(&mut self) {
         let gcd = gcd(self.num, self.den);
         self.num /= gcd;
@@ -22,6 +40,7 @@ impl Rational {
         }
     }
 
+    /// Creates a `Rational` number from an integer.
     pub(crate) fn from_integer(arg: i64) -> Rational {
         Rational::new(arg, 1)
     }
@@ -203,6 +222,7 @@ impl std::fmt::Display for Rational {
     }
 }
 
+/// Computes the greatest common divisor of two numbers.
 fn gcd(mut a: i64, mut b: i64) -> i64 {
     while b != 0 {
         let temp = b;
