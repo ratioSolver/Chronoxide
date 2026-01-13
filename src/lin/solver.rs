@@ -73,7 +73,55 @@ impl Solver {
         self.vars.len() - 1
     }
 
-    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin) -> bool {
+    pub fn value(&self, v: usize) -> InfRational {
+        self.vars[v].value()
+    }
+
+    pub fn lb(&self, v: usize) -> InfRational {
+        match self.vars[v].lb() {
+            Some(lb) => lb.clone(),
+            None => InfRational::NEGATIVE_INFINITY,
+        }
+    }
+
+    pub fn ub(&self, v: usize) -> InfRational {
+        match self.vars[v].ub() {
+            Some(ub) => ub.clone(),
+            None => InfRational::POSITIVE_INFINITY,
+        }
+    }
+
+    pub fn lb_lin(&self, l: &Lin) -> InfRational {
+        let mut lb = InfRational::from_rational(*l.known_term());
+        for (v, coeff) in l.vars() {
+            if coeff >= 0 {
+                lb += coeff * self.lb(*v);
+            } else {
+                lb += coeff * self.ub(*v);
+            }
+            if lb == InfRational::NEGATIVE_INFINITY {
+                break;
+            }
+        }
+        lb
+    }
+
+    pub fn ub_lin(&self, l: &Lin) -> InfRational {
+        let mut ub = InfRational::from_rational(*l.known_term());
+        for (v, coeff) in l.vars() {
+            if coeff >= 0 {
+                ub += coeff * self.ub(*v);
+            } else {
+                ub += coeff * self.lb(*v);
+            }
+            if ub == InfRational::POSITIVE_INFINITY {
+                break;
+            }
+        }
+        ub
+    }
+
+    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<&Constraint>) {
         let mut expr = lhs - rhs;
         // Remove basic variables from the expression and substitute with their tableau expressions
         for v in expr.vars().keys().cloned().collect::<Vec<usize>>() {

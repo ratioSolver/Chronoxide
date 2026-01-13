@@ -1,3 +1,9 @@
+use std::{
+    cmp::Ordering,
+    fmt::{Display, Formatter, Result},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+};
+
 /// Represents a rational number defined by a numerator and a denominator.
 ///
 /// The number is always stored in normalized form:
@@ -50,25 +56,57 @@ impl Rational {
     pub const ZERO: Self = Self { num: 0, den: 1 };
 }
 
-impl std::cmp::PartialOrd for Rational {
-    fn partial_cmp(&self, other: &Rational) -> Option<std::cmp::Ordering> {
+impl From<i64> for Rational {
+    fn from(arg: i64) -> Self {
+        Rational::from_integer(arg)
+    }
+}
+
+impl PartialOrd for Rational {
+    fn partial_cmp(&self, other: &Rational) -> Option<Ordering> {
         (self.num * other.den).partial_cmp(&(other.num * self.den))
     }
 }
 
-impl std::cmp::PartialEq<i64> for Rational {
+impl PartialEq<Rational> for i64 {
+    fn eq(&self, other: &Rational) -> bool {
+        other.num == self * other.den
+    }
+}
+
+impl PartialOrd<i64> for Rational {
+    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
+        (self.num).partial_cmp(&(other * self.den))
+    }
+}
+
+impl PartialEq<i64> for Rational {
     fn eq(&self, other: &i64) -> bool {
         self.num == other * self.den
     }
 }
 
-impl std::cmp::PartialOrd<i64> for Rational {
-    fn partial_cmp(&self, other: &i64) -> Option<std::cmp::Ordering> {
+impl PartialOrd<i64> for &Rational {
+    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
         (self.num).partial_cmp(&(other * self.den))
     }
 }
 
-impl std::ops::AddAssign<&Rational> for Rational {
+impl PartialEq<i64> for &Rational {
+    fn eq(&self, other: &i64) -> bool {
+        self.num == other * self.den
+    }
+}
+
+impl AddAssign for Rational {
+    fn add_assign(&mut self, other: Self) {
+        self.num = self.num * other.den + other.num * self.den;
+        self.den = self.den * other.den;
+        self.normalize();
+    }
+}
+
+impl AddAssign<&Rational> for Rational {
     fn add_assign(&mut self, other: &Rational) {
         self.num = self.num * other.den + other.num * self.den;
         self.den = self.den * other.den;
@@ -76,14 +114,14 @@ impl std::ops::AddAssign<&Rational> for Rational {
     }
 }
 
-impl std::ops::AddAssign<i64> for Rational {
+impl AddAssign<i64> for Rational {
     fn add_assign(&mut self, other: i64) {
         self.num += other * self.den;
         self.normalize();
     }
 }
 
-impl std::ops::Add<&Rational> for Rational {
+impl Add<&Rational> for Rational {
     type Output = Rational;
 
     fn add(self, other: &Rational) -> Rational {
@@ -93,7 +131,7 @@ impl std::ops::Add<&Rational> for Rational {
     }
 }
 
-impl std::ops::Add<&Rational> for &Rational {
+impl Add<&Rational> for &Rational {
     type Output = Rational;
 
     fn add(self, other: &Rational) -> Rational {
@@ -103,7 +141,7 @@ impl std::ops::Add<&Rational> for &Rational {
     }
 }
 
-impl std::ops::Add<i64> for Rational {
+impl Add<i64> for Rational {
     type Output = Rational;
 
     fn add(self, other: i64) -> Rational {
@@ -113,7 +151,7 @@ impl std::ops::Add<i64> for Rational {
     }
 }
 
-impl std::ops::Add<i64> for &Rational {
+impl Add<i64> for &Rational {
     type Output = Rational;
 
     fn add(self, other: i64) -> Rational {
@@ -123,7 +161,7 @@ impl std::ops::Add<i64> for &Rational {
     }
 }
 
-impl std::ops::Add<&Rational> for i64 {
+impl Add<&Rational> for i64 {
     type Output = Rational;
 
     fn add(self, other: &Rational) -> Rational {
@@ -133,7 +171,7 @@ impl std::ops::Add<&Rational> for i64 {
     }
 }
 
-impl std::ops::Add<Rational> for i64 {
+impl Add<Rational> for i64 {
     type Output = Rational;
 
     fn add(self, other: Rational) -> Rational {
@@ -143,7 +181,15 @@ impl std::ops::Add<Rational> for i64 {
     }
 }
 
-impl std::ops::SubAssign<&Rational> for Rational {
+impl SubAssign for Rational {
+    fn sub_assign(&mut self, other: Self) {
+        self.num = self.num * other.den - other.num * self.den;
+        self.den = self.den * other.den;
+        self.normalize();
+    }
+}
+
+impl SubAssign<&Rational> for Rational {
     fn sub_assign(&mut self, other: &Rational) {
         self.num = self.num * other.den - other.num * self.den;
         self.den = self.den * other.den;
@@ -151,14 +197,14 @@ impl std::ops::SubAssign<&Rational> for Rational {
     }
 }
 
-impl std::ops::SubAssign<i64> for Rational {
+impl SubAssign<i64> for Rational {
     fn sub_assign(&mut self, other: i64) {
         self.num -= other * self.den;
         self.normalize();
     }
 }
 
-impl std::ops::Sub<&Rational> for Rational {
+impl Sub<&Rational> for Rational {
     type Output = Rational;
 
     fn sub(self, other: &Rational) -> Rational {
@@ -168,7 +214,7 @@ impl std::ops::Sub<&Rational> for Rational {
     }
 }
 
-impl std::ops::Sub<&Rational> for &Rational {
+impl Sub<&Rational> for &Rational {
     type Output = Rational;
 
     fn sub(self, other: &Rational) -> Rational {
@@ -178,7 +224,7 @@ impl std::ops::Sub<&Rational> for &Rational {
     }
 }
 
-impl std::ops::Sub<i64> for Rational {
+impl Sub<i64> for Rational {
     type Output = Rational;
 
     fn sub(self, other: i64) -> Rational {
@@ -188,7 +234,7 @@ impl std::ops::Sub<i64> for Rational {
     }
 }
 
-impl std::ops::Sub<i64> for &Rational {
+impl Sub<i64> for &Rational {
     type Output = Rational;
 
     fn sub(self, other: i64) -> Rational {
@@ -198,7 +244,7 @@ impl std::ops::Sub<i64> for &Rational {
     }
 }
 
-impl std::ops::Sub<&Rational> for i64 {
+impl Sub<&Rational> for i64 {
     type Output = Rational;
 
     fn sub(self, other: &Rational) -> Rational {
@@ -208,7 +254,7 @@ impl std::ops::Sub<&Rational> for i64 {
     }
 }
 
-impl std::ops::Sub<Rational> for i64 {
+impl Sub<Rational> for i64 {
     type Output = Rational;
 
     fn sub(self, other: Rational) -> Rational {
@@ -218,7 +264,15 @@ impl std::ops::Sub<Rational> for i64 {
     }
 }
 
-impl std::ops::MulAssign<&Rational> for Rational {
+impl MulAssign for Rational {
+    fn mul_assign(&mut self, other: Self) {
+        self.num *= other.num;
+        self.den *= other.den;
+        self.normalize();
+    }
+}
+
+impl MulAssign<&Rational> for Rational {
     fn mul_assign(&mut self, other: &Rational) {
         self.num *= other.num;
         self.den *= other.den;
@@ -226,14 +280,14 @@ impl std::ops::MulAssign<&Rational> for Rational {
     }
 }
 
-impl std::ops::MulAssign<i64> for Rational {
+impl MulAssign<i64> for Rational {
     fn mul_assign(&mut self, other: i64) {
         self.num *= other;
         self.normalize();
     }
 }
 
-impl std::ops::Mul<&Rational> for Rational {
+impl Mul<&Rational> for Rational {
     type Output = Rational;
 
     fn mul(self, other: &Rational) -> Rational {
@@ -243,7 +297,7 @@ impl std::ops::Mul<&Rational> for Rational {
     }
 }
 
-impl std::ops::Mul<&Rational> for &Rational {
+impl Mul<&Rational> for &Rational {
     type Output = Rational;
 
     fn mul(self, other: &Rational) -> Rational {
@@ -253,7 +307,7 @@ impl std::ops::Mul<&Rational> for &Rational {
     }
 }
 
-impl std::ops::Mul<i64> for Rational {
+impl Mul<i64> for Rational {
     type Output = Rational;
 
     fn mul(self, other: i64) -> Rational {
@@ -263,7 +317,7 @@ impl std::ops::Mul<i64> for Rational {
     }
 }
 
-impl std::ops::Mul<i64> for &Rational {
+impl Mul<i64> for &Rational {
     type Output = Rational;
 
     fn mul(self, other: i64) -> Rational {
@@ -273,7 +327,7 @@ impl std::ops::Mul<i64> for &Rational {
     }
 }
 
-impl std::ops::Mul<&Rational> for i64 {
+impl Mul<&Rational> for i64 {
     type Output = Rational;
 
     fn mul(self, other: &Rational) -> Rational {
@@ -283,7 +337,7 @@ impl std::ops::Mul<&Rational> for i64 {
     }
 }
 
-impl std::ops::Mul<Rational> for i64 {
+impl Mul<Rational> for i64 {
     type Output = Rational;
 
     fn mul(self, other: Rational) -> Rational {
@@ -293,7 +347,15 @@ impl std::ops::Mul<Rational> for i64 {
     }
 }
 
-impl std::ops::DivAssign<&Rational> for Rational {
+impl DivAssign for Rational {
+    fn div_assign(&mut self, other: Self) {
+        self.num *= other.den;
+        self.den *= other.num;
+        self.normalize();
+    }
+}
+
+impl DivAssign<&Rational> for Rational {
     fn div_assign(&mut self, other: &Rational) {
         self.num *= other.den;
         self.den *= other.num;
@@ -301,14 +363,14 @@ impl std::ops::DivAssign<&Rational> for Rational {
     }
 }
 
-impl std::ops::DivAssign<i64> for Rational {
+impl DivAssign<i64> for Rational {
     fn div_assign(&mut self, other: i64) {
         self.den *= other;
         self.normalize();
     }
 }
 
-impl std::ops::Div<&Rational> for Rational {
+impl Div<&Rational> for Rational {
     type Output = Rational;
 
     fn div(self, other: &Rational) -> Rational {
@@ -318,7 +380,7 @@ impl std::ops::Div<&Rational> for Rational {
     }
 }
 
-impl std::ops::Div<&Rational> for &Rational {
+impl Div<&Rational> for &Rational {
     type Output = Rational;
 
     fn div(self, other: &Rational) -> Rational {
@@ -328,7 +390,7 @@ impl std::ops::Div<&Rational> for &Rational {
     }
 }
 
-impl std::ops::Div<i64> for Rational {
+impl Div<i64> for Rational {
     type Output = Rational;
 
     fn div(self, other: i64) -> Rational {
@@ -338,7 +400,7 @@ impl std::ops::Div<i64> for Rational {
     }
 }
 
-impl std::ops::Div<i64> for &Rational {
+impl Div<i64> for &Rational {
     type Output = Rational;
 
     fn div(self, other: i64) -> Rational {
@@ -348,7 +410,7 @@ impl std::ops::Div<i64> for &Rational {
     }
 }
 
-impl std::ops::Div<&Rational> for i64 {
+impl Div<&Rational> for i64 {
     type Output = Rational;
 
     fn div(self, other: &Rational) -> Rational {
@@ -358,7 +420,7 @@ impl std::ops::Div<&Rational> for i64 {
     }
 }
 
-impl std::ops::Div<Rational> for i64 {
+impl Div<Rational> for i64 {
     type Output = Rational;
 
     fn div(self, other: Rational) -> Rational {
@@ -368,7 +430,7 @@ impl std::ops::Div<Rational> for i64 {
     }
 }
 
-impl std::ops::Neg for Rational {
+impl Neg for Rational {
     type Output = Rational;
 
     fn neg(self) -> Rational {
@@ -376,8 +438,8 @@ impl std::ops::Neg for Rational {
     }
 }
 
-impl std::fmt::Display for Rational {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Rational {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self.den {
             0 => write!(f, "{}", if self.num > 0 { "∞" } else { "-∞" }),
             1 => write!(f, "{}", self.num),
