@@ -1,1 +1,1 @@
-pub mod ac;
+pub mod solver;

@@ -1,16 +1,12 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    rc::Rc,
-};
-
 use crate::{InfRational, Lin};
+use std::collections::{BTreeMap, HashSet};
 
 pub trait Constraint {}
 
 pub struct Var {
     val: InfRational,
-    lbs: BTreeMap<InfRational, HashSet<Rc<dyn Constraint>>>,
-    ubs: BTreeMap<InfRational, HashSet<Rc<dyn Constraint>>>,
+    lbs: BTreeMap<InfRational, HashSet<usize>>,
+    ubs: BTreeMap<InfRational, HashSet<usize>>,
     rows: HashSet<usize>,
 }
 

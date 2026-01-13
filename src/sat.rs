@@ -1,1 +1,1 @@
-pub mod sat;
+pub mod solver;
