@@ -3,13 +3,30 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lin {
-    vars: HashMap<u32, Rational>,
+    vars: HashMap<usize, Rational>,
     known_term: Rational,
 }
 
 impl Lin {
-    pub fn new(vars: HashMap<u32, Rational>, known_term: Rational) -> Self {
+    pub fn new(vars: HashMap<usize, Rational>, known_term: Rational) -> Self {
         Lin { vars, known_term }
+    }
+
+    pub fn vars(&self) -> &HashMap<usize, Rational> {
+        &self.vars
+    }
+
+    pub fn known_term(&self) -> &Rational {
+        &self.known_term
+    }
+
+    pub fn substitute(&mut self, var: usize, lin: &Lin) {
+        assert!(self.vars.contains_key(&var));
+        let coeff = self.vars.remove(&var).unwrap();
+        for (v, c) in &lin.vars {
+            *self.vars.entry(*v).or_insert(Rational::new(0, 1)) += &(c * &coeff);
+        }
+        self.known_term += &(&lin.known_term * &coeff);
     }
 }
 
@@ -55,12 +72,52 @@ impl std::ops::Add<&Lin> for Lin {
     }
 }
 
+impl std::ops::Add<&Lin> for &Lin {
+    type Output = Lin;
+
+    fn add(self, other: &Lin) -> Lin {
+        let mut result = self.clone();
+        result += other;
+        result
+    }
+}
+
 impl std::ops::Add<&Rational> for Lin {
     type Output = Lin;
 
     fn add(self, other: &Rational) -> Lin {
         let mut result = self;
         result += other;
+        result
+    }
+}
+
+impl std::ops::Add<&Rational> for &Lin {
+    type Output = Lin;
+
+    fn add(self, other: &Rational) -> Lin {
+        let mut result = self.clone();
+        result += other;
+        result
+    }
+}
+
+impl std::ops::Add<&Lin> for Rational {
+    type Output = Lin;
+
+    fn add(self, other: &Lin) -> Lin {
+        let mut result = other.clone();
+        result += &self;
+        result
+    }
+}
+
+impl std::ops::Add<&Lin> for &Rational {
+    type Output = Lin;
+
+    fn add(self, other: &Lin) -> Lin {
+        let mut result = other.clone();
+        result += self;
         result
     }
 }
@@ -90,12 +147,58 @@ impl std::ops::Sub<&Lin> for Lin {
     }
 }
 
+impl std::ops::Sub<&Lin> for &Lin {
+    type Output = Lin;
+
+    fn sub(self, other: &Lin) -> Lin {
+        let mut result = self.clone();
+        result -= other;
+        result
+    }
+}
+
 impl std::ops::Sub<&Rational> for Lin {
     type Output = Lin;
 
     fn sub(self, other: &Rational) -> Lin {
         let mut result = self;
         result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<&Rational> for &Lin {
+    type Output = Lin;
+
+    fn sub(self, other: &Rational) -> Lin {
+        let mut result = self.clone();
+        result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<&Lin> for Rational {
+    type Output = Lin;
+
+    fn sub(self, other: &Lin) -> Lin {
+        let mut result = other.clone();
+        for coeff in result.vars.values_mut() {
+            *coeff = -coeff.clone();
+        }
+        result.known_term = self - &result.known_term;
+        result
+    }
+}
+
+impl std::ops::Sub<&Lin> for &Rational {
+    type Output = Lin;
+
+    fn sub(self, other: &Lin) -> Lin {
+        let mut result = other.clone();
+        for coeff in result.vars.values_mut() {
+            *coeff = -coeff.clone();
+        }
+        result.known_term = self - &result.known_term;
         result
     }
 }
@@ -119,6 +222,16 @@ impl std::ops::Mul<&Rational> for Lin {
     }
 }
 
+impl std::ops::Mul<&Rational> for &Lin {
+    type Output = Lin;
+
+    fn mul(self, other: &Rational) -> Lin {
+        let mut result = self.clone();
+        result *= other;
+        result
+    }
+}
+
 impl std::ops::DivAssign<&Rational> for Lin {
     fn div_assign(&mut self, other: &Rational) {
         for coeff in self.vars.values_mut() {
@@ -133,6 +246,16 @@ impl std::ops::Div<&Rational> for Lin {
 
     fn div(self, other: &Rational) -> Lin {
         let mut result = self;
+        result /= other;
+        result
+    }
+}
+
+impl std::ops::Div<&Rational> for &Lin {
+    type Output = Lin;
+
+    fn div(self, other: &Rational) -> Lin {
+        let mut result = self.clone();
         result /= other;
         result
     }

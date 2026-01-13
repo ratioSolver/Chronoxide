@@ -8,26 +8,26 @@ use std::{
     rc::{Rc, Weak},
 };
 
-pub trait Type {
-    fn get_name(&self) -> &str;
+pub trait Kind {
+    fn name(&self) -> &str;
 
     fn new_instance(&mut self) -> Rc<Component>;
 }
 
-pub struct BoolType {
+pub struct BoolKind {
     core: Weak<Core>,
 }
 
-impl BoolType {
+impl BoolKind {
     pub fn new(core: &Rc<Core>) -> Rc<Self> {
-        Rc::new(BoolType {
+        Rc::new(BoolKind {
             core: Rc::downgrade(core),
         })
     }
 }
 
-impl Type for BoolType {
-    fn get_name(&self) -> &str {
+impl Kind for BoolKind {
+    fn name(&self) -> &str {
         "bool"
     }
 
@@ -36,18 +36,18 @@ impl Type for BoolType {
     }
 }
 
-pub trait ComplexType: Type + Scope {}
+pub trait ComplexType: Kind + Scope {}
 
-pub struct ComponentType {
+pub struct ComponentKind {
     weak_self: Weak<Self>,
     name: String,
     fields: HashMap<String, Field>,
     instances: Vec<Rc<Component>>,
 }
 
-impl ComponentType {
+impl ComponentKind {
     pub fn new(name: String) -> Rc<Self> {
-        let component_type = Rc::new_cyclic(|weak_self| ComponentType {
+        let component_type = Rc::new_cyclic(|weak_self| ComponentKind {
             weak_self: weak_self.clone(),
             name,
             fields: HashMap::new(),
@@ -57,15 +57,15 @@ impl ComponentType {
     }
 }
 
-impl Type for ComponentType {
-    fn get_name(&self) -> &str {
+impl Kind for ComponentKind {
+    fn name(&self) -> &str {
         &self.name
     }
 
     fn new_instance(&mut self) -> Rc<Component> {
         let instance = Rc::new(Component::new(
             Rc::downgrade(
-                &(self.weak_self.upgrade().expect("Type has been dropped") as Rc<dyn Type>),
+                &(self.weak_self.upgrade().expect("Type has been dropped") as Rc<dyn Kind>),
             ),
             std::collections::HashMap::new(),
         ));
@@ -74,10 +74,10 @@ impl Type for ComponentType {
     }
 }
 
-impl Scope for ComponentType {
-    fn get_field(&self, key: &str) -> Option<&Field> {
+impl Scope for ComponentKind {
+    fn field(&self, key: &str) -> Option<&Field> {
         self.fields.get(key)
     }
 }
 
-impl ComplexType for ComponentType {}
+impl ComplexType for ComponentKind {}

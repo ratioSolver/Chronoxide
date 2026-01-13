@@ -1,11 +1,11 @@
-use crate::riddle::r#type::Type;
+use crate::riddle::class::Kind;
 use std::rc::Weak;
 
 pub struct Field {
-    component_type: Weak<dyn Type>,
+    component_type: Weak<dyn Kind>,
     name: String,
 }
 
 pub trait Scope {
-    fn get_field(&self, key: &str) -> Option<&Field>;
+    fn field(&self, key: &str) -> Option<&Field>;
 }

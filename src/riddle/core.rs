@@ -6,17 +6,17 @@ use std::{
 
 use crate::riddle::{
     scope::{Field, Scope},
-    r#type::{BoolType, Type},
+    class::{BoolKind, Kind},
 };
 
 pub struct Core {
     weak_self: Weak<Self>,
     fields: HashMap<String, Field>,
-    types: RefCell<HashMap<String, Rc<dyn Type>>>,
+    types: RefCell<HashMap<String, Rc<dyn Kind>>>,
 }
 
 impl Scope for Core {
-    fn get_field(&self, key: &str) -> Option<&Field> {
+    fn field(&self, key: &str) -> Option<&Field> {
         self.fields.get(key)
     }
 }
@@ -28,10 +28,10 @@ impl Core {
             fields: HashMap::new(),
             types: RefCell::new(HashMap::new()),
         });
-        let bool_type = BoolType::new(&core);
+        let bool_type = BoolKind::new(&core);
         core.types
             .borrow_mut()
-            .insert(bool_type.get_name().to_string(), bool_type);
+            .insert(bool_type.name().to_string(), bool_type);
         core
     }
 }

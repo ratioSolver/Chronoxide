@@ -41,9 +41,13 @@ impl Rational {
     }
 
     /// Creates a `Rational` number from an integer.
-    pub(crate) fn from_integer(arg: i64) -> Rational {
+    pub fn from_integer(arg: i64) -> Rational {
         Rational::new(arg, 1)
     }
+
+    pub const POSITIVE_INFINITY: Self = Self { num: 1, den: 0 };
+    pub const NEGATIVE_INFINITY: Self = Self { num: -1, den: 0 };
+    pub const ZERO: Self = Self { num: 0, den: 1 };
 }
 
 impl std::cmp::PartialOrd for Rational {
@@ -89,12 +93,52 @@ impl std::ops::Add<&Rational> for Rational {
     }
 }
 
+impl std::ops::Add<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn add(self, other: &Rational) -> Rational {
+        let mut result = *self;
+        result += other;
+        result
+    }
+}
+
 impl std::ops::Add<i64> for Rational {
     type Output = Rational;
 
     fn add(self, other: i64) -> Rational {
         let mut result = self;
         result += other;
+        result
+    }
+}
+
+impl std::ops::Add<i64> for &Rational {
+    type Output = Rational;
+
+    fn add(self, other: i64) -> Rational {
+        let mut result = *self;
+        result += other;
+        result
+    }
+}
+
+impl std::ops::Add<&Rational> for i64 {
+    type Output = Rational;
+
+    fn add(self, other: &Rational) -> Rational {
+        let mut result = other.clone();
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Add<Rational> for i64 {
+    type Output = Rational;
+
+    fn add(self, other: Rational) -> Rational {
+        let mut result = other.clone();
+        result += self;
         result
     }
 }
@@ -124,12 +168,52 @@ impl std::ops::Sub<&Rational> for Rational {
     }
 }
 
+impl std::ops::Sub<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn sub(self, other: &Rational) -> Rational {
+        let mut result = *self;
+        result -= other;
+        result
+    }
+}
+
 impl std::ops::Sub<i64> for Rational {
     type Output = Rational;
 
     fn sub(self, other: i64) -> Rational {
         let mut result = self;
         result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<i64> for &Rational {
+    type Output = Rational;
+
+    fn sub(self, other: i64) -> Rational {
+        let mut result = *self;
+        result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<&Rational> for i64 {
+    type Output = Rational;
+
+    fn sub(self, other: &Rational) -> Rational {
+        let mut result = Rational::from_integer(self);
+        result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<Rational> for i64 {
+    type Output = Rational;
+
+    fn sub(self, other: Rational) -> Rational {
+        let mut result = Rational::from_integer(self);
+        result -= &other;
         result
     }
 }
@@ -159,12 +243,52 @@ impl std::ops::Mul<&Rational> for Rational {
     }
 }
 
+impl std::ops::Mul<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn mul(self, other: &Rational) -> Rational {
+        let mut result = *self;
+        result *= other;
+        result
+    }
+}
+
 impl std::ops::Mul<i64> for Rational {
     type Output = Rational;
 
     fn mul(self, other: i64) -> Rational {
         let mut result = self;
         result *= other;
+        result
+    }
+}
+
+impl std::ops::Mul<i64> for &Rational {
+    type Output = Rational;
+
+    fn mul(self, other: i64) -> Rational {
+        let mut result = *self;
+        result *= other;
+        result
+    }
+}
+
+impl std::ops::Mul<&Rational> for i64 {
+    type Output = Rational;
+
+    fn mul(self, other: &Rational) -> Rational {
+        let mut result = other.clone();
+        result *= self;
+        result
+    }
+}
+
+impl std::ops::Mul<Rational> for i64 {
+    type Output = Rational;
+
+    fn mul(self, other: Rational) -> Rational {
+        let mut result = other.clone();
+        result *= self;
         result
     }
 }
@@ -194,12 +318,52 @@ impl std::ops::Div<&Rational> for Rational {
     }
 }
 
+impl std::ops::Div<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn div(self, other: &Rational) -> Rational {
+        let mut result = *self;
+        result /= other;
+        result
+    }
+}
+
 impl std::ops::Div<i64> for Rational {
     type Output = Rational;
 
     fn div(self, other: i64) -> Rational {
         let mut result = self;
         result /= other;
+        result
+    }
+}
+
+impl std::ops::Div<i64> for &Rational {
+    type Output = Rational;
+
+    fn div(self, other: i64) -> Rational {
+        let mut result = *self;
+        result /= other;
+        result
+    }
+}
+
+impl std::ops::Div<&Rational> for i64 {
+    type Output = Rational;
+
+    fn div(self, other: &Rational) -> Rational {
+        let mut result = Rational::from_integer(self);
+        result /= other;
+        result
+    }
+}
+
+impl std::ops::Div<Rational> for i64 {
+    type Output = Rational;
+
+    fn div(self, other: Rational) -> Rational {
+        let mut result = Rational::from_integer(self);
+        result /= &other;
         result
     }
 }
@@ -242,8 +406,8 @@ mod tests {
         assert_eq!(Rational::new(-2, 4), Rational::new(-1, 2));
         assert_eq!(Rational::new(2, -4), Rational::new(-1, 2));
         assert_eq!(Rational::new(-2, -4), Rational::new(1, 2));
-        assert_eq!(Rational::new(0, 5), Rational::new(0, 1));
-        assert_eq!(Rational::new(5, 0), Rational::new(1, 0)); // Infinity check based on normalization logic
+        assert_eq!(Rational::new(0, 5), Rational::ZERO);
+        assert_eq!(Rational::new(5, 0), Rational::POSITIVE_INFINITY);
     }
 
     #[test]
@@ -258,6 +422,10 @@ mod tests {
         let b = Rational::new(1, 3);
         assert_eq!(a + &b, Rational::new(5, 6));
         assert_eq!(a + 1, Rational::new(3, 2));
+        assert_eq!(&a + &b, Rational::new(5, 6));
+        assert_eq!(&a + 1, Rational::new(3, 2));
+        assert_eq!(1 + &a, Rational::new(3, 2));
+        assert_eq!(1 + a, Rational::new(3, 2));
     }
 
     #[test]
@@ -277,6 +445,10 @@ mod tests {
         let b = Rational::new(1, 3);
         assert_eq!(a - &b, Rational::new(1, 6));
         assert_eq!(a - 1, Rational::new(-1, 2));
+        assert_eq!(&a - &b, Rational::new(1, 6));
+        assert_eq!(&a - 1, Rational::new(-1, 2));
+        assert_eq!(1 - &a, Rational::new(1, 2));
+        assert_eq!(1 - a, Rational::new(1, 2));
     }
 
     #[test]
@@ -296,6 +468,10 @@ mod tests {
         let b = Rational::new(2, 3);
         assert_eq!(a * &b, Rational::new(1, 3));
         assert_eq!(a * 2, Rational::new(1, 1));
+        assert_eq!(&a * &b, Rational::new(1, 3));
+        assert_eq!(&a * 2, Rational::new(1, 1));
+        assert_eq!(2 * &a, Rational::new(1, 1));
+        assert_eq!(2 * a, Rational::new(1, 1));
     }
 
     #[test]
@@ -315,6 +491,10 @@ mod tests {
         let b = Rational::new(2, 3);
         assert_eq!(a / &b, Rational::new(3, 4));
         assert_eq!(a / 2, Rational::new(1, 4));
+        assert_eq!(&a / &b, Rational::new(3, 4));
+        assert_eq!(&a / 2, Rational::new(1, 4));
+        assert_eq!(2 / &a, Rational::new(4, 1));
+        assert_eq!(2 / a, Rational::new(4, 1));
     }
 
     #[test]

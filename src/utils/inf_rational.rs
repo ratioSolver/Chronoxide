@@ -11,12 +11,32 @@ impl InfRational {
         InfRational { rat, inf }
     }
 
-    pub(crate) fn from_integer(arg: i64) -> InfRational {
+    pub fn from_rational(rat: Rational) -> InfRational {
         InfRational {
-            rat: Rational::from_integer(arg),
-            inf: Rational::from_integer(0),
+            rat,
+            inf: Rational::ZERO,
         }
     }
+
+    pub fn from_integer(arg: i64) -> InfRational {
+        InfRational {
+            rat: Rational::from_integer(arg),
+            inf: Rational::ZERO,
+        }
+    }
+
+    pub const POSITIVE_INFINITY: Self = Self {
+        rat: Rational::POSITIVE_INFINITY,
+        inf: Rational::ZERO,
+    };
+    pub const NEGATIVE_INFINITY: Self = Self {
+        rat: Rational::NEGATIVE_INFINITY,
+        inf: Rational::ZERO,
+    };
+    pub const ZERO: Self = Self {
+        rat: Rational::ZERO,
+        inf: Rational::ZERO,
+    };
 }
 
 impl std::cmp::PartialOrd for InfRational {
