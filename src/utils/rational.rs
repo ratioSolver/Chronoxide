@@ -467,11 +467,11 @@ mod tests {
         let a = Rational::new(1, 2);
         let b = Rational::new(2, 3);
         assert_eq!(a * &b, Rational::new(1, 3));
-        assert_eq!(a * 2, Rational::new(1, 1));
+        assert_eq!(a * 2, Rational::from_integer(1));
         assert_eq!(&a * &b, Rational::new(1, 3));
-        assert_eq!(&a * 2, Rational::new(1, 1));
-        assert_eq!(2 * &a, Rational::new(1, 1));
-        assert_eq!(2 * a, Rational::new(1, 1));
+        assert_eq!(&a * 2, Rational::from_integer(1));
+        assert_eq!(2 * &a, Rational::from_integer(1));
+        assert_eq!(2 * a, Rational::from_integer(1));
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
 
         let mut b = Rational::new(1, 2);
         b *= 2;
-        assert_eq!(b, Rational::new(1, 1));
+        assert_eq!(b, Rational::from_integer(1));
     }
 
     #[test]
@@ -493,8 +493,8 @@ mod tests {
         assert_eq!(a / 2, Rational::new(1, 4));
         assert_eq!(&a / &b, Rational::new(3, 4));
         assert_eq!(&a / 2, Rational::new(1, 4));
-        assert_eq!(2 / &a, Rational::new(4, 1));
-        assert_eq!(2 / a, Rational::new(4, 1));
+        assert_eq!(2 / &a, Rational::from_integer(4));
+        assert_eq!(2 / a, Rational::from_integer(4));
     }
 
     #[test]
@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn test_display() {
         assert_eq!(format!("{}", Rational::new(1, 2)), "1/2");
-        assert_eq!(format!("{}", Rational::new(2, 1)), "2");
+        assert_eq!(format!("{}", Rational::from_integer(2)), "2");
         assert_eq!(format!("{}", Rational::new(0, 5)), "0");
         assert_eq!(format!("{}", Rational::new(-1, 2)), "-1/2");
     }

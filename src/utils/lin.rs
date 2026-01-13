@@ -24,7 +24,7 @@ impl Lin {
         assert!(self.vars.contains_key(&var));
         let coeff = self.vars.remove(&var).unwrap();
         for (v, c) in &lin.vars {
-            *self.vars.entry(*v).or_insert(Rational::new(0, 1)) += &(c * &coeff);
+            *self.vars.entry(*v).or_insert(Rational::from_integer(0)) += &(c * &coeff);
         }
         self.known_term += &(&lin.known_term * &coeff);
     }
@@ -50,7 +50,7 @@ impl std::fmt::Display for Lin {
 impl std::ops::AddAssign<&Lin> for Lin {
     fn add_assign(&mut self, other: &Lin) {
         for (var, coeff) in &other.vars {
-            *self.vars.entry(*var).or_insert(Rational::new(0, 1)) += coeff;
+            *self.vars.entry(*var).or_insert(Rational::from_integer(0)) += coeff;
         }
         self.known_term += &other.known_term;
     }
@@ -125,7 +125,7 @@ impl std::ops::Add<&Lin> for &Rational {
 impl std::ops::SubAssign<&Lin> for Lin {
     fn sub_assign(&mut self, other: &Lin) {
         for (var, coeff) in &other.vars {
-            *self.vars.entry(*var).or_insert(Rational::new(0, 1)) -= coeff;
+            *self.vars.entry(*var).or_insert(Rational::from_integer(0)) -= coeff;
         }
         self.known_term -= &other.known_term;
     }
@@ -286,7 +286,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert(1, Rational::new(1, 2));
         vars.insert(2, Rational::new(-3, 4));
-        let known_term = Rational::new(5, 1);
+        let known_term = Rational::from_integer(5);
         let lin = Lin::new(vars, known_term);
 
         // Display representation depends on map iteration order
@@ -298,20 +298,20 @@ mod tests {
     #[test]
     fn test_add_lin() {
         let mut vars1 = HashMap::new();
-        vars1.insert(1, Rational::new(1, 1));
-        let lin1 = Lin::new(vars1, Rational::new(2, 1));
+        vars1.insert(1, Rational::from_integer(1));
+        let lin1 = Lin::new(vars1, Rational::from_integer(2));
 
         let mut vars2 = HashMap::new();
-        vars2.insert(1, Rational::new(2, 1));
-        vars2.insert(2, Rational::new(3, 1));
-        let lin2 = Lin::new(vars2, Rational::new(4, 1));
+        vars2.insert(1, Rational::from_integer(2));
+        vars2.insert(2, Rational::from_integer(3));
+        let lin2 = Lin::new(vars2, Rational::from_integer(4));
 
         let sum = lin1 + &lin2;
 
         let mut expected_vars = HashMap::new();
-        expected_vars.insert(1, Rational::new(3, 1));
-        expected_vars.insert(2, Rational::new(3, 1));
-        let expected = Lin::new(expected_vars, Rational::new(6, 1));
+        expected_vars.insert(1, Rational::from_integer(3));
+        expected_vars.insert(2, Rational::from_integer(3));
+        let expected = Lin::new(expected_vars, Rational::from_integer(6));
 
         assert_eq!(sum, expected);
     }
@@ -319,12 +319,12 @@ mod tests {
     #[test]
     fn test_add_rational() {
         let mut vars = HashMap::new();
-        vars.insert(1, Rational::new(1, 1));
-        let lin = Lin::new(vars.clone(), Rational::new(2, 1));
-        let rat = Rational::new(3, 1);
+        vars.insert(1, Rational::from_integer(1));
+        let lin = Lin::new(vars.clone(), Rational::from_integer(2));
+        let rat = Rational::from_integer(3);
 
         let sum = lin + &rat;
-        let expected = Lin::new(vars, Rational::new(5, 1));
+        let expected = Lin::new(vars, Rational::from_integer(5));
 
         assert_eq!(sum, expected);
     }
@@ -332,20 +332,20 @@ mod tests {
     #[test]
     fn test_sub_lin() {
         let mut vars1 = HashMap::new();
-        vars1.insert(1, Rational::new(1, 1));
-        let lin1 = Lin::new(vars1, Rational::new(2, 1));
+        vars1.insert(1, Rational::from_integer(1));
+        let lin1 = Lin::new(vars1, Rational::from_integer(2));
 
         let mut vars2 = HashMap::new();
-        vars2.insert(1, Rational::new(2, 1));
-        vars2.insert(2, Rational::new(3, 1));
-        let lin2 = Lin::new(vars2, Rational::new(4, 1));
+        vars2.insert(1, Rational::from_integer(2));
+        vars2.insert(2, Rational::from_integer(3));
+        let lin2 = Lin::new(vars2, Rational::from_integer(4));
 
         let diff = lin1 - &lin2;
 
         let mut expected_vars = HashMap::new();
-        expected_vars.insert(1, Rational::new(-1, 1));
-        expected_vars.insert(2, Rational::new(-3, 1));
-        let expected = Lin::new(expected_vars, Rational::new(-2, 1));
+        expected_vars.insert(1, Rational::from_integer(-1));
+        expected_vars.insert(2, Rational::from_integer(-3));
+        let expected = Lin::new(expected_vars, Rational::from_integer(-2));
 
         assert_eq!(diff, expected);
     }
@@ -353,12 +353,12 @@ mod tests {
     #[test]
     fn test_sub_rational() {
         let mut vars = HashMap::new();
-        vars.insert(1, Rational::new(1, 1));
-        let lin = Lin::new(vars.clone(), Rational::new(2, 1));
-        let rat = Rational::new(3, 1);
+        vars.insert(1, Rational::from_integer(1));
+        let lin = Lin::new(vars.clone(), Rational::from_integer(2));
+        let rat = Rational::from_integer(3);
 
         let diff = lin - &rat;
-        let expected = Lin::new(vars, Rational::new(-1, 1));
+        let expected = Lin::new(vars, Rational::from_integer(-1));
 
         assert_eq!(diff, expected);
     }
@@ -368,12 +368,12 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert(1, Rational::new(1, 2));
         let lin = Lin::new(vars, Rational::new(3, 4));
-        let rat = Rational::new(2, 1);
+        let rat = Rational::from_integer(2);
 
         let product = lin * &rat;
 
         let mut expected_vars = HashMap::new();
-        expected_vars.insert(1, Rational::new(1, 1));
+        expected_vars.insert(1, Rational::from_integer(1));
         let expected = Lin::new(expected_vars, Rational::new(3, 2));
 
         assert_eq!(product, expected);
@@ -382,9 +382,9 @@ mod tests {
     #[test]
     fn test_div_rational() {
         let mut vars = HashMap::new();
-        vars.insert(1, Rational::new(1, 1));
+        vars.insert(1, Rational::from_integer(1));
         let lin = Lin::new(vars, Rational::new(3, 2));
-        let rat = Rational::new(2, 1);
+        let rat = Rational::from_integer(2);
 
         let quotient = lin / &rat;
 
@@ -408,5 +408,65 @@ mod tests {
         let expected = Lin::new(expected_vars, Rational::new(3, 4));
 
         assert_eq!(neg_lin, expected);
+    }
+
+    #[test]
+    fn test_substitute() {
+        // self = 2*x1 + 3*x2 + 5
+        let mut vars1 = HashMap::new();
+        vars1.insert(1, Rational::from_integer(2));
+        vars1.insert(2, Rational::from_integer(3));
+        let mut lin1 = Lin::new(vars1, Rational::from_integer(5));
+
+        // substitute x1 with (4*x3 + 1)
+        let mut vars_sub = HashMap::new();
+        vars_sub.insert(3, Rational::from_integer(4));
+        let lin_sub = Lin::new(vars_sub, Rational::from_integer(1));
+
+        lin1.substitute(1, &lin_sub);
+
+        // expected = 3*x2 + 8*x3 + 7
+        let mut expected_vars = HashMap::new();
+        expected_vars.insert(2, Rational::from_integer(3));
+        expected_vars.insert(3, Rational::from_integer(8));
+        let expected = Lin::new(expected_vars, Rational::from_integer(7));
+
+        assert_eq!(lin1, expected);
+    }
+
+    #[test]
+    fn test_substitute_combine() {
+        // self = 2*x1 + 3*x2
+        let mut vars1 = HashMap::new();
+        vars1.insert(1, Rational::from_integer(2));
+        vars1.insert(2, Rational::from_integer(3));
+        let mut lin1 = Lin::new(vars1, Rational::from_integer(0));
+
+        // substitute x1 with (x2 + 1)
+        let mut vars_sub = HashMap::new();
+        vars_sub.insert(2, Rational::from_integer(1));
+        let lin_sub = Lin::new(vars_sub, Rational::from_integer(1));
+
+        lin1.substitute(1, &lin_sub);
+
+        // expected = 5*x2 + 2
+        let mut expected_vars = HashMap::new();
+        expected_vars.insert(2, Rational::from_integer(5));
+        let expected = Lin::new(expected_vars, Rational::from_integer(2));
+
+        assert_eq!(lin1, expected);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_substitute_missing_var() {
+        let mut vars = HashMap::new();
+        vars.insert(1, Rational::from_integer(1));
+        let mut lin = Lin::new(vars, Rational::from_integer(0));
+
+        let lin_sub = Lin::new(HashMap::new(), Rational::from_integer(0));
+
+        // Panic: Variable 2 not in lin
+        lin.substitute(2, &lin_sub);
     }
 }
