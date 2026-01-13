@@ -68,13 +68,13 @@ impl PartialOrd for Rational {
     }
 }
 
-impl PartialEq<Rational> for i64 {
-    fn eq(&self, other: &Rational) -> bool {
-        other.num == self * other.den
+impl PartialOrd<i64> for Rational {
+    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
+        (self.num).partial_cmp(&(other * self.den))
     }
 }
 
-impl PartialOrd<i64> for Rational {
+impl PartialOrd<i64> for &Rational {
     fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
         (self.num).partial_cmp(&(other * self.den))
     }
@@ -83,12 +83,6 @@ impl PartialOrd<i64> for Rational {
 impl PartialEq<i64> for Rational {
     fn eq(&self, other: &i64) -> bool {
         self.num == other * self.den
-    }
-}
-
-impl PartialOrd<i64> for &Rational {
-    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
-        (self.num).partial_cmp(&(other * self.den))
     }
 }
 
@@ -121,66 +115,6 @@ impl AddAssign<i64> for Rational {
     }
 }
 
-impl Add<&Rational> for Rational {
-    type Output = Rational;
-
-    fn add(self, other: &Rational) -> Rational {
-        let mut result = self;
-        result += other;
-        result
-    }
-}
-
-impl Add<&Rational> for &Rational {
-    type Output = Rational;
-
-    fn add(self, other: &Rational) -> Rational {
-        let mut result = *self;
-        result += other;
-        result
-    }
-}
-
-impl Add<i64> for Rational {
-    type Output = Rational;
-
-    fn add(self, other: i64) -> Rational {
-        let mut result = self;
-        result += other;
-        result
-    }
-}
-
-impl Add<i64> for &Rational {
-    type Output = Rational;
-
-    fn add(self, other: i64) -> Rational {
-        let mut result = *self;
-        result += other;
-        result
-    }
-}
-
-impl Add<&Rational> for i64 {
-    type Output = Rational;
-
-    fn add(self, other: &Rational) -> Rational {
-        let mut result = other.clone();
-        result += self;
-        result
-    }
-}
-
-impl Add<Rational> for i64 {
-    type Output = Rational;
-
-    fn add(self, other: Rational) -> Rational {
-        let mut result = other.clone();
-        result += self;
-        result
-    }
-}
-
 impl SubAssign for Rational {
     fn sub_assign(&mut self, other: Self) {
         self.num = self.num * other.den - other.num * self.den;
@@ -201,66 +135,6 @@ impl SubAssign<i64> for Rational {
     fn sub_assign(&mut self, other: i64) {
         self.num -= other * self.den;
         self.normalize();
-    }
-}
-
-impl Sub<&Rational> for Rational {
-    type Output = Rational;
-
-    fn sub(self, other: &Rational) -> Rational {
-        let mut result = self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<&Rational> for &Rational {
-    type Output = Rational;
-
-    fn sub(self, other: &Rational) -> Rational {
-        let mut result = *self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<i64> for Rational {
-    type Output = Rational;
-
-    fn sub(self, other: i64) -> Rational {
-        let mut result = self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<i64> for &Rational {
-    type Output = Rational;
-
-    fn sub(self, other: i64) -> Rational {
-        let mut result = *self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<&Rational> for i64 {
-    type Output = Rational;
-
-    fn sub(self, other: &Rational) -> Rational {
-        let mut result = Rational::from_integer(self);
-        result -= other;
-        result
-    }
-}
-
-impl Sub<Rational> for i64 {
-    type Output = Rational;
-
-    fn sub(self, other: Rational) -> Rational {
-        let mut result = Rational::from_integer(self);
-        result -= &other;
-        result
     }
 }
 
@@ -287,66 +161,6 @@ impl MulAssign<i64> for Rational {
     }
 }
 
-impl Mul<&Rational> for Rational {
-    type Output = Rational;
-
-    fn mul(self, other: &Rational) -> Rational {
-        let mut result = self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<&Rational> for &Rational {
-    type Output = Rational;
-
-    fn mul(self, other: &Rational) -> Rational {
-        let mut result = *self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<i64> for Rational {
-    type Output = Rational;
-
-    fn mul(self, other: i64) -> Rational {
-        let mut result = self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<i64> for &Rational {
-    type Output = Rational;
-
-    fn mul(self, other: i64) -> Rational {
-        let mut result = *self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<&Rational> for i64 {
-    type Output = Rational;
-
-    fn mul(self, other: &Rational) -> Rational {
-        let mut result = other.clone();
-        result *= self;
-        result
-    }
-}
-
-impl Mul<Rational> for i64 {
-    type Output = Rational;
-
-    fn mul(self, other: Rational) -> Rational {
-        let mut result = other.clone();
-        result *= self;
-        result
-    }
-}
-
 impl DivAssign for Rational {
     fn div_assign(&mut self, other: Self) {
         self.num *= other.den;
@@ -370,65 +184,100 @@ impl DivAssign<i64> for Rational {
     }
 }
 
-impl Div<&Rational> for Rational {
-    type Output = Rational;
+macro_rules! impl_op {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign_method:ident) => {
+        // Rational op Rational
+        impl $trait<Rational> for Rational {
+            type Output = Rational;
+            fn $method(mut self, other: Rational) -> Rational {
+                self.$assign_method(&other);
+                self
+            }
+        }
 
-    fn div(self, other: &Rational) -> Rational {
-        let mut result = self;
-        result /= other;
-        result
-    }
+        // Rational op &Rational
+        impl $trait<&Rational> for Rational {
+            type Output = Rational;
+            fn $method(mut self, other: &Rational) -> Rational {
+                self.$assign_method(other);
+                self
+            }
+        }
+
+        // &Rational op Rational
+        impl $trait<Rational> for &Rational {
+            type Output = Rational;
+            fn $method(self, other: Rational) -> Rational {
+                let mut res = *self;
+                res.$assign_method(&other);
+                res
+            }
+        }
+
+        // &Rational op &Rational
+        impl $trait<&Rational> for &Rational {
+            type Output = Rational;
+            fn $method(self, other: &Rational) -> Rational {
+                let mut res = *self;
+                res.$assign_method(other);
+                res
+            }
+        }
+
+        // Rational op i64
+        impl $trait<i64> for Rational {
+            type Output = Rational;
+            fn $method(mut self, other: i64) -> Rational {
+                self.$assign_method(other);
+                self
+            }
+        }
+
+        // &Rational op i64
+        impl $trait<i64> for &Rational {
+            type Output = Rational;
+            fn $method(self, other: i64) -> Rational {
+                let mut res = *self;
+                res.$assign_method(other);
+                res
+            }
+        }
+    };
 }
 
-impl Div<&Rational> for &Rational {
-    type Output = Rational;
+macro_rules! impl_rev_op {
+    ($trait:ident, $method:ident) => {
+        // i64 op Rational
+        impl $trait<Rational> for i64 {
+            type Output = Rational;
+            fn $method(self, other: Rational) -> Rational {
+                let mut res = Rational::from(self);
+                res = res.$method(&other);
+                res
+            }
+        }
 
-    fn div(self, other: &Rational) -> Rational {
-        let mut result = *self;
-        result /= other;
-        result
-    }
+        // i64 op &Rational
+        impl $trait<&Rational> for i64 {
+            type Output = Rational;
+            fn $method(self, other: &Rational) -> Rational {
+                let mut res = Rational::from(self);
+                res = res.$method(other);
+                res
+            }
+        }
+    };
 }
 
-impl Div<i64> for Rational {
-    type Output = Rational;
+impl_op!(Add, add, AddAssign, add_assign);
+impl_op!(Sub, sub, SubAssign, sub_assign);
+impl_op!(Mul, mul, MulAssign, mul_assign);
+impl_op!(Div, div, DivAssign, div_assign);
 
-    fn div(self, other: i64) -> Rational {
-        let mut result = self;
-        result /= other;
-        result
-    }
-}
-
-impl Div<i64> for &Rational {
-    type Output = Rational;
-
-    fn div(self, other: i64) -> Rational {
-        let mut result = *self;
-        result /= other;
-        result
-    }
-}
-
-impl Div<&Rational> for i64 {
-    type Output = Rational;
-
-    fn div(self, other: &Rational) -> Rational {
-        let mut result = Rational::from_integer(self);
-        result /= other;
-        result
-    }
-}
-
-impl Div<Rational> for i64 {
-    type Output = Rational;
-
-    fn div(self, other: Rational) -> Rational {
-        let mut result = Rational::from_integer(self);
-        result /= &other;
-        result
-    }
-}
+impl_rev_op!(Add, add);
+impl_rev_op!(Sub, sub);
+impl_rev_op!(Mul, mul);
+impl_rev_op!(Div, div);
 
 impl Neg for Rational {
     type Output = Rational;
