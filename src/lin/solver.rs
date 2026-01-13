@@ -85,3 +85,17 @@ impl Solver {
         unimplemented!()
     }
 }
+
+impl std::fmt::Display for Solver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Variables:")?;
+        for (i, var) in self.vars.iter().enumerate() {
+            writeln!(f, "  x{}: {}", i, var)?;
+        }
+        writeln!(f, "Tableau:")?;
+        for (v, lin) in &self.tableau {
+            writeln!(f, "  x{} = {}", v, lin)?;
+        }
+        Ok(())
+    }
+}
