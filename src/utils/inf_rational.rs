@@ -107,11 +107,31 @@ impl std::ops::Add<&InfRational> for InfRational {
     }
 }
 
+impl std::ops::Add<&InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn add(self, other: &InfRational) -> InfRational {
+        let mut result = *self;
+        result += other;
+        result
+    }
+}
+
 impl std::ops::Add<&Rational> for InfRational {
     type Output = InfRational;
 
     fn add(self, other: &Rational) -> InfRational {
         let mut result = self;
+        result += other;
+        result
+    }
+}
+
+impl std::ops::Add<&Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn add(self, other: &Rational) -> InfRational {
+        let mut result = *self;
         result += other;
         result
     }
@@ -123,6 +143,76 @@ impl std::ops::Add<i64> for InfRational {
     fn add(self, other: i64) -> InfRational {
         let mut result = self;
         result += other;
+        result
+    }
+}
+
+impl std::ops::Add<i64> for &InfRational {
+    type Output = InfRational;
+
+    fn add(self, other: i64) -> InfRational {
+        let mut result = *self;
+        result += other;
+        result
+    }
+}
+
+impl std::ops::Add<InfRational> for Rational {
+    type Output = InfRational;
+
+    fn add(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result += &self;
+        result
+    }
+}
+
+impl std::ops::Add<InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn add(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Add<&InfRational> for Rational {
+    type Output = InfRational;
+
+    fn add(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result += &self;
+        result
+    }
+}
+
+impl std::ops::Add<&InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn add(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Add<InfRational> for i64 {
+    type Output = InfRational;
+
+    fn add(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Add<&InfRational> for i64 {
+    type Output = InfRational;
+
+    fn add(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result += self;
         result
     }
 }
@@ -156,11 +246,31 @@ impl std::ops::Sub<&InfRational> for InfRational {
     }
 }
 
+impl std::ops::Sub<&InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn sub(self, other: &InfRational) -> InfRational {
+        let mut result = *self;
+        result -= other;
+        result
+    }
+}
+
 impl std::ops::Sub<&Rational> for InfRational {
     type Output = InfRational;
 
     fn sub(self, other: &Rational) -> InfRational {
         let mut result = self;
+        result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<&Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn sub(self, other: &Rational) -> InfRational {
+        let mut result = *self;
         result -= other;
         result
     }
@@ -172,6 +282,76 @@ impl std::ops::Sub<i64> for InfRational {
     fn sub(self, other: i64) -> InfRational {
         let mut result = self;
         result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<i64> for &InfRational {
+    type Output = InfRational;
+
+    fn sub(self, other: i64) -> InfRational {
+        let mut result = *self;
+        result -= other;
+        result
+    }
+}
+
+impl std::ops::Sub<InfRational> for Rational {
+    type Output = InfRational;
+
+    fn sub(self, other: InfRational) -> InfRational {
+        let mut result = -other;
+        result += &self;
+        result
+    }
+}
+
+impl std::ops::Sub<InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn sub(self, other: InfRational) -> InfRational {
+        let mut result = -other;
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Sub<&InfRational> for Rational {
+    type Output = InfRational;
+
+    fn sub(self, other: &InfRational) -> InfRational {
+        let mut result = -(*other);
+        result += &self;
+        result
+    }
+}
+
+impl std::ops::Sub<&InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn sub(self, other: &InfRational) -> InfRational {
+        let mut result = -(*other);
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Sub<InfRational> for i64 {
+    type Output = InfRational;
+
+    fn sub(self, other: InfRational) -> InfRational {
+        let mut result = -other;
+        result += self;
+        result
+    }
+}
+
+impl std::ops::Sub<&InfRational> for i64 {
+    type Output = InfRational;
+
+    fn sub(self, other: &InfRational) -> InfRational {
+        let mut result = -(*other);
+        result += self;
         result
     }
 }
@@ -200,12 +380,92 @@ impl std::ops::Mul<&Rational> for InfRational {
     }
 }
 
+impl std::ops::Mul<&Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn mul(self, other: &Rational) -> InfRational {
+        let mut result = *self;
+        result *= other;
+        result
+    }
+}
+
 impl std::ops::Mul<i64> for InfRational {
     type Output = InfRational;
 
     fn mul(self, other: i64) -> InfRational {
         let mut result = self;
         result *= other;
+        result
+    }
+}
+
+impl std::ops::Mul<i64> for &InfRational {
+    type Output = InfRational;
+
+    fn mul(self, other: i64) -> InfRational {
+        let mut result = *self;
+        result *= other;
+        result
+    }
+}
+
+impl std::ops::Mul<InfRational> for Rational {
+    type Output = InfRational;
+
+    fn mul(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result *= &self;
+        result
+    }
+}
+
+impl std::ops::Mul<InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn mul(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result *= self;
+        result
+    }
+}
+
+impl std::ops::Mul<&InfRational> for Rational {
+    type Output = InfRational;
+
+    fn mul(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result *= &self;
+        result
+    }
+}
+
+impl std::ops::Mul<&InfRational> for &Rational {
+    type Output = InfRational;
+
+    fn mul(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result *= self;
+        result
+    }
+}
+
+impl std::ops::Mul<InfRational> for i64 {
+    type Output = InfRational;
+
+    fn mul(self, other: InfRational) -> InfRational {
+        let mut result = other;
+        result *= self;
+        result
+    }
+}
+
+impl std::ops::Mul<&InfRational> for i64 {
+    type Output = InfRational;
+
+    fn mul(self, other: &InfRational) -> InfRational {
+        let mut result = *other;
+        result *= self;
         result
     }
 }
@@ -234,11 +494,31 @@ impl std::ops::Div<&Rational> for InfRational {
     }
 }
 
+impl std::ops::Div<&Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn div(self, other: &Rational) -> InfRational {
+        let mut result = *self;
+        result /= other;
+        result
+    }
+}
+
 impl std::ops::Div<i64> for InfRational {
     type Output = InfRational;
 
     fn div(self, other: i64) -> InfRational {
         let mut result = self;
+        result /= other;
+        result
+    }
+}
+
+impl std::ops::Div<i64> for &InfRational {
+    type Output = InfRational;
+
+    fn div(self, other: i64) -> InfRational {
+        let mut result = *self;
         result /= other;
         result
     }
