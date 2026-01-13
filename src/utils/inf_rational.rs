@@ -297,8 +297,13 @@ impl SubAssign<i64> for InfRational {
 
 impl MulAssign for InfRational {
     fn mul_assign(&mut self, other: Self) {
-        self.rat *= other.rat;
-        self.inf *= other.inf;
+        let a = self.rat;
+        let b = self.inf;
+        let c = other.rat;
+        let d = other.inf;
+
+        self.rat = a * c;
+        self.inf = (a * d) + (b * c);
     }
 }
 
@@ -318,8 +323,13 @@ impl MulAssign<i64> for InfRational {
 
 impl DivAssign for InfRational {
     fn div_assign(&mut self, other: Self) {
-        self.rat /= other.rat;
-        self.inf /= other.inf;
+        let a = self.rat;
+        let b = self.inf;
+        let c = other.rat;
+        let d = other.inf;
+
+        self.rat = a / c;
+        self.inf = (b * c - a * d) / (c * c);
     }
 }
 
@@ -354,8 +364,10 @@ impl std::fmt::Display for InfRational {
             write!(f, "{}", self.rat)
         } else if self.rat == 0 {
             write!(f, "{}ε", self.inf)
-        } else {
+        } else if self.inf > 0 {
             write!(f, "{} + {}ε", self.rat, self.inf)
+        } else {
+            write!(f, "{} - {}ε", self.rat, -self.inf)
         }
     }
 }
