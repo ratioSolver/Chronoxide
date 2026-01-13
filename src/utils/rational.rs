@@ -37,7 +37,7 @@ impl Rational {
     /// Normalizes the rational number by dividing numerator and denominator by their GCD.
     /// Also ensures that the denominator is non-negative.
     fn normalize(&mut self) {
-        let gcd = gcd(self.num, self.den);
+        let gcd = gcd(self.num, self.den).abs();
         self.num /= gcd;
         self.den /= gcd;
         if self.den < 0 {
@@ -94,6 +94,13 @@ impl PartialEq<i64> for &Rational {
 
 impl AddAssign for Rational {
     fn add_assign(&mut self, other: Self) {
+        if self.den == 0 {
+            return;
+        }
+        if other.den == 0 {
+            *self = other;
+            return;
+        }
         self.num = self.num * other.den + other.num * self.den;
         self.den = self.den * other.den;
         self.normalize();
@@ -102,6 +109,13 @@ impl AddAssign for Rational {
 
 impl AddAssign<&Rational> for Rational {
     fn add_assign(&mut self, other: &Rational) {
+        if self.den == 0 {
+            return;
+        }
+        if other.den == 0 {
+            *self = *other;
+            return;
+        }
         self.num = self.num * other.den + other.num * self.den;
         self.den = self.den * other.den;
         self.normalize();
@@ -117,6 +131,13 @@ impl AddAssign<i64> for Rational {
 
 impl SubAssign for Rational {
     fn sub_assign(&mut self, other: Self) {
+        if self.den == 0 {
+            return;
+        }
+        if other.den == 0 {
+            *self = -other;
+            return;
+        }
         self.num = self.num * other.den - other.num * self.den;
         self.den = self.den * other.den;
         self.normalize();
@@ -125,6 +146,13 @@ impl SubAssign for Rational {
 
 impl SubAssign<&Rational> for Rational {
     fn sub_assign(&mut self, other: &Rational) {
+        if self.den == 0 {
+            return;
+        }
+        if other.den == 0 {
+            *self = -*other;
+            return;
+        }
         self.num = self.num * other.den - other.num * self.den;
         self.den = self.den * other.den;
         self.normalize();
