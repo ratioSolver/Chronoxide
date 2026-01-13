@@ -21,6 +21,10 @@ impl Rational {
             self.den = -self.den;
         }
     }
+
+    pub(crate) fn from_integer(arg: i64) -> Rational {
+        Rational::new(arg, 1)
+    }
 }
 
 impl std::cmp::PartialOrd for Rational {
@@ -191,10 +195,10 @@ impl std::ops::Neg for Rational {
 
 impl std::fmt::Display for Rational {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.den == 1 {
-            write!(f, "{}", self.num)
-        } else {
-            write!(f, "{}/{}", self.num, self.den)
+        match self.den {
+            0 => write!(f, "{}", if self.num > 0 { "∞" } else { "-∞" }),
+            1 => write!(f, "{}", self.num),
+            _ => write!(f, "{}/{}", self.num, self.den),
         }
     }
 }

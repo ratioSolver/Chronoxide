@@ -10,6 +10,13 @@ impl InfRational {
     pub fn new(rat: Rational, inf: Rational) -> Self {
         InfRational { rat, inf }
     }
+
+    pub(crate) fn from_integer(arg: i64) -> InfRational {
+        InfRational {
+            rat: Rational::from_integer(arg),
+            inf: Rational::from_integer(0),
+        }
+    }
 }
 
 impl std::cmp::PartialOrd for InfRational {
@@ -262,25 +269,25 @@ mod tests {
         let ir3 = InfRational::new(Rational::new(1, 2), Rational::new(0, 1));
         let r = Rational::new(1, 2);
         assert_eq!(ir3, &r);
-        
+
         // This fails to compile if PartialEq<i64> isn't implemented correctly or type inference fails
         // PartialEquals<i64> is implemented.
         let ir4 = InfRational::new(Rational::new(5, 1), Rational::new(0, 1));
         assert_eq!(ir4, 5);
     }
-    
+
     #[test]
     fn test_ord() {
         let ir1 = InfRational::new(Rational::new(0, 1), Rational::new(1, 1)); // 1ε
         let ir2 = InfRational::new(Rational::new(100, 1), Rational::new(0, 1)); // 100
-        
+
         // 1ε < 100
         assert!(ir1 < ir2);
-        
+
         let ir3 = InfRational::new(Rational::new(0, 1), Rational::new(-1, 1)); // -1ε
         assert!(ir3 < ir2);
         assert!(ir3 < ir1);
-        
+
         let ir4 = InfRational::new(Rational::new(1, 1), Rational::new(1, 1)); // 1 + 1ε
         // 1 + 1ε > 0 + 1ε
         assert!(ir4 > ir1);
@@ -288,38 +295,50 @@ mod tests {
 
     #[test]
     fn test_ord_with_primitive_and_rational() {
-         let pos_inf = InfRational::new(Rational::new(0, 1), Rational::new(1, 1));
-         let neg_inf = InfRational::new(Rational::new(0, 1), Rational::new(-1, 1));
-         let zero = 0;
-         let rat_ten = Rational::new(10, 1);
-         
-         // 0 < 0 + 1ε
-         assert!(pos_inf > zero);
-         // 0 + 1ε < 10
-         assert!(pos_inf < &rat_ten);
-         
-         // -1ε < 0
-         assert!(neg_inf < zero);
-         // -1ε < 10
-         assert!(neg_inf < &rat_ten);
+        let pos_inf = InfRational::new(Rational::new(0, 1), Rational::new(1, 1));
+        let neg_inf = InfRational::new(Rational::new(0, 1), Rational::new(-1, 1));
+        let zero = 0;
+        let rat_ten = Rational::new(10, 1);
+
+        // 0 < 0 + 1ε
+        assert!(pos_inf > zero);
+        // 0 + 1ε < 10
+        assert!(pos_inf < &rat_ten);
+
+        // -1ε < 0
+        assert!(neg_inf < zero);
+        // -1ε < 10
+        assert!(neg_inf < &rat_ten);
     }
 
     #[test]
     fn test_arithmetic() {
         let a = InfRational::new(Rational::new(1, 1), Rational::new(2, 1)); // 1 + 2ε
         let b = InfRational::new(Rational::new(3, 1), Rational::new(4, 1)); // 3 + 4ε
-        
+
         // Add
-        assert_eq!(a + &b, InfRational::new(Rational::new(4, 1), Rational::new(6, 1)));
-        
+        assert_eq!(
+            a + &b,
+            InfRational::new(Rational::new(4, 1), Rational::new(6, 1))
+        );
+
         // Sub
-        assert_eq!(b - &a, InfRational::new(Rational::new(2, 1), Rational::new(2, 1)));
-        
+        assert_eq!(
+            b - &a,
+            InfRational::new(Rational::new(2, 1), Rational::new(2, 1))
+        );
+
         // Mul by scalar
         let scalar = Rational::new(2, 1);
-        assert_eq!(a * &scalar, InfRational::new(Rational::new(2, 1), Rational::new(4, 1)));
-        
+        assert_eq!(
+            a * &scalar,
+            InfRational::new(Rational::new(2, 1), Rational::new(4, 1))
+        );
+
         // Div by scalar
-        assert_eq!(a / &scalar, InfRational::new(Rational::new(1, 2), Rational::new(1, 1)));
+        assert_eq!(
+            a / &scalar,
+            InfRational::new(Rational::new(1, 2), Rational::new(1, 1))
+        );
     }
 }
