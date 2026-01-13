@@ -64,15 +64,18 @@ impl PartialOrd for InfRational {
     }
 }
 
-impl PartialEq<&Rational> for InfRational {
-    fn eq(&self, other: &&Rational) -> bool {
-        self.inf == 0 && self.rat == **other
-    }
-}
-
 impl PartialOrd<&Rational> for InfRational {
     fn partial_cmp(&self, other: &&Rational) -> Option<Ordering> {
         match self.rat.partial_cmp(*other) {
+            Some(Ordering::Equal) => self.inf.partial_cmp(&0),
+            ord => ord,
+        }
+    }
+}
+
+impl PartialOrd<i64> for InfRational {
+    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
+        match self.rat.partial_cmp(other) {
             Some(Ordering::Equal) => self.inf.partial_cmp(&0),
             ord => ord,
         }
@@ -85,14 +88,160 @@ impl PartialEq<i64> for InfRational {
     }
 }
 
-impl PartialOrd<i64> for InfRational {
-    fn partial_cmp(&self, other: &i64) -> Option<Ordering> {
-        match self.rat.partial_cmp(other) {
-            Some(Ordering::Equal) => self.inf.partial_cmp(&0),
-            ord => ord,
-        }
+impl PartialEq<&Rational> for InfRational {
+    fn eq(&self, other: &&Rational) -> bool {
+        self.inf == 0 && self.rat == **other
     }
 }
+
+macro_rules! impl_op {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign_method:ident) => {
+        // InfRational op InfRational
+        impl $trait<InfRational> for InfRational {
+            type Output = InfRational;
+            fn $method(mut self, other: InfRational) -> InfRational {
+                self.$assign_method(&other);
+                self
+            }
+        }
+
+        // InfRational op &InfRational
+        impl $trait<&InfRational> for InfRational {
+            type Output = InfRational;
+            fn $method(mut self, other: &InfRational) -> InfRational {
+                self.$assign_method(other);
+                self
+            }
+        }
+
+        // &InfRational op InfRational
+        impl $trait<InfRational> for &InfRational {
+            type Output = InfRational;
+            fn $method(self, other: InfRational) -> InfRational {
+                let mut result = *self;
+                result.$assign_method(&other);
+                result
+            }
+        }
+
+        // &InfRational op &InfRational
+        impl $trait<&InfRational> for &InfRational {
+            type Output = InfRational;
+            fn $method(self, other: &InfRational) -> InfRational {
+                let mut result = *self;
+                result.$assign_method(other);
+                result
+            }
+        }
+    };
+}
+
+macro_rules! impl_op_scalar {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign_method:ident) => {
+        // InfRational op Rational
+        impl $trait<&Rational> for InfRational {
+            type Output = InfRational;
+            fn $method(mut self, other: &Rational) -> InfRational {
+                self.$assign_method(other);
+                self
+            }
+        }
+
+        // &InfRational op Rational
+        impl $trait<&Rational> for &InfRational {
+            type Output = InfRational;
+            fn $method(self, other: &Rational) -> InfRational {
+                let mut result = *self;
+                result.$assign_method(other);
+                result
+            }
+        }
+
+        // InfRational op i64
+        impl $trait<i64> for InfRational {
+            type Output = InfRational;
+            fn $method(mut self, other: i64) -> InfRational {
+                self.$assign_method(other);
+                self
+            }
+        }
+
+        // &InfRational op i64
+        impl $trait<i64> for &InfRational {
+            type Output = InfRational;
+            fn $method(self, other: i64) -> InfRational {
+                let mut result = *self;
+                result.$assign_method(other);
+                result
+            }
+        }
+    };
+}
+
+macro_rules! impl_rev_op {
+    ($trait:ident, $method:ident) => {
+        // Rational op InfRational
+        impl $trait<InfRational> for Rational {
+            type Output = InfRational;
+            fn $method(self, other: InfRational) -> InfRational {
+                other.$method(&self)
+            }
+        }
+
+        // Rational op &InfRational
+        impl $trait<&InfRational> for Rational {
+            type Output = InfRational;
+            fn $method(self, other: &InfRational) -> InfRational {
+                other.$method(&self)
+            }
+        }
+
+        // &Rational op InfRational
+        impl $trait<InfRational> for &Rational {
+            type Output = InfRational;
+            fn $method(self, other: InfRational) -> InfRational {
+                other.$method(self)
+            }
+        }
+
+        // &Rational op &InfRational
+        impl $trait<&InfRational> for &Rational {
+            type Output = InfRational;
+            fn $method(self, other: &InfRational) -> InfRational {
+                other.$method(self)
+            }
+        }
+
+        // i64 op InfRational
+        impl $trait<InfRational> for i64 {
+            type Output = InfRational;
+            fn $method(self, other: InfRational) -> InfRational {
+                other.$method(self)
+            }
+        }
+
+        // i64 op &InfRational
+        impl $trait<&InfRational> for i64 {
+            type Output = InfRational;
+            fn $method(self, other: &InfRational) -> InfRational {
+                other.$method(self)
+            }
+        }
+    };
+}
+
+impl_op!(Add, add, AddAssign, add_assign);
+impl_op!(Sub, sub, SubAssign, sub_assign);
+
+impl_op_scalar!(Add, add, AddAssign, add_assign);
+impl_op_scalar!(Sub, sub, SubAssign, sub_assign);
+impl_op_scalar!(Mul, mul, MulAssign, mul_assign);
+impl_op_scalar!(Div, div, DivAssign, div_assign);
+
+impl_rev_op!(Add, add);
+impl_rev_op!(Sub, sub);
+impl_rev_op!(Mul, mul);
+impl_rev_op!(Div, div);
 
 impl AddAssign for InfRational {
     fn add_assign(&mut self, other: Self) {
@@ -117,126 +266,6 @@ impl AddAssign<&Rational> for InfRational {
 impl AddAssign<i64> for InfRational {
     fn add_assign(&mut self, other: i64) {
         self.rat += other;
-    }
-}
-
-impl Add<&InfRational> for InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: &InfRational) -> InfRational {
-        let mut result = self;
-        result += other;
-        result
-    }
-}
-
-impl Add<&InfRational> for &InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: &InfRational) -> InfRational {
-        let mut result = *self;
-        result += other;
-        result
-    }
-}
-
-impl Add<&Rational> for InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: &Rational) -> InfRational {
-        let mut result = self;
-        result += other;
-        result
-    }
-}
-
-impl Add<&Rational> for &InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: &Rational) -> InfRational {
-        let mut result = *self;
-        result += other;
-        result
-    }
-}
-
-impl Add<i64> for InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: i64) -> InfRational {
-        let mut result = self;
-        result += other;
-        result
-    }
-}
-
-impl Add<i64> for &InfRational {
-    type Output = InfRational;
-
-    fn add(self, other: i64) -> InfRational {
-        let mut result = *self;
-        result += other;
-        result
-    }
-}
-
-impl Add<InfRational> for Rational {
-    type Output = InfRational;
-
-    fn add(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result += &self;
-        result
-    }
-}
-
-impl Add<InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn add(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result += self;
-        result
-    }
-}
-
-impl Add<&InfRational> for Rational {
-    type Output = InfRational;
-
-    fn add(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result += &self;
-        result
-    }
-}
-
-impl Add<&InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn add(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result += self;
-        result
-    }
-}
-
-impl Add<InfRational> for i64 {
-    type Output = InfRational;
-
-    fn add(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result += self;
-        result
-    }
-}
-
-impl Add<&InfRational> for i64 {
-    type Output = InfRational;
-
-    fn add(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result += self;
-        result
     }
 }
 
@@ -266,126 +295,6 @@ impl SubAssign<i64> for InfRational {
     }
 }
 
-impl Sub<&InfRational> for InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: &InfRational) -> InfRational {
-        let mut result = self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<&InfRational> for &InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: &InfRational) -> InfRational {
-        let mut result = *self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<&Rational> for InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: &Rational) -> InfRational {
-        let mut result = self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<&Rational> for &InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: &Rational) -> InfRational {
-        let mut result = *self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<i64> for InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: i64) -> InfRational {
-        let mut result = self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<i64> for &InfRational {
-    type Output = InfRational;
-
-    fn sub(self, other: i64) -> InfRational {
-        let mut result = *self;
-        result -= other;
-        result
-    }
-}
-
-impl Sub<InfRational> for Rational {
-    type Output = InfRational;
-
-    fn sub(self, other: InfRational) -> InfRational {
-        let mut result = -other;
-        result += &self;
-        result
-    }
-}
-
-impl Sub<InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn sub(self, other: InfRational) -> InfRational {
-        let mut result = -other;
-        result += self;
-        result
-    }
-}
-
-impl Sub<&InfRational> for Rational {
-    type Output = InfRational;
-
-    fn sub(self, other: &InfRational) -> InfRational {
-        let mut result = -(*other);
-        result += &self;
-        result
-    }
-}
-
-impl Sub<&InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn sub(self, other: &InfRational) -> InfRational {
-        let mut result = -(*other);
-        result += self;
-        result
-    }
-}
-
-impl Sub<InfRational> for i64 {
-    type Output = InfRational;
-
-    fn sub(self, other: InfRational) -> InfRational {
-        let mut result = -other;
-        result += self;
-        result
-    }
-}
-
-impl Sub<&InfRational> for i64 {
-    type Output = InfRational;
-
-    fn sub(self, other: &InfRational) -> InfRational {
-        let mut result = -(*other);
-        result += self;
-        result
-    }
-}
-
 impl MulAssign for InfRational {
     fn mul_assign(&mut self, other: Self) {
         self.rat *= other.rat;
@@ -407,106 +316,6 @@ impl MulAssign<i64> for InfRational {
     }
 }
 
-impl Mul<&Rational> for InfRational {
-    type Output = InfRational;
-
-    fn mul(self, other: &Rational) -> InfRational {
-        let mut result = self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<&Rational> for &InfRational {
-    type Output = InfRational;
-
-    fn mul(self, other: &Rational) -> InfRational {
-        let mut result = *self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<i64> for InfRational {
-    type Output = InfRational;
-
-    fn mul(self, other: i64) -> InfRational {
-        let mut result = self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<i64> for &InfRational {
-    type Output = InfRational;
-
-    fn mul(self, other: i64) -> InfRational {
-        let mut result = *self;
-        result *= other;
-        result
-    }
-}
-
-impl Mul<InfRational> for Rational {
-    type Output = InfRational;
-
-    fn mul(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result *= &self;
-        result
-    }
-}
-
-impl Mul<InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn mul(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result *= self;
-        result
-    }
-}
-
-impl Mul<&InfRational> for Rational {
-    type Output = InfRational;
-
-    fn mul(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result *= &self;
-        result
-    }
-}
-
-impl Mul<&InfRational> for &Rational {
-    type Output = InfRational;
-
-    fn mul(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result *= self;
-        result
-    }
-}
-
-impl Mul<InfRational> for i64 {
-    type Output = InfRational;
-
-    fn mul(self, other: InfRational) -> InfRational {
-        let mut result = other;
-        result *= self;
-        result
-    }
-}
-
-impl Mul<&InfRational> for i64 {
-    type Output = InfRational;
-
-    fn mul(self, other: &InfRational) -> InfRational {
-        let mut result = *other;
-        result *= self;
-        result
-    }
-}
-
 impl DivAssign for InfRational {
     fn div_assign(&mut self, other: Self) {
         self.rat /= other.rat;
@@ -525,46 +334,6 @@ impl DivAssign<i64> for InfRational {
     fn div_assign(&mut self, other: i64) {
         self.rat /= other;
         self.inf /= other;
-    }
-}
-
-impl Div<&Rational> for InfRational {
-    type Output = InfRational;
-
-    fn div(self, other: &Rational) -> InfRational {
-        let mut result = self;
-        result /= other;
-        result
-    }
-}
-
-impl Div<&Rational> for &InfRational {
-    type Output = InfRational;
-
-    fn div(self, other: &Rational) -> InfRational {
-        let mut result = *self;
-        result /= other;
-        result
-    }
-}
-
-impl Div<i64> for InfRational {
-    type Output = InfRational;
-
-    fn div(self, other: i64) -> InfRational {
-        let mut result = self;
-        result /= other;
-        result
-    }
-}
-
-impl Div<i64> for &InfRational {
-    type Output = InfRational;
-
-    fn div(self, other: i64) -> InfRational {
-        let mut result = *self;
-        result /= other;
-        result
     }
 }
 

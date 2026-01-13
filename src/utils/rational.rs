@@ -223,7 +223,11 @@ macro_rules! impl_op {
                 res
             }
         }
+    };
+}
 
+macro_rules! impl_op_scalar {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign_method:ident) => {
         // Rational op i64
         impl $trait<i64> for Rational {
             type Output = Rational;
@@ -273,6 +277,11 @@ impl_op!(Add, add, AddAssign, add_assign);
 impl_op!(Sub, sub, SubAssign, sub_assign);
 impl_op!(Mul, mul, MulAssign, mul_assign);
 impl_op!(Div, div, DivAssign, div_assign);
+
+impl_op_scalar!(Add, add, AddAssign, add_assign);
+impl_op_scalar!(Sub, sub, SubAssign, sub_assign);
+impl_op_scalar!(Mul, mul, MulAssign, mul_assign);
+impl_op_scalar!(Div, div, DivAssign, div_assign);
 
 impl_rev_op!(Add, add);
 impl_rev_op!(Sub, sub);
