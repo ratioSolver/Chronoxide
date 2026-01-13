@@ -11,7 +11,7 @@ pub struct Var {
     val: InfRational,
     lbs: BTreeMap<InfRational, HashSet<Rc<dyn Constraint>>>,
     ubs: BTreeMap<InfRational, HashSet<Rc<dyn Constraint>>>,
-    rows: HashSet<u32>,
+    rows: HashSet<usize>,
 }
 
 impl Var {
@@ -57,7 +57,7 @@ impl std::fmt::Display for Var {
 
 pub struct Solver {
     vars: Vec<Var>,
-    tableau: BTreeMap<u32, Lin>,
+    tableau: BTreeMap<usize, Lin>,
 }
 
 impl Solver {

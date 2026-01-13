@@ -1,21 +1,28 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lit {
-    x: u32,
+    x: usize,
     sign: bool,
 }
 
 impl Lit {
-    pub fn new(x: u32, sign: bool) -> Self {
+    pub fn new(x: usize, sign: bool) -> Self {
         Lit { x, sign }
+    }
+
+    pub fn var(&self) -> usize {
+        self.x
+    }
+
+    pub fn is_positive(&self) -> bool {
+        self.sign
     }
 }
 
 impl std::fmt::Display for Lit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.sign {
-            write!(f, "¬{}", self.x)
-        } else {
-            write!(f, "{}", self.x)
+        match self.sign {
+            true => write!(f, "{}", self.x),
+            false => write!(f, "¬{}", self.x),
         }
     }
 }

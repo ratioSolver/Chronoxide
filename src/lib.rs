@@ -4,6 +4,9 @@ pub use utils::lin::Lin;
 pub use utils::lit::Lit;
 pub use utils::rational::Rational;
 
+pub mod sat;
+pub use sat::sat::Solver as SatSolver;
+
 pub mod ac;
 pub use ac::ac::Solver as AcSolver;
 
