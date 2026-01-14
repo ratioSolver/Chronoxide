@@ -1,7 +1,9 @@
 use crate::{InfRational, Lin};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub struct Constraint {
+pub trait Constraint {}
+
+pub struct Updates {
     lbs: HashMap<usize, InfRational>,
     ubs: HashMap<usize, InfRational>,
 }
@@ -27,30 +29,24 @@ impl Var {
         self.val
     }
 
-    pub fn lb(&self) -> Option<&InfRational> {
-        self.lbs.keys().next_back()
+    pub fn lb(&self) -> InfRational {
+        match self.lbs.iter().next() {
+            Some((lb, _)) => lb.clone(),
+            None => InfRational::NEGATIVE_INFINITY,
+        }
     }
 
-    pub fn ub(&self) -> Option<&InfRational> {
-        self.ubs.keys().next()
+    pub fn ub(&self) -> InfRational {
+        match self.ubs.iter().next_back() {
+            Some((ub, _)) => ub.clone(),
+            None => InfRational::POSITIVE_INFINITY,
+        }
     }
 }
 
 impl std::fmt::Display for Var {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} [{}, {}]",
-            self.val,
-            match self.lb() {
-                Some(lb) => lb.to_string(),
-                None => "-∞".to_string(),
-            },
-            match self.ub() {
-                Some(ub) => ub.to_string(),
-                None => "∞".to_string(),
-            }
-        )
+        write!(f, "{} [{}, {}]", self.val, self.lb(), self.ub())
     }
 }
 
@@ -78,20 +74,14 @@ impl Solver {
     }
 
     pub fn lb(&self, v: usize) -> InfRational {
-        match self.vars[v].lb() {
-            Some(lb) => lb.clone(),
-            None => InfRational::NEGATIVE_INFINITY,
-        }
+        self.vars[v].lb()
     }
 
     pub fn ub(&self, v: usize) -> InfRational {
-        match self.vars[v].ub() {
-            Some(ub) => ub.clone(),
-            None => InfRational::POSITIVE_INFINITY,
-        }
+        self.vars[v].ub()
     }
 
-    pub fn lb_lin(&self, l: &Lin) -> InfRational {
+    pub fn lin_lb(&self, l: &Lin) -> InfRational {
         let mut lb = InfRational::from_rational(*l.known_term());
         for (v, coeff) in l.vars() {
             if coeff >= 0 {
@@ -106,7 +96,7 @@ impl Solver {
         lb
     }
 
-    pub fn ub_lin(&self, l: &Lin) -> InfRational {
+    pub fn lin_ub(&self, l: &Lin) -> InfRational {
         let mut ub = InfRational::from_rational(*l.known_term());
         for (v, coeff) in l.vars() {
             if coeff >= 0 {
@@ -121,7 +111,7 @@ impl Solver {
         ub
     }
 
-    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<&Constraint>) {
+    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<&dyn Constraint>) {
         let mut expr = lhs - rhs;
         // Remove basic variables from the expression and substitute with their tableau expressions
         for v in expr.vars().keys().cloned().collect::<Vec<usize>>() {
@@ -130,6 +120,20 @@ impl Solver {
             }
         }
 
+        unimplemented!()
+    }
+
+    fn set_lb(&mut self, v: usize, lb: InfRational, reason: Option<&dyn Constraint>) {
+        if lb > self.vars[v].ub() {
+            panic!("Infeasible lower bound");
+        }
+        unimplemented!()
+    }
+
+    fn set_ub(&mut self, v: usize, ub: InfRational, reason: Option<&dyn Constraint>) {
+        if ub < self.vars[v].lb() {
+            panic!("Infeasible upper bound");
+        }
         unimplemented!()
     }
 }
