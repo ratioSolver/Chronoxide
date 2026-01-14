@@ -101,8 +101,10 @@ impl AddAssign for Rational {
             *self = other;
             return;
         }
-        self.num = self.num * other.den + other.num * self.den;
-        self.den = self.den * other.den;
+        let g = gcd(self.den, other.den);
+        let den = other.den / g;
+        self.num = self.num * den + other.num * (self.den / g);
+        self.den *= den;
         self.normalize();
     }
 }
@@ -116,8 +118,10 @@ impl AddAssign<&Rational> for Rational {
             *self = *other;
             return;
         }
-        self.num = self.num * other.den + other.num * self.den;
-        self.den = self.den * other.den;
+        let g = gcd(self.den, other.den);
+        let den = other.den / g;
+        self.num = self.num * den + other.num * (self.den / g);
+        self.den *= den;
         self.normalize();
     }
 }
@@ -138,8 +142,10 @@ impl SubAssign for Rational {
             *self = -other;
             return;
         }
-        self.num = self.num * other.den - other.num * self.den;
-        self.den = self.den * other.den;
+        let g = gcd(self.den, other.den);
+        let den = other.den / g;
+        self.num = self.num * den - other.num * (self.den / g);
+        self.den *= den;
         self.normalize();
     }
 }
@@ -153,8 +159,10 @@ impl SubAssign<&Rational> for Rational {
             *self = -*other;
             return;
         }
-        self.num = self.num * other.den - other.num * self.den;
-        self.den = self.den * other.den;
+        let g = gcd(self.den, other.den);
+        let den = other.den / g;
+        self.num = self.num * den - other.num * (self.den / g);
+        self.den *= den;
         self.normalize();
     }
 }
@@ -168,46 +176,58 @@ impl SubAssign<i64> for Rational {
 
 impl MulAssign for Rational {
     fn mul_assign(&mut self, other: Self) {
-        self.num *= other.num;
-        self.den *= other.den;
+        let g1 = gcd(self.num, other.den).abs();
+        let g2 = gcd(other.num, self.den).abs();
+        self.num = (self.num / g1) * (other.num / g2);
+        self.den = (self.den / g2) * (other.den / g1);
         self.normalize();
     }
 }
 
 impl MulAssign<&Rational> for Rational {
     fn mul_assign(&mut self, other: &Rational) {
-        self.num *= other.num;
-        self.den *= other.den;
+        let g1 = gcd(self.num, other.den).abs();
+        let g2 = gcd(other.num, self.den).abs();
+        self.num = (self.num / g1) * (other.num / g2);
+        self.den = (self.den / g2) * (other.den / g1);
         self.normalize();
     }
 }
 
 impl MulAssign<i64> for Rational {
     fn mul_assign(&mut self, other: i64) {
-        self.num *= other;
+        let g = gcd(other, self.den).abs();
+        self.num *= other / g;
+        self.den /= g;
         self.normalize();
     }
 }
 
 impl DivAssign for Rational {
     fn div_assign(&mut self, other: Self) {
-        self.num *= other.den;
-        self.den *= other.num;
+        let g1 = gcd(self.num, other.num).abs();
+        let g2 = gcd(other.den, self.den).abs();
+        self.num = (self.num / g1) * (other.den / g2);
+        self.den = (self.den / g2) * (other.num / g1);
         self.normalize();
     }
 }
 
 impl DivAssign<&Rational> for Rational {
     fn div_assign(&mut self, other: &Rational) {
-        self.num *= other.den;
-        self.den *= other.num;
+        let g1 = gcd(self.num, other.num).abs();
+        let g2 = gcd(other.den, self.den).abs();
+        self.num = (self.num / g1) * (other.den / g2);
+        self.den = (self.den / g2) * (other.num / g1);
         self.normalize();
     }
 }
 
 impl DivAssign<i64> for Rational {
     fn div_assign(&mut self, other: i64) {
-        self.den *= other;
+        let g = gcd(self.num, other).abs();
+        self.num /= g;
+        self.den *= other / g;
         self.normalize();
     }
 }

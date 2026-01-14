@@ -42,6 +42,14 @@ impl Var {
             None => InfRational::POSITIVE_INFINITY,
         }
     }
+
+    pub(super) fn set_lb(&mut self, lb: InfRational, reason: Option<usize>) {
+        assert!(lb <= self.ub());
+    }
+
+    pub(super) fn set_ub(&mut self, ub: InfRational, reason: Option<usize>) {
+        assert!(ub >= self.lb());
+    }
 }
 
 impl std::fmt::Display for Var {
@@ -111,7 +119,7 @@ impl Solver {
         ub
     }
 
-    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<&dyn Constraint>) {
+    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<usize>) {
         let mut expr = lhs - rhs;
         // Remove basic variables from the expression and substitute with their tableau expressions
         for v in expr.vars().keys().cloned().collect::<Vec<usize>>() {
@@ -123,14 +131,14 @@ impl Solver {
         unimplemented!()
     }
 
-    fn set_lb(&mut self, v: usize, lb: InfRational, reason: Option<&dyn Constraint>) {
+    fn set_lb(&mut self, v: usize, lb: InfRational, reason: Option<usize>) {
         if lb > self.vars[v].ub() {
             panic!("Infeasible lower bound");
         }
         unimplemented!()
     }
 
-    fn set_ub(&mut self, v: usize, ub: InfRational, reason: Option<&dyn Constraint>) {
+    fn set_ub(&mut self, v: usize, ub: InfRational, reason: Option<usize>) {
         if ub < self.vars[v].lb() {
             panic!("Infeasible upper bound");
         }
