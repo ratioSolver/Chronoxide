@@ -12,7 +12,7 @@ pub trait Listener {
 pub trait Value {}
 
 #[derive(Clone)]
-pub struct ValuePtr(pub Rc<dyn Value>);
+struct ValuePtr(Rc<dyn Value>);
 
 impl PartialEq for ValuePtr {
     fn eq(&self, other: &Self) -> bool {
@@ -39,6 +39,10 @@ impl Var {
             domain,
         }
     }
+
+    pub(super) fn domain(&self) -> Vec<Rc<dyn Value>> {
+        self.domain.iter().map(|v| v.0.clone()).collect()
+    }
 }
 
 pub struct Solver {
@@ -54,10 +58,15 @@ impl Solver {
         }
     }
 
-    pub fn add_var(&mut self, domain: HashSet<ValuePtr>) -> usize {
+    pub fn add_var(&mut self, domain: Vec<Rc<dyn Value>>) -> usize {
         let var_id = self.vars.len();
-        self.vars.push(Var::new(domain));
+        self.vars
+            .push(Var::new(domain.into_iter().map(|v| ValuePtr(v)).collect()));
         var_id
+    }
+
+    pub fn domain(&self, var: usize) -> Vec<Rc<dyn Value>> {
+        self.vars[var].domain()
     }
 
     pub fn add_listener(&mut self, var: usize, listener: Rc<RefCell<dyn Listener>>) {
@@ -79,11 +88,12 @@ mod tests {
     #[test]
     fn test_add_var() {
         let mut solver = Solver::new();
-        let mut domain = HashSet::new();
-        domain.insert(ValuePtr(Rc::new(TestValue(1))));
-        domain.insert(ValuePtr(Rc::new(TestValue(2))));
+        let v0 = Rc::new(TestValue(0));
+        let v1 = Rc::new(TestValue(1));
+        let domain: Vec<Rc<dyn Value>> = vec![v0, v1.clone(), v1];
         let var_id = solver.add_var(domain);
         assert_eq!(var_id, 0);
         assert_eq!(solver.vars.len(), 1);
+        assert_eq!(solver.domain(var_id).len(), 2);
     }
 }
