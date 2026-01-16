@@ -35,9 +35,12 @@ impl Solver {
         }
     }
 
-    pub fn add_var(&mut self, domain: HashSet<usize>) -> usize {
+    pub fn add_var<I>(&mut self, domain: I) -> usize
+    where
+        I: IntoIterator<Item = usize>,
+    {
         let var_id = self.vars.len();
-        let var = Var::new(domain);
+        let var = Var::new(domain.into_iter().collect());
         self.vars.push(var);
         var_id
     }
@@ -61,7 +64,7 @@ mod tests {
     #[test]
     fn test_add_var() {
         let mut solver = Solver::new();
-        let var_id = solver.add_var([0, 1, 1].iter().cloned().collect());
+        let var_id = solver.add_var([1, 2, 2]);
         assert_eq!(var_id, 0);
         assert_eq!(solver.vars.len(), 1);
         assert_eq!(solver.domain(var_id).len(), 2);
