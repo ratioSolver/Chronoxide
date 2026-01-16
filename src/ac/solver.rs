@@ -1,7 +1,6 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
     rc::Rc,
 };
 
@@ -9,39 +8,17 @@ pub trait Listener {
     fn on_update(&mut self, var: usize);
 }
 
-pub trait Value {}
-
-#[derive(Clone)]
-struct ValuePtr(Rc<dyn Value>);
-
-impl PartialEq for ValuePtr {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-impl Eq for ValuePtr {}
-
-impl Hash for ValuePtr {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (&*self.0 as *const dyn Value).hash(state);
-    }
-}
-
 struct Var {
-    init_domain: HashSet<ValuePtr>,
-    domain: HashSet<ValuePtr>,
+    init_domain: HashSet<usize>,
+    domain: HashSet<usize>,
 }
 
 impl Var {
-    pub fn new(domain: HashSet<ValuePtr>) -> Self {
+    pub fn new(domain: HashSet<usize>) -> Self {
         Self {
             init_domain: domain.clone(),
             domain,
         }
-    }
-
-    pub(super) fn domain(&self) -> Vec<Rc<dyn Value>> {
-        self.domain.iter().map(|v| v.0.clone()).collect()
     }
 }
 
@@ -58,15 +35,15 @@ impl Solver {
         }
     }
 
-    pub fn add_var(&mut self, domain: Vec<Rc<dyn Value>>) -> usize {
+    pub fn add_var(&mut self, domain: HashSet<usize>) -> usize {
         let var_id = self.vars.len();
-        self.vars
-            .push(Var::new(domain.into_iter().map(|v| ValuePtr(v)).collect()));
+        let var = Var::new(domain);
+        self.vars.push(var);
         var_id
     }
 
-    pub fn domain(&self, var: usize) -> Vec<Rc<dyn Value>> {
-        self.vars[var].domain()
+    pub fn domain(&self, var: usize) -> &HashSet<usize> {
+        &self.vars[var].domain
     }
 
     pub fn add_listener(&mut self, var: usize, listener: Rc<RefCell<dyn Listener>>) {
@@ -81,17 +58,10 @@ impl Solver {
 mod tests {
     use super::*;
 
-    struct TestValue(i64);
-
-    impl Value for TestValue {}
-
     #[test]
     fn test_add_var() {
         let mut solver = Solver::new();
-        let v0 = Rc::new(TestValue(0));
-        let v1 = Rc::new(TestValue(1));
-        let domain: Vec<Rc<dyn Value>> = vec![v0, v1.clone(), v1];
-        let var_id = solver.add_var(domain);
+        let var_id = solver.add_var([0, 1, 1].iter().cloned().collect());
         assert_eq!(var_id, 0);
         assert_eq!(solver.vars.len(), 1);
         assert_eq!(solver.domain(var_id).len(), 2);

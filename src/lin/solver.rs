@@ -51,12 +51,14 @@ impl Var {
         }
     }
 
-    pub(super) fn set_lb(&mut self, lb: InfRational, reason: Option<usize>) {
+    fn set_lb(&mut self, lb: InfRational, reason: Option<usize>) {
         assert!(lb <= self.ub());
+        unimplemented!()
     }
 
-    pub(super) fn set_ub(&mut self, ub: InfRational, reason: Option<usize>) {
+    fn set_ub(&mut self, ub: InfRational, reason: Option<usize>) {
         assert!(ub >= self.lb());
+        unimplemented!()
     }
 }
 
