@@ -188,6 +188,9 @@ impl SubAssign<i64> for Rational {
 
 impl MulAssign for Rational {
     fn mul_assign(&mut self, other: Self) {
+        if (self.num == 0 && other.den == 0) || (self.den == 0 && other.num == 0) {
+            panic!("Indeterminate form: 0 * infinity");
+        }
         let g1 = gcd(self.num, other.den).abs();
         let g2 = gcd(other.num, self.den).abs();
         self.num = (self.num / g1) * (other.num / g2);
@@ -198,6 +201,9 @@ impl MulAssign for Rational {
 
 impl MulAssign<&Rational> for Rational {
     fn mul_assign(&mut self, other: &Rational) {
+        if (self.num == 0 && other.den == 0) || (self.den == 0 && other.num == 0) {
+            panic!("Indeterminate form: 0 * infinity");
+        }
         let g1 = gcd(self.num, other.den).abs();
         let g2 = gcd(other.num, self.den).abs();
         self.num = (self.num / g1) * (other.num / g2);
@@ -208,6 +214,9 @@ impl MulAssign<&Rational> for Rational {
 
 impl MulAssign<i64> for Rational {
     fn mul_assign(&mut self, other: i64) {
+        if self.den == 0 && other == 0 {
+            panic!("Indeterminate form: infinity * 0");
+        }
         let g = gcd(other, self.den).abs();
         self.num *= other / g;
         self.den /= g;
@@ -217,6 +226,12 @@ impl MulAssign<i64> for Rational {
 
 impl DivAssign for Rational {
     fn div_assign(&mut self, other: Self) {
+        if self.num == 0 && other.num == 0 {
+            panic!("Indeterminate form: 0 / 0");
+        }
+        if self.den == 0 && other.den == 0 {
+            panic!("Indeterminate form: infinity / infinity");
+        }
         let g1 = gcd(self.num, other.num).abs();
         let g2 = gcd(other.den, self.den).abs();
         self.num = (self.num / g1) * (other.den / g2);
@@ -227,6 +242,12 @@ impl DivAssign for Rational {
 
 impl DivAssign<&Rational> for Rational {
     fn div_assign(&mut self, other: &Rational) {
+        if self.num == 0 && other.num == 0 {
+            panic!("Indeterminate form: 0 / 0");
+        }
+        if self.den == 0 && other.den == 0 {
+            panic!("Indeterminate form: infinity / infinity");
+        }
         let g1 = gcd(self.num, other.num).abs();
         let g2 = gcd(other.den, self.den).abs();
         self.num = (self.num / g1) * (other.den / g2);
@@ -237,6 +258,9 @@ impl DivAssign<&Rational> for Rational {
 
 impl DivAssign<i64> for Rational {
     fn div_assign(&mut self, other: i64) {
+        if self.num == 0 && other == 0 {
+            panic!("Indeterminate form: 0 / 0");
+        }
         let g = gcd(self.num, other).abs();
         self.num /= g;
         self.den *= other / g;
@@ -574,6 +598,44 @@ mod tests {
     #[should_panic(expected = "Indeterminate form: infinity - infinity")]
     fn test_neg_inf_minus_neg_inf() {
         let _ = Rational::NEGATIVE_INFINITY - Rational::NEGATIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: 0 * infinity")]
+    fn test_zero_mul_inf() {
+        let _ = Rational::ZERO * Rational::POSITIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: 0 * infinity")]
+    fn test_inf_mul_zero() {
+        let _ = Rational::POSITIVE_INFINITY * Rational::ZERO;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: 0 / 0")]
+    fn test_zero_div_zero() {
+        let _ = Rational::ZERO / Rational::ZERO;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity / infinity")]
+    fn test_inf_div_inf() {
+        let _ = Rational::POSITIVE_INFINITY / Rational::POSITIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity * 0")]
+    fn test_inf_mul_zero_scalar() {
+        let mut a = Rational::POSITIVE_INFINITY;
+        a *= 0;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: 0 / 0")]
+    fn test_zero_div_zero_scalar() {
+        let mut a = Rational::ZERO;
+        a /= 0;
     }
 
     #[test]
