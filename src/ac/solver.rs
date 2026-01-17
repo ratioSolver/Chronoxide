@@ -50,10 +50,7 @@ impl Solver {
     }
 
     pub fn add_listener(&mut self, var: usize, listener: Rc<RefCell<dyn Listener>>) {
-        self.listeners
-            .entry(var)
-            .or_insert_with(Vec::new)
-            .push(listener);
+        self.listeners.entry(var).or_default().push(listener);
     }
 }
 

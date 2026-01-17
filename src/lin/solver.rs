@@ -39,14 +39,14 @@ impl Var {
 
     pub fn lb(&self) -> InfRational {
         match self.lbs.iter().next() {
-            Some((lb, _)) => lb.clone(),
+            Some((lb, _)) => *lb,
             None => InfRational::NEGATIVE_INFINITY,
         }
     }
 
     pub fn ub(&self) -> InfRational {
         match self.ubs.iter().next_back() {
-            Some((ub, _)) => ub.clone(),
+            Some((ub, _)) => *ub,
             None => InfRational::POSITIVE_INFINITY,
         }
     }

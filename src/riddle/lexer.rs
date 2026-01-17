@@ -90,7 +90,7 @@ impl<'a> Lexer<'a> {
                     let mut lookahead = self.input.clone();
                     lookahead.next();
                     if let Some(&ch) = lookahead.peek() {
-                        if ch.is_digit(10) {
+                        if ch.is_ascii_digit() {
                             self.read_number()
                         } else {
                             self.input.next();
@@ -195,7 +195,7 @@ impl<'a> Lexer<'a> {
         let mut has_decimal_point = false;
 
         while let Some(&ch) = self.input.peek() {
-            if ch.is_digit(10) {
+            if ch.is_ascii_digit() {
                 number.push(ch);
                 self.input.next();
             } else if ch == '.' && !has_decimal_point {
@@ -226,7 +226,7 @@ impl<'a> Lexer<'a> {
     fn read_identifier(&mut self) -> Token {
         let mut identifier = String::new();
         while let Some(&ch) = self.input.peek() {
-            if ch.is_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
                 identifier.push(ch);
                 self.input.next();
             } else {

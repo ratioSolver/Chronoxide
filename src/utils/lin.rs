@@ -24,9 +24,9 @@ impl Lin {
         assert!(self.vars.contains_key(&var));
         let coeff = self.vars.remove(&var).unwrap();
         for (v, c) in &lin.vars {
-            *self.vars.entry(*v).or_insert(Rational::from_integer(0)) += &(c * &coeff);
+            *self.vars.entry(*v).or_insert(Rational::from_integer(0)) += &(c * coeff);
         }
-        self.known_term += &(&lin.known_term * &coeff);
+        self.known_term += &(lin.known_term * coeff);
     }
 }
 
@@ -183,9 +183,9 @@ impl std::ops::Sub<&Lin> for Rational {
     fn sub(self, other: &Lin) -> Lin {
         let mut result = other.clone();
         for coeff in result.vars.values_mut() {
-            *coeff = -coeff.clone();
+            *coeff = -*coeff;
         }
-        result.known_term = self - &result.known_term;
+        result.known_term = self - result.known_term;
         result
     }
 }
@@ -196,9 +196,9 @@ impl std::ops::Sub<&Lin> for &Rational {
     fn sub(self, other: &Lin) -> Lin {
         let mut result = other.clone();
         for coeff in result.vars.values_mut() {
-            *coeff = -coeff.clone();
+            *coeff = -*coeff;
         }
-        result.known_term = self - &result.known_term;
+        result.known_term = self - result.known_term;
         result
     }
 }
@@ -267,10 +267,10 @@ impl std::ops::Neg for Lin {
     fn neg(self) -> Lin {
         let mut result = self;
         for coeff in result.vars.values_mut() {
-            *coeff = -coeff.clone();
+            *coeff = -*coeff;
         }
         // Do the same for the known_term
-        result.known_term = -result.known_term.clone();
+        result.known_term = -result.known_term;
         result
     }
 }

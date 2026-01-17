@@ -47,13 +47,12 @@ pub struct ComponentKind {
 
 impl ComponentKind {
     pub fn new(name: String) -> Rc<Self> {
-        let component_type = Rc::new_cyclic(|weak_self| ComponentKind {
+        Rc::new_cyclic(|weak_self| ComponentKind {
             weak_self: weak_self.clone(),
             name,
             fields: HashMap::new(),
             instances: Vec::new(),
-        });
-        component_type
+        })
     }
 }
 
