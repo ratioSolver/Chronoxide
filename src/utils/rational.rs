@@ -95,6 +95,9 @@ impl PartialEq<i64> for &Rational {
 impl AddAssign for Rational {
     fn add_assign(&mut self, other: Self) {
         if self.den == 0 {
+            if other.den == 0 && self.num != other.num {
+                panic!("Indeterminate form: infinity + (-infinity)");
+            }
             return;
         }
         if other.den == 0 {
@@ -112,6 +115,9 @@ impl AddAssign for Rational {
 impl AddAssign<&Rational> for Rational {
     fn add_assign(&mut self, other: &Rational) {
         if self.den == 0 {
+            if other.den == 0 && self.num != other.num {
+                panic!("Indeterminate form: infinity + (-infinity)");
+            }
             return;
         }
         if other.den == 0 {
@@ -136,6 +142,9 @@ impl AddAssign<i64> for Rational {
 impl SubAssign for Rational {
     fn sub_assign(&mut self, other: Self) {
         if self.den == 0 {
+            if other.den == 0 && self.num == other.num {
+                panic!("Indeterminate form: infinity - infinity");
+            }
             return;
         }
         if other.den == 0 {
@@ -153,6 +162,9 @@ impl SubAssign for Rational {
 impl SubAssign<&Rational> for Rational {
     fn sub_assign(&mut self, other: &Rational) {
         if self.den == 0 {
+            if other.den == 0 && self.num == other.num {
+                panic!("Indeterminate form: infinity - infinity");
+            }
             return;
         }
         if other.den == 0 {
@@ -515,5 +527,59 @@ mod tests {
         let e = Rational::new(1, 2);
         assert!(e < 1);
         assert!(e > 0);
+    }
+
+    #[test]
+    fn test_infinity_arithmetic() {
+        let inf = Rational::POSITIVE_INFINITY;
+        let neg_inf = Rational::NEGATIVE_INFINITY;
+        let one = Rational::from_integer(1);
+
+        // Addition involving infinity
+        assert_eq!(inf + one, inf);
+        assert_eq!(neg_inf + one, neg_inf);
+        assert_eq!(one + inf, inf);
+        assert_eq!(one + neg_inf, neg_inf);
+        assert_eq!(inf + inf, inf);
+        assert_eq!(neg_inf + neg_inf, neg_inf);
+
+        // Subtraction involving infinity
+        assert_eq!(inf - one, inf);
+        assert_eq!(neg_inf - one, neg_inf);
+        assert_eq!(one - inf, neg_inf);
+        assert_eq!(one - neg_inf, inf);
+        assert_eq!(inf - neg_inf, inf); // inf + inf
+        assert_eq!(neg_inf - inf, neg_inf); // -inf - inf
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity - infinity")]
+    fn test_inf_minus_inf() {
+        let _ = Rational::POSITIVE_INFINITY - Rational::POSITIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity + (-infinity)")]
+    fn test_inf_plus_neg_inf() {
+        let _ = Rational::POSITIVE_INFINITY + Rational::NEGATIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity + (-infinity)")]
+    fn test_neg_inf_plus_inf() {
+        let _ = Rational::NEGATIVE_INFINITY + Rational::POSITIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic(expected = "Indeterminate form: infinity - infinity")]
+    fn test_neg_inf_minus_neg_inf() {
+        let _ = Rational::NEGATIVE_INFINITY - Rational::NEGATIVE_INFINITY;
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_nan_creation_via_mul() {
+        // 0 * inf is undefined/NaN, currently panics
+        let _ = Rational::ZERO * Rational::POSITIVE_INFINITY;
     }
 }
