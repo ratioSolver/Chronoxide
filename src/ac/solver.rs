@@ -1,12 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
-
-pub trait Listener {
-    fn on_update(&mut self, var: usize);
-}
+use std::collections::{HashMap, HashSet};
 
 struct Var {
     init_domain: HashSet<usize>,
@@ -24,7 +16,7 @@ impl Var {
 
 pub struct Solver {
     vars: Vec<Var>,
-    listeners: HashMap<usize, Vec<Rc<RefCell<dyn Listener>>>>,
+    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
 }
 
 impl Solver {
@@ -49,7 +41,7 @@ impl Solver {
         &self.vars[var].domain
     }
 
-    pub fn add_listener(&mut self, var: usize, listener: Rc<RefCell<dyn Listener>>) {
+    pub fn add_listener(&mut self, var: usize, listener: Box<dyn FnMut(usize)>) {
         self.listeners.entry(var).or_default().push(listener);
     }
 }

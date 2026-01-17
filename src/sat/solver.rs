@@ -1,10 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use crate::Lit;
-
-pub trait Listener {
-    fn on_update(&mut self, var: usize);
-}
 
 pub enum LBool {
     True,
@@ -63,7 +59,7 @@ pub struct Solver {
     vars: Vec<LBool>,
     watches: Vec<Vec<usize>>,
     clauses: Vec<Clause>,
-    listeners: HashMap<usize, Vec<Rc<RefCell<dyn Listener>>>>,
+    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
 }
 
 impl Solver {
@@ -92,7 +88,7 @@ impl Solver {
         self.clauses.push(clause);
     }
 
-    pub fn add_listener(&mut self, var: usize, listener: Rc<RefCell<dyn Listener>>) {
+    pub fn add_listener(&mut self, var: usize, listener: Box<dyn FnMut(usize)>) {
         self.listeners.entry(var).or_default().push(listener);
     }
 }

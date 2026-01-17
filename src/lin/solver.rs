@@ -1,13 +1,5 @@
 use crate::{InfRational, Lin};
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
-    rc::Rc,
-};
-
-pub trait Listener {
-    fn on_update(&mut self, var: usize);
-}
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub trait Constraint {}
 
@@ -71,7 +63,7 @@ impl std::fmt::Display for Var {
 pub struct Solver {
     vars: Vec<Var>,
     tableau: BTreeMap<usize, Lin>,
-    listeners: HashMap<usize, Vec<Rc<RefCell<dyn Listener>>>>,
+    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
 }
 
 impl Solver {
@@ -157,7 +149,7 @@ impl Solver {
         unimplemented!()
     }
 
-    pub fn add_listener(&mut self, v: usize, listener: Rc<RefCell<dyn Listener>>) {
+    pub fn add_listener(&mut self, v: usize, listener: Box<dyn FnMut(usize)>) {
         self.listeners.entry(v).or_default().push(listener);
     }
 }
