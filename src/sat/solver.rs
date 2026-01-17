@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use crate::Lit;
 
+type Callback = Box<dyn Fn(&Solver, usize)>;
+
 pub enum LBool {
     True,
     False,
@@ -59,7 +61,7 @@ pub struct Solver {
     vars: Vec<LBool>,
     watches: Vec<Vec<usize>>,
     clauses: Vec<Clause>,
-    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
+    listeners: HashMap<usize, Vec<Callback>>,
 }
 
 impl Solver {
@@ -88,7 +90,15 @@ impl Solver {
         self.clauses.push(clause);
     }
 
-    pub fn add_listener(&mut self, var: usize, listener: Box<dyn FnMut(usize)>) {
+    fn notify(&self, var: usize) {
+        if let Some(listeners) = self.listeners.get(&var) {
+            for listener in listeners {
+                listener(self, var);
+            }
+        }
+    }
+
+    pub fn add_listener(&mut self, var: usize, listener: Callback) {
         self.listeners.entry(var).or_default().push(listener);
     }
 }

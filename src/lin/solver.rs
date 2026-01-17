@@ -1,6 +1,8 @@
 use crate::{InfRational, Lin};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+type Callback = Box<dyn Fn(&Solver, usize)>;
+
 pub trait Constraint {}
 
 pub struct Updates {
@@ -63,7 +65,7 @@ impl std::fmt::Display for Var {
 pub struct Solver {
     vars: Vec<Var>,
     tableau: BTreeMap<usize, Lin>,
-    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
+    listeners: HashMap<usize, Vec<Callback>>,
 }
 
 impl Solver {
@@ -149,7 +151,15 @@ impl Solver {
         unimplemented!()
     }
 
-    pub fn add_listener(&mut self, v: usize, listener: Box<dyn FnMut(usize)>) {
+    fn notify(&self, var: usize) {
+        if let Some(listeners) = self.listeners.get(&var) {
+            for listener in listeners {
+                listener(self, var);
+            }
+        }
+    }
+
+    pub fn add_listener(&mut self, v: usize, listener: Callback) {
         self.listeners.entry(v).or_default().push(listener);
     }
 }

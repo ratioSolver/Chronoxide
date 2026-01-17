@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+type Callback = Box<dyn Fn(&Solver, usize)>;
+
 struct Var {
     init_domain: HashSet<usize>,
     domain: HashSet<usize>,
@@ -16,7 +18,7 @@ impl Var {
 
 pub struct Solver {
     vars: Vec<Var>,
-    listeners: HashMap<usize, Vec<Box<dyn FnMut(usize)>>>,
+    listeners: HashMap<usize, Vec<Callback>>,
 }
 
 impl Solver {
@@ -41,7 +43,15 @@ impl Solver {
         &self.vars[var].domain
     }
 
-    pub fn add_listener(&mut self, var: usize, listener: Box<dyn FnMut(usize)>) {
+    fn notify(&self, var: usize) {
+        if let Some(listeners) = self.listeners.get(&var) {
+            for listener in listeners {
+                listener(self, var);
+            }
+        }
+    }
+
+    pub fn add_listener(&mut self, var: usize, listener: Callback) {
         self.listeners.entry(var).or_default().push(listener);
     }
 }
