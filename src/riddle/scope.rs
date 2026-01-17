@@ -27,4 +27,6 @@ impl Field {
 
 pub trait Scope {
     fn field(&self, key: &str) -> Option<&Field>;
+
+    fn kind(&self, key: &str) -> Option<Rc<dyn Kind>>;
 }

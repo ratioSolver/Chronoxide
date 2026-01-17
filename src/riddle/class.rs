@@ -41,6 +41,7 @@ pub struct ComponentKind {
     core: Weak<Core>,
     name: String,
     fields: HashMap<String, Field>,
+    kinds: HashMap<String, Rc<dyn Kind>>,
     instances: Vec<Rc<dyn Item>>,
 }
 
@@ -51,6 +52,7 @@ impl ComponentKind {
             core: Rc::downgrade(core),
             name,
             fields: HashMap::new(),
+            kinds: HashMap::new(),
             instances: Vec::new(),
         })
     }
@@ -75,5 +77,9 @@ impl Kind for ComponentKind {
 impl Scope for ComponentKind {
     fn field(&self, key: &str) -> Option<&Field> {
         self.fields.get(key)
+    }
+
+    fn kind(&self, key: &str) -> Option<Rc<dyn Kind>> {
+        self.kinds.get(key).cloned()
     }
 }

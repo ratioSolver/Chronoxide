@@ -9,6 +9,10 @@ pub trait Item {
     }
 }
 
+pub struct BoolItem {
+    core: Weak<Core>,
+}
+
 pub trait Env {
     fn get(&self, key: &str) -> Option<&dyn Item>;
 }
