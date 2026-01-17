@@ -1,6 +1,6 @@
 use crate::riddle::{
     core::Core,
-    env::Component,
+    env::{Component, Item},
     scope::{Field, Scope},
 };
 use std::{
@@ -11,7 +11,7 @@ use std::{
 pub trait Kind {
     fn name(&self) -> &str;
 
-    fn new_instance(&mut self) -> Rc<Component>;
+    fn new_instance(&mut self) -> Rc<dyn Item>;
 }
 
 pub struct BoolKind {
@@ -31,7 +31,7 @@ impl Kind for BoolKind {
         "bool"
     }
 
-    fn new_instance(&mut self) -> Rc<Component> {
+    fn new_instance(&mut self) -> Rc<dyn Item> {
         unimplemented!()
     }
 }
@@ -42,7 +42,7 @@ pub struct ComponentKind {
     weak_self: Weak<Self>,
     name: String,
     fields: HashMap<String, Field>,
-    instances: Vec<Rc<Component>>,
+    instances: Vec<Rc<dyn Item>>,
 }
 
 impl ComponentKind {
@@ -61,7 +61,7 @@ impl Kind for ComponentKind {
         &self.name
     }
 
-    fn new_instance(&mut self) -> Rc<Component> {
+    fn new_instance(&mut self) -> Rc<dyn Item> {
         let instance = Rc::new(Component::new(
             Rc::downgrade(
                 &(self.weak_self.upgrade().expect("Type has been dropped") as Rc<dyn Kind>),
