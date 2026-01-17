@@ -36,19 +36,19 @@ impl Kind for BoolKind {
     }
 }
 
-pub trait ComplexType: Kind + Scope {}
-
 pub struct ComponentKind {
     weak_self: Weak<Self>,
+    core: Weak<Core>,
     name: String,
     fields: HashMap<String, Field>,
     instances: Vec<Rc<dyn Item>>,
 }
 
 impl ComponentKind {
-    pub fn new(name: String) -> Rc<Self> {
+    pub fn new(core: &Rc<Core>, name: String) -> Rc<Self> {
         Rc::new_cyclic(|weak_self| ComponentKind {
             weak_self: weak_self.clone(),
+            core: Rc::downgrade(core),
             name,
             fields: HashMap::new(),
             instances: Vec::new(),
@@ -63,9 +63,8 @@ impl Kind for ComponentKind {
 
     fn new_instance(&mut self) -> Rc<dyn Item> {
         let instance = Rc::new(Component::new(
-            Rc::downgrade(
-                &(self.weak_self.upgrade().expect("Type has been dropped") as Rc<dyn Kind>),
-            ),
+            self.core.clone(),
+            self.weak_self.clone(),
             std::collections::HashMap::new(),
         ));
         self.instances.push(instance.clone());
@@ -78,5 +77,3 @@ impl Scope for ComponentKind {
         self.fields.get(key)
     }
 }
-
-impl ComplexType for ComponentKind {}

@@ -1,4 +1,4 @@
-use crate::riddle::class::Kind;
+use crate::riddle::{class::Kind, core::Core};
 use std::{collections::HashMap, rc::Rc, rc::Weak};
 
 pub trait Item {
@@ -14,13 +14,19 @@ pub trait Env {
 }
 
 pub struct Component {
+    core: Weak<Core>,
     component_type: Weak<dyn Kind>,
     items: HashMap<String, Rc<dyn Item>>,
 }
 
 impl Component {
-    pub fn new(component_type: Weak<dyn Kind>, items: HashMap<String, Rc<dyn Item>>) -> Self {
+    pub fn new(
+        core: Weak<Core>,
+        component_type: Weak<dyn Kind>,
+        items: HashMap<String, Rc<dyn Item>>,
+    ) -> Self {
         Self {
+            core,
             component_type,
             items,
         }
