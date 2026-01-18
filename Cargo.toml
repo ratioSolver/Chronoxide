@@ -1,7 +1,12 @@
 [package]
 name = "chronoxide"
 version = "0.1.0"
+authors = ["Riccardo De Benedictis"]
 edition = "2024"
+description = "Chronoxide is a high-performance, timeline-based planner built in Rust"
+readme = "README.md"
+repository = "https://github.com/ratioSolver/Chronoxide"
+license-file = "LICENSE.txt"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["ws"] }
