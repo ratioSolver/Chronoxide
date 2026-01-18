@@ -159,8 +159,14 @@ impl Solver {
         }
     }
 
-    pub fn add_listener(&mut self, v: usize, listener: Callback) {
-        self.listeners.entry(v).or_default().push(listener);
+    pub fn add_listener<F>(&mut self, var: usize, listener: F)
+    where
+        F: Fn(&Solver, usize) + 'static,
+    {
+        self.listeners
+            .entry(var)
+            .or_default()
+            .push(Box::new(listener));
     }
 }
 
