@@ -1,4 +1,4 @@
-use crate::riddle::class::Kind;
+use crate::riddle::kind::Kind;
 use std::rc::{Rc, Weak};
 
 pub struct Field {
@@ -26,7 +26,7 @@ impl Field {
 }
 
 pub trait Scope {
-    fn field(&self, key: &str) -> Option<&Field>;
+    fn field(&self, key: &str) -> Result<Rc<Field>, String>;
 
-    fn kind(&self, key: &str) -> Option<Rc<dyn Kind>>;
+    fn kind(&self, key: &str) -> Result<Rc<dyn Kind>, String>;
 }

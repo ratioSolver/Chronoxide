@@ -1,4 +1,4 @@
-use crate::riddle::{class::Kind, core::Core};
+use crate::riddle::{core::Core, kind::Kind};
 use std::{collections::HashMap, rc::Rc, rc::Weak};
 
 pub trait Item {
@@ -10,7 +10,22 @@ pub trait Item {
 }
 
 pub struct BoolItem {
-    core: Weak<Core>,
+    core: Weak<dyn Core>,
+}
+
+impl BoolItem {
+    pub fn new(core: &Rc<dyn Core>) -> Rc<Self> {
+        Rc::new(BoolItem {
+            core: Rc::downgrade(core),
+        })
+    }
+}
+
+impl Item for BoolItem {
+    fn kind(&self) -> Rc<dyn Kind> {
+        let core = self.core.upgrade().expect("Core has been dropped");
+        core.kind("bool").expect("`bool` kind not found")
+    }
 }
 
 pub trait Env {
@@ -18,14 +33,14 @@ pub trait Env {
 }
 
 pub struct Component {
-    core: Weak<Core>,
+    core: Weak<dyn Core>,
     component_type: Weak<dyn Kind>,
     items: HashMap<String, Rc<dyn Item>>,
 }
 
 impl Component {
     pub fn new(
-        core: Weak<Core>,
+        core: Weak<dyn Core>,
         component_type: Weak<dyn Kind>,
         items: HashMap<String, Rc<dyn Item>>,
     ) -> Self {

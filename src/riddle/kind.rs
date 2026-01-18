@@ -15,11 +15,11 @@ pub trait Kind {
 }
 
 pub struct BoolKind {
-    core: Weak<Core>,
+    core: Weak<dyn Core>,
 }
 
 impl BoolKind {
-    pub fn new(core: &Rc<Core>) -> Rc<Self> {
+    pub fn new(core: &Rc<dyn Core>) -> Rc<Self> {
         Rc::new(BoolKind {
             core: Rc::downgrade(core),
         })
@@ -32,24 +32,29 @@ impl Kind for BoolKind {
     }
 
     fn new_instance(&mut self) -> Rc<dyn Item> {
-        unimplemented!()
+        self.core
+            .upgrade()
+            .expect("Core has been dropped")
+            .new_bool()
     }
 }
 
 pub struct ComponentKind {
     weak_self: Weak<Self>,
-    core: Weak<Core>,
+    core: Weak<dyn Core>,
+    parent: Weak<dyn Scope>,
     name: String,
-    fields: HashMap<String, Field>,
+    fields: HashMap<String, Rc<Field>>,
     kinds: HashMap<String, Rc<dyn Kind>>,
     instances: Vec<Rc<dyn Item>>,
 }
 
 impl ComponentKind {
-    pub fn new(core: &Rc<Core>, name: String) -> Rc<Self> {
+    pub fn new(core: &Rc<dyn Core>, parent: &Rc<dyn Scope>, name: String) -> Rc<Self> {
         Rc::new_cyclic(|weak_self| ComponentKind {
             weak_self: weak_self.clone(),
             core: Rc::downgrade(core),
+            parent: Rc::downgrade(parent),
             name,
             fields: HashMap::new(),
             kinds: HashMap::new(),
@@ -75,11 +80,29 @@ impl Kind for ComponentKind {
 }
 
 impl Scope for ComponentKind {
-    fn field(&self, key: &str) -> Option<&Field> {
-        self.fields.get(key)
+    fn field(&self, key: &str) -> Result<Rc<Field>, String> {
+        if let Some(field) = self.fields.get(key) {
+            return Ok(field.clone());
+        }
+        if let Some(parent) = self.parent.upgrade() {
+            return parent.field(key);
+        }
+        Err(format!(
+            "Field '{}' not found in component '{}'",
+            key, self.name
+        ))
     }
 
-    fn kind(&self, key: &str) -> Option<Rc<dyn Kind>> {
-        self.kinds.get(key).cloned()
+    fn kind(&self, key: &str) -> Result<Rc<dyn Kind>, String> {
+        if let Some(kind) = self.kinds.get(key) {
+            return Ok(kind.clone());
+        }
+        if let Some(parent) = self.parent.upgrade() {
+            return parent.kind(key);
+        }
+        Err(format!(
+            "Kind '{}' not found in component '{}'",
+            key, self.name
+        ))
     }
 }

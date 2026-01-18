@@ -14,3 +14,5 @@ pub mod lin;
 pub use lin::solver::Solver as LinSolver;
 
 pub mod riddle;
+
+pub mod solver;
