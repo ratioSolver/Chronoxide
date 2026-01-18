@@ -14,10 +14,8 @@ pub struct BoolItem {
 }
 
 impl BoolItem {
-    pub fn new(core: &Rc<dyn Core>) -> Rc<Self> {
-        Rc::new(BoolItem {
-            core: Rc::downgrade(core),
-        })
+    pub fn new(core: Weak<dyn Core>) -> Rc<Self> {
+        Rc::new(BoolItem { core })
     }
 }
 

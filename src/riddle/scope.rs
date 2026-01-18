@@ -7,9 +7,9 @@ pub struct Field {
 }
 
 impl Field {
-    pub fn new(component_type: &Rc<dyn Kind>, name: &str) -> Self {
+    pub fn new(component_type: Weak<dyn Kind>, name: &str) -> Self {
         Self {
-            component_type: Rc::downgrade(component_type),
+            component_type,
             name: name.to_string(),
         }
     }

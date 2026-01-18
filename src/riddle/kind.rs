@@ -19,10 +19,8 @@ pub struct BoolKind {
 }
 
 impl BoolKind {
-    pub fn new(core: &Rc<dyn Core>) -> Rc<Self> {
-        Rc::new(BoolKind {
-            core: Rc::downgrade(core),
-        })
+    pub fn new(core: Weak<dyn Core>) -> Rc<Self> {
+        Rc::new(BoolKind { core })
     }
 }
 
@@ -50,11 +48,11 @@ pub struct ComponentKind {
 }
 
 impl ComponentKind {
-    pub fn new(core: &Rc<dyn Core>, parent: &Rc<dyn Scope>, name: String) -> Rc<Self> {
+    pub fn new(core: Weak<dyn Core>, parent: Weak<dyn Scope>, name: String) -> Rc<Self> {
         Rc::new_cyclic(|weak_self| ComponentKind {
             weak_self: weak_self.clone(),
-            core: Rc::downgrade(core),
-            parent: Rc::downgrade(parent),
+            core,
+            parent,
             name,
             fields: HashMap::new(),
             kinds: HashMap::new(),
