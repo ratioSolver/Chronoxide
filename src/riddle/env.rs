@@ -14,7 +14,7 @@ pub struct BoolItem {
 }
 
 pub trait Env {
-    fn get(&self, key: &str) -> Option<&dyn Item>;
+    fn get(&self, key: &str) -> Result<&dyn Item, String>;
 }
 
 pub struct Component {
@@ -50,7 +50,10 @@ impl Item for Component {
 }
 
 impl Env for Component {
-    fn get(&self, key: &str) -> Option<&dyn Item> {
-        self.items.get(key).map(|item| item.as_ref())
+    fn get(&self, key: &str) -> Result<&dyn Item, String> {
+        self.items
+            .get(key)
+            .map(|item| item.as_ref())
+            .ok_or_else(|| format!("Item '{}' not found in component", key))
     }
 }
