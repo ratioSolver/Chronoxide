@@ -67,30 +67,33 @@ impl Solver {
                 self.vars[var].2.clone()
             };
             for clause_id in clauses {
-                if reason == Some(clause_id) {
-                    continue;
-                }
-                let mut num_undef = 0;
-                let mut last_undef: Option<Lit> = None;
-                for &lit in &self.clauses[clause_id] {
-                    match self.value(lit.var()) {
-                        LBool::True => return true,
-                        LBool::Undef => {
-                            num_undef += 1;
-                            last_undef = Some(lit);
-                        }
-                        LBool::False => {}
-                    }
-                    if num_undef > 1 {
-                        return true;
-                    }
-                }
-                if num_undef == 1 && last_undef.is_some() {
-                    return self.enqueue(&last_undef.unwrap(), Some(clause_id));
-                } else {
+                if reason != Some(clause_id) && !self.propagate(clause_id) {
                     return false;
                 }
             }
+        }
+        true
+    }
+
+    fn propagate(&mut self, clause_id: usize) -> bool {
+        let mut num_undef = 0;
+        let mut last_undef: Option<Lit> = None;
+        for &lit in &self.clauses[clause_id] {
+            match self.value(lit.var()) {
+                LBool::True => return true,
+                LBool::Undef => {
+                    num_undef += 1;
+                    last_undef = Some(lit);
+                }
+                LBool::False => {}
+            }
+            if num_undef > 1 {
+                return true;
+            }
+        }
+        if num_undef == 1 {
+            assert!(last_undef.is_some());
+            return self.enqueue(&last_undef.unwrap(), Some(clause_id));
         }
         true
     }
