@@ -1,3 +1,21 @@
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LBool {
+    True,
+    False,
+    Undef,
+}
+
+impl std::fmt::Display for LBool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            LBool::True => "True",
+            LBool::False => "False",
+            LBool::Undef => "Undef",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lit {
     x: usize,

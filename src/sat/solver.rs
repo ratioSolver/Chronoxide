@@ -1,26 +1,7 @@
-use std::collections::{HashMap, VecDeque};
-
-use crate::Lit;
+use crate::{Lit, utils::lit::LBool};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 type Callback = Box<dyn Fn(&Solver, usize)>;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LBool {
-    True,
-    False,
-    Undef,
-}
-
-impl std::fmt::Display for LBool {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            LBool::True => "True",
-            LBool::False => "False",
-            LBool::Undef => "Undef",
-        };
-        write!(f, "{}", s)
-    }
-}
 
 #[derive(Default)]
 pub struct Solver {
@@ -73,6 +54,34 @@ impl Solver {
             }
         }
         true
+    }
+
+    pub fn retract(&mut self, var: usize) {
+        self.vars[var].0 = LBool::Undef;
+        let mut visited: HashSet<usize> = HashSet::new();
+        visited.insert(var);
+        let mut to_retract: VecDeque<usize> = VecDeque::new();
+        to_retract.push_back(var);
+        while let Some(v) = to_retract.pop_front() {
+            let n_pos = self.vars[v].1.len();
+            let n_neg = self.vars[v].2.len();
+            for i in 0..n_pos + n_neg {
+                let clause_id = if i < n_pos {
+                    self.vars[v].1[i]
+                } else {
+                    self.vars[v].2[i - n_pos]
+                };
+
+                for &lit in &self.clauses[clause_id] {
+                    let lit_var = lit.var();
+                    if !visited.contains(&lit_var) && self.value(lit_var) != LBool::Undef {
+                        visited.insert(lit_var);
+                        to_retract.push_back(lit_var);
+                        self.vars[lit_var].0 = LBool::Undef;
+                    }
+                }
+            }
+        }
     }
 
     fn propagate(&mut self, clause_id: usize) -> bool {
