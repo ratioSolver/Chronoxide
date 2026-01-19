@@ -10,7 +10,7 @@ struct Var {
 }
 
 impl Var {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Var {
             value: LBool::Undef,
             _reason: None,
@@ -60,9 +60,9 @@ impl Solver {
         self.enqueue(lit, None);
         while let Some((var, reason)) = self.prop_q.pop_front() {
             let clauses = if self.value(var) == LBool::True {
-                self.vars[var].pos_clauses.clone()
-            } else {
                 self.vars[var].neg_clauses.clone()
+            } else {
+                self.vars[var].pos_clauses.clone()
             };
             for clause_id in clauses {
                 if reason != Some(clause_id) && !self.propagate(clause_id) {
@@ -77,13 +77,22 @@ impl Solver {
         let mut num_undef = 0;
         let mut last_undef = None;
         for &lit in &self.clauses[clause_id] {
-            match self.value(lit.var()) {
-                LBool::True => return true,
+            let val = self.value(lit.var());
+            match val {
                 LBool::Undef => {
                     num_undef += 1;
                     last_undef = Some(lit);
                 }
-                LBool::False => {}
+                LBool::True => {
+                    if lit.is_positive() {
+                        return true;
+                    }
+                }
+                LBool::False => {
+                    if !lit.is_positive() {
+                        return true;
+                    }
+                }
             }
             if num_undef > 1 {
                 return true;
@@ -93,7 +102,7 @@ impl Solver {
             assert!(last_undef.is_some());
             return self.enqueue(&last_undef.unwrap(), Some(clause_id));
         }
-        true
+        false
     }
 
     fn enqueue(&mut self, lit: &Lit, reason: Option<usize>) -> bool {
@@ -134,5 +143,83 @@ impl Solver {
             .entry(var)
             .or_default()
             .push(Box::new(listener));
+    }
+}
+
+impl std::fmt::Display for Solver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, var) in self.vars.iter().enumerate() {
+            writeln!(f, "b{}: {:?}", i, var.value)?;
+        }
+        for clause in &self.clauses {
+            let lits: Vec<String> = clause.iter().map(|l| l.to_string()).collect();
+            writeln!(f, "{}", lits.join(" ∨ "))?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Lit, utils::lit::LBool};
+
+    #[test]
+    fn test_add_var() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+        let v1 = solver.add_var();
+        assert_eq!(v0, 0);
+        assert_eq!(v1, 1);
+        assert_eq!(solver.value(v0), LBool::Undef);
+    }
+
+    #[test]
+    fn test_assignment_propagation() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+        let v1 = solver.add_var();
+
+        // Clause: v0 or v1
+        solver.add_clause(&[Lit::new(v0, true), Lit::new(v1, true)]);
+
+        // Assert !v0
+        let ret = solver.assert(&Lit::new(v0, false));
+        assert!(ret, "Solver should be consistent");
+
+        // v0 should be False
+        assert_eq!(solver.value(v0), LBool::False);
+        // v1 should be implied True
+        assert_eq!(solver.value(v1), LBool::True);
+    }
+
+    #[test]
+    fn test_chain_propagation() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+        let v1 = solver.add_var();
+        let v2 = solver.add_var();
+
+        // v0 -> v1 (equivalent to !v0 or v1)
+        solver.add_clause(&[Lit::new(v0, false), Lit::new(v1, true)]);
+        // v1 -> v2 (equivalent to !v1 or v2)
+        solver.add_clause(&[Lit::new(v1, false), Lit::new(v2, true)]);
+
+        // Assert v0
+        solver.assert(&Lit::new(v0, true));
+
+        assert_eq!(solver.value(v0), LBool::True);
+        assert_eq!(solver.value(v1), LBool::True);
+        assert_eq!(solver.value(v2), LBool::True);
+    }
+
+    #[test]
+    fn test_listener() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+
+        solver.add_listener(v0, move |_solver, var| {
+            assert_eq!(var, v0);
+        });
     }
 }
