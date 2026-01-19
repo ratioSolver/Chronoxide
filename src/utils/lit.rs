@@ -83,10 +83,10 @@ mod tests {
     #[test]
     fn test_display() {
         let l1 = Lit::new(5, false);
-        assert_eq!(format!("{}", l1), "¬5");
+        assert_eq!(format!("{}", l1), "¬b5");
 
         let l2 = Lit::new(5, true);
-        assert_eq!(format!("{}", l2), "5");
+        assert_eq!(format!("{}", l2), "b5");
     }
 
     #[test]

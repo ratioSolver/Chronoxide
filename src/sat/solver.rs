@@ -57,8 +57,10 @@ impl Solver {
     }
 
     pub fn assert(&mut self, lit: &Lit) -> bool {
+        let mut current_level_vars = Vec::new();
         self.enqueue(lit, None);
         while let Some((var, reason)) = self.prop_q.pop_front() {
+            current_level_vars.push(var); // Track order!
             let clauses = if self.value(var) == LBool::True {
                 self.vars[var].neg_clauses.clone()
             } else {
@@ -66,6 +68,7 @@ impl Solver {
             };
             for clause_id in clauses {
                 if reason != Some(clause_id) && !self.propagate(clause_id) {
+                    self.analyze_conflict(clause_id, &current_level_vars);
                     return false;
                 }
             }
@@ -127,6 +130,8 @@ impl Solver {
             }
         }
     }
+
+    fn analyze_conflict(&self, _clause_id: usize, _current_level_vars: &Vec<usize>) {}
 
     fn notify(&self, var: usize) {
         if let Some(listeners) = self.listeners.get(&var) {
