@@ -1,27 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::Lit;
 
 type Callback = Box<dyn Fn(&Solver, usize)>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LBool {
     True,
     False,
     Undef,
-}
-
-impl LBool {
-    pub fn is_true(&self) -> bool {
-        matches!(self, LBool::True)
-    }
-
-    pub fn is_false(&self) -> bool {
-        matches!(self, LBool::False)
-    }
-
-    pub fn is_undef(&self) -> bool {
-        matches!(self, LBool::Undef)
-    }
 }
 
 impl std::fmt::Display for LBool {
@@ -35,59 +22,99 @@ impl std::fmt::Display for LBool {
     }
 }
 
-#[derive(Debug)]
-struct Clause {
-    literals: Vec<Lit>,
-}
-
-impl Clause {
-    pub fn new(lits: Vec<Lit>) -> Self {
-        Clause { literals: lits }
-    }
-
-    pub fn lits(&self) -> &Vec<Lit> {
-        &self.literals
-    }
-}
-
-impl std::fmt::Display for Clause {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let lits_str: Vec<String> = self.literals.iter().map(|lit| lit.to_string()).collect();
-        write!(f, "{}", lits_str.join(" ∨ "))
-    }
-}
-
+#[derive(Default)]
 pub struct Solver {
-    vars: Vec<LBool>,
-    watches: Vec<Vec<usize>>,
-    clauses: Vec<Clause>,
+    vars: Vec<(LBool, Vec<usize>, Vec<usize>)>, // (value, pos clauses, neg clauses)
+    clauses: Vec<Vec<Lit>>,
+    prop_q: VecDeque<(usize, Option<usize>)>, // (var, reason clause)
     listeners: HashMap<usize, Vec<Callback>>,
 }
 
 impl Solver {
     pub fn new() -> Self {
-        Solver {
-            vars: Vec::new(),
-            watches: Vec::new(),
-            clauses: Vec::new(),
-            listeners: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn add_var(&mut self) -> usize {
         let var_id = self.vars.len();
-        self.vars.push(LBool::Undef);
-        self.watches.push(Vec::new());
+        self.vars.push((LBool::Undef, Vec::new(), Vec::new()));
         var_id
     }
 
-    pub fn add_clause(&mut self, lits: Vec<Lit>) {
+    pub fn value(&self, var: usize) -> LBool {
+        self.vars[var].0.clone()
+    }
+
+    pub fn add_clause(&mut self, lits: &[Lit]) -> bool {
         let clause_id = self.clauses.len();
-        let clause = Clause::new(lits);
-        for lit in clause.lits() {
-            self.watches[lit.var()].push(clause_id);
+        for lit in lits {
+            if lit.is_positive() {
+                self.vars[lit.var()].1.push(clause_id);
+            } else {
+                self.vars[lit.var()].2.push(clause_id);
+            }
         }
-        self.clauses.push(clause);
+        self.clauses.push(lits.to_vec());
+        true
+    }
+
+    pub fn assert(&mut self, lit: &Lit) -> bool {
+        self.enqueue(lit, None);
+        while let Some((var, reason)) = self.prop_q.pop_front() {
+            let clauses = if self.value(var) == LBool::True {
+                self.vars[var].1.clone()
+            } else {
+                self.vars[var].2.clone()
+            };
+            for clause_id in clauses {
+                if reason == Some(clause_id) {
+                    continue;
+                }
+                let mut num_undef = 0;
+                let mut last_undef: Option<Lit> = None;
+                for &lit in &self.clauses[clause_id] {
+                    match self.value(lit.var()) {
+                        LBool::True => return true,
+                        LBool::Undef => {
+                            num_undef += 1;
+                            last_undef = Some(lit);
+                        }
+                        LBool::False => {}
+                    }
+                    if num_undef > 1 {
+                        return true;
+                    }
+                }
+                if num_undef == 1 && last_undef.is_some() {
+                    return self.enqueue(&last_undef.unwrap(), Some(clause_id));
+                } else {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    fn enqueue(&mut self, lit: &Lit, reason: Option<usize>) -> bool {
+        match self.value(lit.var()) {
+            LBool::Undef => {
+                self.vars[lit.var()].0 = if lit.is_positive() {
+                    LBool::True
+                } else {
+                    LBool::False
+                };
+                self.prop_q.push_back((lit.var(), reason));
+                self.notify(lit.var());
+                true
+            }
+            val => {
+                val == if lit.is_positive() {
+                    LBool::True
+                } else {
+                    LBool::False
+                }
+            }
+        }
     }
 
     fn notify(&self, var: usize) {
