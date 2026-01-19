@@ -4,7 +4,7 @@ type Callback = Box<dyn Fn(&Solver, usize)>;
 
 struct Var {
     value: LBool,            // current value
-    _reason: Option<usize>,  // clause that implied the value
+    reason: Option<usize>,   // clause that implied the value
     pos_clauses: Vec<usize>, // clauses where the variable appears positively
     neg_clauses: Vec<usize>, // clauses where the variable appears negatively
 }
@@ -13,7 +13,7 @@ impl Var {
     fn new() -> Self {
         Var {
             value: LBool::Undef,
-            _reason: None,
+            reason: None,
             pos_clauses: Vec::new(),
             neg_clauses: Vec::new(),
         }
@@ -113,6 +113,7 @@ impl Solver {
                 } else {
                     LBool::False
                 };
+                self.vars[lit.var()].reason = reason;
                 self.prop_q.push_back((lit.var(), reason));
                 self.notify(lit.var());
                 true
