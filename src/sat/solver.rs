@@ -43,9 +43,30 @@ impl Solver {
         self.vars[var].value.clone()
     }
 
+    pub fn lit_value(&self, lit: &Lit) -> LBool {
+        match self.value(lit.var()) {
+            LBool::Undef => LBool::Undef,
+            LBool::True => {
+                if lit.is_positive() {
+                    LBool::True
+                } else {
+                    LBool::False
+                }
+            }
+            LBool::False => {
+                if lit.is_positive() {
+                    LBool::False
+                } else {
+                    LBool::True
+                }
+            }
+        }
+    }
+
     pub fn add_clause(&mut self, lits: &[Lit]) -> bool {
+        assert!(lits.len() > 1, "Clause must have at least two literals");
         let clause_id = self.clauses.len();
-        for lit in lits {
+        for &lit in &lits[..2] {
             if lit.is_positive() {
                 self.vars[lit.var()].pos_clauses.push(clause_id);
             } else {
@@ -56,18 +77,22 @@ impl Solver {
         true
     }
 
-    pub fn assert(&mut self, lit: &Lit) -> bool {
+    pub fn assert(&mut self, lit: Lit) -> bool {
         let mut current_level_vars = Vec::new();
         self.enqueue(lit, None);
         while let Some((var, reason)) = self.prop_q.pop_front() {
             current_level_vars.push(var); // Track order!
             let clauses = if self.value(var) == LBool::True {
-                self.vars[var].neg_clauses.clone()
+                std::mem::take(&mut self.vars[var].neg_clauses)
             } else {
-                self.vars[var].pos_clauses.clone()
+                std::mem::take(&mut self.vars[var].pos_clauses)
             };
             for clause_id in clauses {
-                if reason != Some(clause_id) && !self.propagate(clause_id) {
+                assert!(
+                    reason != Some(clause_id),
+                    "A clause cannot be the reason for its own propagation"
+                );
+                if !self.propagate(clause_id, var) {
                     self.analyze_conflict(clause_id, &current_level_vars);
                     return false;
                 }
@@ -76,39 +101,48 @@ impl Solver {
         true
     }
 
-    fn propagate(&mut self, clause_id: usize) -> bool {
-        let mut num_undef = 0;
-        let mut last_undef = None;
-        for &lit in &self.clauses[clause_id] {
-            let val = self.value(lit.var());
-            match val {
-                LBool::Undef => {
-                    num_undef += 1;
-                    last_undef = Some(lit);
-                }
-                LBool::True => {
-                    if lit.is_positive() {
-                        return true;
-                    }
-                }
-                LBool::False => {
-                    if !lit.is_positive() {
-                        return true;
-                    }
-                }
+    fn propagate(&mut self, clause_id: usize, var: usize) -> bool {
+        // Ensure the first literal is not the one that was just assigned
+        if self.clauses[clause_id][0].var() == var {
+            self.clauses[clause_id].swap(0, 1);
+        }
+
+        let lit_1 = &self.clauses[clause_id][1];
+        // Check if clause is already satisfied
+        if self.lit_value(&self.clauses[clause_id][0]) == LBool::True {
+            if lit_1.is_positive() {
+                self.vars[lit_1.var()].pos_clauses.push(clause_id);
+            } else {
+                self.vars[lit_1.var()].neg_clauses.push(clause_id);
             }
-            if num_undef > 1 {
+            return true;
+        }
+
+        // Find the next unassigned literal
+        for i in 2..self.clauses[clause_id].len() {
+            if self.lit_value(&self.clauses[clause_id][i]) != LBool::False {
+                // Move this literal to the second position
+                self.clauses[clause_id].swap(1, i);
+                let new_watcher = &self.clauses[clause_id][1];
+                if new_watcher.is_positive() {
+                    self.vars[new_watcher.var()].pos_clauses.push(clause_id);
+                } else {
+                    self.vars[new_watcher.var()].neg_clauses.push(clause_id);
+                }
                 return true;
             }
         }
-        if num_undef == 1 {
-            assert!(last_undef.is_some());
-            return self.enqueue(&last_undef.unwrap(), Some(clause_id));
+
+        // If we reach here, all other literals are false, so we must propagate the first literal
+        if self.value(var) == LBool::True {
+            self.vars[var].pos_clauses.push(clause_id);
+        } else {
+            self.vars[var].neg_clauses.push(clause_id);
         }
-        false
+        self.enqueue(self.clauses[clause_id][0], Some(clause_id))
     }
 
-    fn enqueue(&mut self, lit: &Lit, reason: Option<usize>) -> bool {
+    fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
         match self.value(lit.var()) {
             LBool::Undef => {
                 self.vars[lit.var()].value = if lit.is_positive() {
@@ -190,7 +224,7 @@ mod tests {
         solver.add_clause(&[Lit::new(v0, true), Lit::new(v1, true)]);
 
         // Assert !v0
-        let ret = solver.assert(&Lit::new(v0, false));
+        let ret = solver.assert(Lit::new(v0, false));
         assert!(ret, "Solver should be consistent");
 
         // v0 should be False
@@ -212,7 +246,7 @@ mod tests {
         solver.add_clause(&[Lit::new(v1, false), Lit::new(v2, true)]);
 
         // Assert v0
-        solver.assert(&Lit::new(v0, true));
+        solver.assert(Lit::new(v0, true));
 
         assert_eq!(solver.value(v0), LBool::True);
         assert_eq!(solver.value(v1), LBool::True);
@@ -227,5 +261,73 @@ mod tests {
         solver.add_listener(v0, move |_solver, var| {
             assert_eq!(var, v0);
         });
+    }
+
+    #[test]
+    fn test_2wl_correctness() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+        let v1 = solver.add_var();
+        let v2 = solver.add_var();
+        let v3 = solver.add_var();
+
+        // Clause: v0 or v1 or v2 or v3
+        solver.add_clause(&[
+            Lit::new(v0, true),
+            Lit::new(v1, true),
+            Lit::new(v2, true),
+            Lit::new(v3, true),
+        ]);
+
+        // Initially, watchers are the first two literals: v0 and v1
+        assert!(solver.vars[v0].pos_clauses.contains(&0));
+        assert!(solver.vars[v1].pos_clauses.contains(&0));
+        assert!(!solver.vars[v2].pos_clauses.contains(&0));
+        assert!(!solver.vars[v3].pos_clauses.contains(&0));
+
+        // Assign !v1. Watch on v1 should move to v2.
+        solver.assert(Lit::new(v1, false));
+        assert!(solver.vars[v0].pos_clauses.contains(&0));
+        assert!(!solver.vars[v1].pos_clauses.contains(&0));
+        assert!(solver.vars[v2].pos_clauses.contains(&0));
+        assert!(!solver.vars[v3].pos_clauses.contains(&0));
+
+        // Assign !v2. Watch on v2 should move to v3.
+        solver.assert(Lit::new(v2, false));
+        assert!(solver.vars[v0].pos_clauses.contains(&0));
+        assert!(!solver.vars[v1].pos_clauses.contains(&0));
+        assert!(!solver.vars[v2].pos_clauses.contains(&0));
+        assert!(solver.vars[v3].pos_clauses.contains(&0));
+
+        // Assign !v3. No more watchers available. Should propagate v0.
+        solver.assert(Lit::new(v3, false));
+        assert_eq!(solver.value(v0), LBool::True);
+    }
+
+    #[test]
+    fn test_2wl_lazy_update() {
+        let mut solver = Solver::new();
+        let v0 = solver.add_var();
+        let v1 = solver.add_var();
+        let v2 = solver.add_var();
+
+        // Clause: v0 or v1 or v2
+        solver.add_clause(&[Lit::new(v0, true), Lit::new(v1, true), Lit::new(v2, true)]);
+
+        // Watchers: v0, v1
+        assert!(solver.vars[v0].pos_clauses.contains(&0));
+        assert!(solver.vars[v1].pos_clauses.contains(&0));
+
+        // Satisfy the clause with v0
+        solver.assert(Lit::new(v0, true));
+        // Watchers shouldn't change eagerly
+        assert!(solver.vars[v0].pos_clauses.contains(&0));
+        assert!(solver.vars[v1].pos_clauses.contains(&0));
+
+        // Now falsify v1. Since clause is satisfied by v0, watch on v1 should remain (or just be re-added).
+        solver.assert(Lit::new(v1, false));
+        assert!(solver.vars[v1].pos_clauses.contains(&0));
+        // Watch shouldn't move to v2 because v0 is true.
+        assert!(!solver.vars[v2].pos_clauses.contains(&0));
     }
 }
