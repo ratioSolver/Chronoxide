@@ -46,32 +46,27 @@ impl Solver {
     pub fn lit_value(&self, lit: &Lit) -> LBool {
         match self.value(lit.var()) {
             LBool::Undef => LBool::Undef,
-            LBool::True => {
-                if lit.is_positive() {
+            val => {
+                if (val == LBool::True) == lit.is_positive() {
                     LBool::True
                 } else {
                     LBool::False
-                }
-            }
-            LBool::False => {
-                if lit.is_positive() {
-                    LBool::False
-                } else {
-                    LBool::True
                 }
             }
         }
     }
 
     pub fn add_clause(&mut self, lits: &[Lit]) -> bool {
-        assert!(lits.len() > 1, "Clause must have at least two literals");
+        if lits.is_empty() {
+            return false;
+        }
+        if lits.len() == 1 {
+            return self.assert(lits[0]);
+        }
+
         let clause_id = self.clauses.len();
         for &lit in &lits[..2] {
-            if lit.is_positive() {
-                self.vars[lit.var()].pos_clauses.push(clause_id);
-            } else {
-                self.vars[lit.var()].neg_clauses.push(clause_id);
-            }
+            self.watch_lit(lit, clause_id);
         }
         self.clauses.push(lits.to_vec());
         true
@@ -101,20 +96,23 @@ impl Solver {
         true
     }
 
+    fn watch_lit(&mut self, lit: Lit, clause_id: usize) {
+        if lit.is_positive() {
+            self.vars[lit.var()].pos_clauses.push(clause_id);
+        } else {
+            self.vars[lit.var()].neg_clauses.push(clause_id);
+        }
+    }
+
     fn propagate(&mut self, clause_id: usize, var: usize) -> bool {
         // Ensure the first literal is not the one that was just assigned
         if self.clauses[clause_id][0].var() == var {
             self.clauses[clause_id].swap(0, 1);
         }
 
-        let lit_1 = &self.clauses[clause_id][1];
         // Check if clause is already satisfied
         if self.lit_value(&self.clauses[clause_id][0]) == LBool::True {
-            if lit_1.is_positive() {
-                self.vars[lit_1.var()].pos_clauses.push(clause_id);
-            } else {
-                self.vars[lit_1.var()].neg_clauses.push(clause_id);
-            }
+            self.watch_lit(self.clauses[clause_id][1], clause_id);
             return true;
         }
 
@@ -123,12 +121,8 @@ impl Solver {
             if self.lit_value(&self.clauses[clause_id][i]) != LBool::False {
                 // Move this literal to the second position
                 self.clauses[clause_id].swap(1, i);
-                let new_watcher = &self.clauses[clause_id][1];
-                if new_watcher.is_positive() {
-                    self.vars[new_watcher.var()].pos_clauses.push(clause_id);
-                } else {
-                    self.vars[new_watcher.var()].neg_clauses.push(clause_id);
-                }
+                // Update watchers
+                self.watch_lit(self.clauses[clause_id][1], clause_id);
                 return true;
             }
         }
