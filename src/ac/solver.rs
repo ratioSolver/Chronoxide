@@ -21,6 +21,12 @@ pub struct Solver {
     listeners: HashMap<usize, Vec<Callback>>,
 }
 
+impl Default for Solver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Solver {
     pub fn new() -> Self {
         Self {

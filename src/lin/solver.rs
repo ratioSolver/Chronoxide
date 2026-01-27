@@ -68,6 +68,12 @@ pub struct Solver {
     listeners: HashMap<usize, Vec<Callback>>,
 }
 
+impl Default for Solver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Solver {
     pub fn new() -> Self {
         Self {
@@ -125,7 +131,7 @@ impl Solver {
         ub
     }
 
-    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<usize>) {
+    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, _strict: bool, _reason: Option<usize>) {
         let mut expr = lhs - rhs;
         // Remove basic variables from the expression and substitute with their tableau expressions
         for v in expr.vars().keys().cloned().collect::<Vec<usize>>() {
@@ -137,14 +143,14 @@ impl Solver {
         unimplemented!()
     }
 
-    fn set_lb(&mut self, v: usize, lb: InfRational, reason: Option<usize>) {
+    fn set_lb(&mut self, v: usize, lb: InfRational, _reason: Option<usize>) {
         if lb > self.vars[v].ub() {
             panic!("Infeasible lower bound");
         }
         unimplemented!()
     }
 
-    fn set_ub(&mut self, v: usize, ub: InfRational, reason: Option<usize>) {
+    fn set_ub(&mut self, v: usize, ub: InfRational, _reason: Option<usize>) {
         if ub < self.vars[v].lb() {
             panic!("Infeasible upper bound");
         }
