@@ -4,17 +4,30 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents a rational number extended with an infinitesimal part.
+///
+/// The value is represented as `rat + inf * ε`, where `ε` (epsilon) is an infinitesimal
+/// value that is positive but smaller than any positive rational number.
+///
+/// - `rat`: The standard rational part.
+/// - `inf`: The coefficient of the infinitesimal `ε`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InfRational {
     rat: Rational,
     inf: Rational,
 }
 
 impl InfRational {
+    /// Creates a new `InfRational` number from its rational and infinitesimal parts.
+    ///
+    /// The number represents `rat + inf * ε`.
     pub fn new(rat: Rational, inf: Rational) -> Self {
         InfRational { rat, inf }
     }
 
+    /// Creates an `InfRational` from a standard `Rational`.
+    ///
+    /// The infinitesimal part is set to 0.
     pub fn from_rational(rat: Rational) -> InfRational {
         InfRational {
             rat,
@@ -22,6 +35,7 @@ impl InfRational {
         }
     }
 
+    /// Creates an `InfRational` from an integer.
     pub fn from_integer(arg: i64) -> InfRational {
         InfRational {
             rat: Rational::from_integer(arg),
@@ -52,15 +66,6 @@ impl From<Rational> for InfRational {
 impl From<i64> for InfRational {
     fn from(arg: i64) -> Self {
         InfRational::from_integer(arg)
-    }
-}
-
-impl PartialOrd for InfRational {
-    fn partial_cmp(&self, other: &InfRational) -> Option<Ordering> {
-        match self.rat.partial_cmp(&other.rat) {
-            Some(Ordering::Equal) => self.inf.partial_cmp(&other.inf),
-            ord => ord,
-        }
     }
 }
 
@@ -465,5 +470,32 @@ mod tests {
             a / &scalar,
             InfRational::new(Rational::new(1, 2), Rational::from_integer(1))
         );
+    }
+
+    #[test]
+    fn test_ordering() {
+        let mut list = vec![
+            InfRational::new(Rational::new(1, 2), Rational::ZERO),
+            InfRational::new(Rational::new(1, 2), Rational::new(1, 1)),
+            InfRational::new(Rational::new(1, 2), Rational::new(-1, 1)),
+            InfRational::ZERO,
+            InfRational::POSITIVE_INFINITY,
+            InfRational::NEGATIVE_INFINITY,
+            InfRational::new(Rational::POSITIVE_INFINITY, Rational::new(1, 1)),
+        ];
+
+        list.sort();
+
+        let expected = vec![
+            InfRational::NEGATIVE_INFINITY,
+            InfRational::ZERO,
+            InfRational::new(Rational::new(1, 2), Rational::new(-1, 1)),
+            InfRational::new(Rational::new(1, 2), Rational::ZERO),
+            InfRational::new(Rational::new(1, 2), Rational::new(1, 1)),
+            InfRational::POSITIVE_INFINITY,
+            InfRational::new(Rational::POSITIVE_INFINITY, Rational::new(1, 1)),
+        ];
+
+        assert_eq!(list, expected);
     }
 }

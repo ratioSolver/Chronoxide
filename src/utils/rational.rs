@@ -62,9 +62,32 @@ impl From<i64> for Rational {
     }
 }
 
+impl Ord for Rational {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.den == 0 && other.den == 0 {
+            return self.num.cmp(&other.num);
+        }
+        if self.den == 0 {
+            return if self.num > 0 {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            };
+        }
+        if other.den == 0 {
+            return if other.num > 0 {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+        }
+        (self.num * other.den).cmp(&(other.num * self.den))
+    }
+}
+
 impl PartialOrd for Rational {
     fn partial_cmp(&self, other: &Rational) -> Option<Ordering> {
-        (self.num * other.den).partial_cmp(&(other.num * self.den))
+        Some(self.cmp(other))
     }
 }
 
@@ -551,6 +574,33 @@ mod tests {
         let e = Rational::new(1, 2);
         assert!(e < 1);
         assert!(e > 0);
+    }
+
+    #[test]
+    fn test_ordering() {
+        let mut list = vec![
+            Rational::new(1, 2),
+            Rational::new(1, 3),
+            Rational::new(3, 2),
+            Rational::new(-1, 2),
+            Rational::new(0, 1),
+            Rational::POSITIVE_INFINITY,
+            Rational::NEGATIVE_INFINITY,
+        ];
+
+        list.sort();
+
+        let expected = vec![
+            Rational::NEGATIVE_INFINITY,
+            Rational::new(-1, 2),
+            Rational::ZERO,
+            Rational::new(1, 3),
+            Rational::new(1, 2),
+            Rational::new(3, 2),
+            Rational::POSITIVE_INFINITY,
+        ];
+
+        assert_eq!(list, expected);
     }
 
     #[test]
