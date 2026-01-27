@@ -14,7 +14,7 @@ pub trait Kind {
     fn new_instance(&mut self) -> Rc<dyn Item>;
 }
 
-pub struct BoolKind {
+pub(super) struct BoolKind {
     core: Weak<dyn Core>,
 }
 

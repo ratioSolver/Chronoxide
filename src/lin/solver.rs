@@ -1,69 +1,16 @@
-use crate::{InfRational, Lin};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use crate::{InfRational, Lin, lin::var::Var};
+use std::collections::{BTreeMap, HashMap};
 
 type Callback = Box<dyn Fn(&Solver, usize)>;
 
-pub trait Constraint {}
-
-pub struct Updates {
+struct Updates {
     lbs: HashMap<usize, InfRational>,
     ubs: HashMap<usize, InfRational>,
 }
 
-struct Var {
-    val: InfRational,
-    lbs: BTreeMap<InfRational, HashSet<usize>>,
-    ubs: BTreeMap<InfRational, HashSet<usize>>,
-    rows: HashSet<usize>,
-}
-
-impl Var {
-    pub fn new() -> Self {
-        Self {
-            val: InfRational::from_integer(0),
-            lbs: BTreeMap::new(),
-            ubs: BTreeMap::new(),
-            rows: HashSet::new(),
-        }
-    }
-
-    pub fn value(&self) -> InfRational {
-        self.val
-    }
-
-    pub fn lb(&self) -> InfRational {
-        match self.lbs.iter().next() {
-            Some((lb, _)) => *lb,
-            None => InfRational::NEGATIVE_INFINITY,
-        }
-    }
-
-    pub fn ub(&self) -> InfRational {
-        match self.ubs.iter().next_back() {
-            Some((ub, _)) => *ub,
-            None => InfRational::POSITIVE_INFINITY,
-        }
-    }
-
-    fn set_lb(&mut self, lb: InfRational, reason: Option<usize>) {
-        assert!(lb <= self.ub());
-        unimplemented!()
-    }
-
-    fn set_ub(&mut self, ub: InfRational, reason: Option<usize>) {
-        assert!(ub >= self.lb());
-        unimplemented!()
-    }
-}
-
-impl std::fmt::Display for Var {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} [{}, {}]", self.val, self.lb(), self.ub())
-    }
-}
-
 pub struct Solver {
     vars: Vec<Var>,
+    updates: Vec<Updates>,
     tableau: BTreeMap<usize, Lin>,
     listeners: HashMap<usize, Vec<Callback>>,
 }
@@ -78,6 +25,7 @@ impl Solver {
     pub fn new() -> Self {
         Self {
             vars: Vec::new(),
+            updates: Vec::new(),
             tableau: BTreeMap::new(),
             listeners: HashMap::new(),
         }
@@ -87,6 +35,15 @@ impl Solver {
         let var_id = self.vars.len();
         self.vars.push(Var::new());
         var_id
+    }
+
+    pub fn new_update(&mut self) -> usize {
+        let update_id = self.updates.len();
+        self.updates.push(Updates {
+            lbs: HashMap::new(),
+            ubs: HashMap::new(),
+        });
+        update_id
     }
 
     pub fn value(&self, v: usize) -> InfRational {
@@ -131,7 +88,7 @@ impl Solver {
         ub
     }
 
-    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, _strict: bool, _reason: Option<usize>) {
+    pub fn new_lt(&mut self, lhs: &Lin, rhs: &Lin, strict: bool, reason: Option<usize>) {
         let mut expr = lhs - rhs;
         // Remove basic variables from the expression and substitute with their tableau expressions
         for v in expr.vars().keys().cloned().collect::<Vec<usize>>() {
@@ -143,14 +100,14 @@ impl Solver {
         unimplemented!()
     }
 
-    fn set_lb(&mut self, v: usize, lb: InfRational, _reason: Option<usize>) {
+    fn set_lb(&mut self, v: usize, lb: InfRational, reason: Option<usize>) {
         if lb > self.vars[v].ub() {
             panic!("Infeasible lower bound");
         }
         unimplemented!()
     }
 
-    fn set_ub(&mut self, v: usize, ub: InfRational, _reason: Option<usize>) {
+    fn set_ub(&mut self, v: usize, ub: InfRational, reason: Option<usize>) {
         if ub < self.vars[v].lb() {
             panic!("Infeasible upper bound");
         }

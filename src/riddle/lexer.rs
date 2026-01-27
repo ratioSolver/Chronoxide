@@ -47,7 +47,7 @@ pub enum Token {
     EOF,
 }
 
-pub struct Lexer<'a> {
+pub(super) struct Lexer<'a> {
     input: Peekable<Chars<'a>>,
 }
 

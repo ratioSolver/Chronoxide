@@ -46,7 +46,7 @@ pub enum Statement {
     },
 }
 
-pub struct Parser<'a> {
+pub(super) struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
 }
 
