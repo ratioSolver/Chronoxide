@@ -57,8 +57,12 @@ impl Solver {
         }
 
         let clause_id = self.clauses.len();
-        for &lit in &lits[..2] {
-            self.watch_lit(lit, clause_id);
+        for lit in &lits[..2] {
+            if lit.is_positive() {
+                self.vars[lit.var()].pos_clauses.push(clause_id);
+            } else {
+                self.vars[lit.var()].neg_clauses.push(clause_id);
+            }
         }
         self.clauses.push(lits.to_vec());
         true
@@ -68,6 +72,7 @@ impl Solver {
         self.enqueue(lit, None);
         while let Some(var) = self.prop_q.pop_front() {
             self.vars[lit.var()].current_level_vars.push(var);
+            self.vars[var].decision_var = Some(lit.var());
             let clauses = if self.value(var) == &LBool::True { std::mem::take(&mut self.vars[var].neg_clauses) } else { std::mem::take(&mut self.vars[var].pos_clauses) };
             for clause_id in clauses {
                 if !self.propagate(clause_id, var) {
@@ -80,7 +85,12 @@ impl Solver {
         true
     }
 
-    fn watch_lit(&mut self, lit: Lit, clause_id: usize) {
+    pub fn retract(&mut self, var: usize) {
+        assert!(var < self.vars.len(), "Variable index out of bounds");
+        assert!(self.value(var) != &LBool::Undef, "Variable is already unassigned");
+    }
+
+    fn watch_lit(&mut self, lit: &Lit, clause_id: usize) {
         if lit.is_positive() {
             self.vars[lit.var()].pos_clauses.push(clause_id);
         } else {
@@ -96,7 +106,11 @@ impl Solver {
 
         // Check if clause is already satisfied
         if self.lit_value(&self.clauses[clause_id][0]) == LBool::True {
-            self.watch_lit(self.clauses[clause_id][1], clause_id);
+            if self.clauses[clause_id][1].is_positive() {
+                self.vars[self.clauses[clause_id][1].var()].pos_clauses.push(clause_id);
+            } else {
+                self.vars[self.clauses[clause_id][1].var()].neg_clauses.push(clause_id);
+            }
             return true;
         }
 
@@ -106,7 +120,11 @@ impl Solver {
                 // Move this literal to the second position
                 self.clauses[clause_id].swap(1, i);
                 // Update watchers
-                self.watch_lit(self.clauses[clause_id][1], clause_id);
+                if self.clauses[clause_id][1].is_positive() {
+                    self.vars[self.clauses[clause_id][1].var()].pos_clauses.push(clause_id);
+                } else {
+                    self.vars[self.clauses[clause_id][1].var()].neg_clauses.push(clause_id);
+                }
                 return true;
             }
         }
