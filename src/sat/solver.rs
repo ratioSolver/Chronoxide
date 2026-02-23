@@ -74,7 +74,7 @@ impl Solver {
             };
             for clause_id in clauses {
                 if !self.propagate(clause_id, var) {
-                    self.analyze_conflict(clause_id, &current_level_vars);
+                    self.analyze_conflict(clause_id, current_level_vars);
                     return false;
                 }
             }
@@ -140,7 +140,7 @@ impl Solver {
         }
     }
 
-    fn analyze_conflict(&self, _clause_id: usize, _current_level_vars: &Vec<usize>) {}
+    fn analyze_conflict(&self, clause_id: usize, mut current_level_vars: Vec<usize>) {}
 
     fn notify(&self, var: usize) {
         if let Some(listeners) = self.listeners.get(&var) {
