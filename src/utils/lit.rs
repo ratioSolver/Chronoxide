@@ -5,6 +5,12 @@ pub enum LBool {
     Undef,
 }
 
+impl Default for LBool {
+    fn default() -> Self {
+        LBool::Undef
+    }
+}
+
 impl std::fmt::Display for LBool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {

@@ -2,22 +2,12 @@ use crate::{Lit, utils::lit::LBool};
 use std::collections::{HashMap, VecDeque};
 type Callback = Box<dyn Fn(&Solver, usize)>;
 
+#[derive(Default)]
 struct Var {
     value: LBool,            // current value
     reason: Option<usize>,   // clause that implied the value
     pos_clauses: Vec<usize>, // clauses where the variable appears positively
     neg_clauses: Vec<usize>, // clauses where the variable appears negatively
-}
-
-impl Var {
-    fn new() -> Self {
-        Var {
-            value: LBool::Undef,
-            reason: None,
-            pos_clauses: Vec::new(),
-            neg_clauses: Vec::new(),
-        }
-    }
 }
 
 #[derive(Default)]
@@ -35,19 +25,19 @@ impl Solver {
 
     pub fn add_var(&mut self) -> usize {
         let var_id = self.vars.len();
-        self.vars.push(Var::new());
+        self.vars.push(Var::default());
         var_id
     }
 
-    pub fn value(&self, var: usize) -> LBool {
-        self.vars[var].value.clone()
+    pub fn value(&self, var: usize) -> &LBool {
+        &self.vars[var].value
     }
 
     pub fn lit_value(&self, lit: &Lit) -> LBool {
         match self.value(lit.var()) {
             LBool::Undef => LBool::Undef,
             val => {
-                if (val == LBool::True) == lit.is_positive() {
+                if (val == &LBool::True) == lit.is_positive() {
                     LBool::True
                 } else {
                     LBool::False
@@ -77,7 +67,7 @@ impl Solver {
         self.enqueue(lit, None);
         while let Some((var, reason)) = self.prop_q.pop_front() {
             current_level_vars.push(var); // Track order!
-            let clauses = if self.value(var) == LBool::True {
+            let clauses = if self.value(var) == &LBool::True {
                 std::mem::take(&mut self.vars[var].neg_clauses)
             } else {
                 std::mem::take(&mut self.vars[var].pos_clauses)
@@ -128,7 +118,7 @@ impl Solver {
         }
 
         // If we reach here, all other literals are false, so we must propagate the first literal
-        if self.value(var) == LBool::True {
+        if self.value(var) == &LBool::True {
             self.vars[var].pos_clauses.push(clause_id);
         } else {
             self.vars[var].neg_clauses.push(clause_id);
@@ -150,7 +140,7 @@ impl Solver {
                 true
             }
             val => {
-                val == if lit.is_positive() {
+                *val == if lit.is_positive() {
                     LBool::True
                 } else {
                     LBool::False
@@ -205,7 +195,7 @@ mod tests {
         let v1 = solver.add_var();
         assert_eq!(v0, 0);
         assert_eq!(v1, 1);
-        assert_eq!(solver.value(v0), LBool::Undef);
+        assert_eq!(solver.value(v0), &LBool::Undef);
     }
 
     #[test]
@@ -222,9 +212,9 @@ mod tests {
         assert!(ret, "Solver should be consistent");
 
         // v0 should be False
-        assert_eq!(solver.value(v0), LBool::False);
+        assert_eq!(solver.value(v0), &LBool::False);
         // v1 should be implied True
-        assert_eq!(solver.value(v1), LBool::True);
+        assert_eq!(solver.value(v1), &LBool::True);
     }
 
     #[test]
@@ -242,9 +232,9 @@ mod tests {
         // Assert v0
         solver.assert(Lit::new(v0, true));
 
-        assert_eq!(solver.value(v0), LBool::True);
-        assert_eq!(solver.value(v1), LBool::True);
-        assert_eq!(solver.value(v2), LBool::True);
+        assert_eq!(solver.value(v0), &LBool::True);
+        assert_eq!(solver.value(v1), &LBool::True);
+        assert_eq!(solver.value(v2), &LBool::True);
     }
 
     #[test]
@@ -295,7 +285,7 @@ mod tests {
 
         // Assign !v3. No more watchers available. Should propagate v0.
         solver.assert(Lit::new(v3, false));
-        assert_eq!(solver.value(v0), LBool::True);
+        assert_eq!(solver.value(v0), &LBool::True);
     }
 
     #[test]
