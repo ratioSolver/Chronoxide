@@ -14,7 +14,7 @@ struct Var {
 pub struct Solver {
     vars: Vec<Var>,
     clauses: Vec<Vec<Lit>>,
-    prop_q: VecDeque<(usize, Option<usize>)>, // (var, reason clause)
+    prop_q: VecDeque<usize>,
     listeners: HashMap<usize, Vec<Callback>>,
 }
 
@@ -65,7 +65,7 @@ impl Solver {
     pub fn assert(&mut self, lit: Lit) -> bool {
         let mut current_level_vars = Vec::new();
         self.enqueue(lit, None);
-        while let Some((var, reason)) = self.prop_q.pop_front() {
+        while let Some(var) = self.prop_q.pop_front() {
             current_level_vars.push(var); // Track order!
             let clauses = if self.value(var) == &LBool::True {
                 std::mem::take(&mut self.vars[var].neg_clauses)
@@ -73,10 +73,6 @@ impl Solver {
                 std::mem::take(&mut self.vars[var].pos_clauses)
             };
             for clause_id in clauses {
-                assert!(
-                    reason != Some(clause_id),
-                    "A clause cannot be the reason for its own propagation"
-                );
                 if !self.propagate(clause_id, var) {
                     self.analyze_conflict(clause_id, &current_level_vars);
                     return false;
@@ -135,7 +131,7 @@ impl Solver {
                     LBool::False
                 };
                 self.vars[lit.var()].reason = reason;
-                self.prop_q.push_back((lit.var(), reason));
+                self.prop_q.push_back(lit.var());
                 self.notify(lit.var());
                 true
             }
