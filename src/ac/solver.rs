@@ -9,10 +9,7 @@ struct Var {
 
 impl Var {
     pub fn new(domain: HashSet<usize>) -> Self {
-        Self {
-            init_domain: domain.clone(),
-            domain,
-        }
+        Self { init_domain: domain.clone(), domain }
     }
 }
 
@@ -29,10 +26,7 @@ impl Default for Solver {
 
 impl Solver {
     pub fn new() -> Self {
-        Self {
-            vars: Vec::new(),
-            listeners: HashMap::new(),
-        }
+        Self { vars: Vec::new(), listeners: HashMap::new() }
     }
 
     pub fn add_var<I>(&mut self, domain: I) -> usize
@@ -61,10 +55,7 @@ impl Solver {
     where
         F: Fn(&Solver, usize) + 'static,
     {
-        self.listeners
-            .entry(var)
-            .or_default()
-            .push(Box::new(listener));
+        self.listeners.entry(var).or_default().push(Box::new(listener));
     }
 }
 

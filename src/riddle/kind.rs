@@ -30,10 +30,7 @@ impl Kind for BoolKind {
     }
 
     fn new_instance(&mut self) -> Rc<dyn Item> {
-        self.core
-            .upgrade()
-            .expect("Core has been dropped")
-            .new_bool()
+        self.core.upgrade().expect("Core has been dropped").new_bool()
     }
 }
 
@@ -67,11 +64,7 @@ impl Kind for ComponentKind {
     }
 
     fn new_instance(&mut self) -> Rc<dyn Item> {
-        let instance = Rc::new(Component::new(
-            self.core.clone(),
-            self.weak_self.clone(),
-            std::collections::HashMap::new(),
-        ));
+        let instance = Rc::new(Component::new(self.core.clone(), self.weak_self.clone(), std::collections::HashMap::new()));
         self.instances.push(instance.clone());
         instance
     }
@@ -85,10 +78,7 @@ impl Scope for ComponentKind {
         if let Some(parent) = self.parent.upgrade() {
             return parent.field(key);
         }
-        Err(format!(
-            "Field '{}' not found in component '{}'",
-            key, self.name
-        ))
+        Err(format!("Field '{}' not found in component '{}'", key, self.name))
     }
 
     fn kind(&self, key: &str) -> Result<Rc<dyn Kind>, String> {
@@ -98,9 +88,6 @@ impl Scope for ComponentKind {
         if let Some(parent) = self.parent.upgrade() {
             return parent.kind(key);
         }
-        Err(format!(
-            "Kind '{}' not found in component '{}'",
-            key, self.name
-        ))
+        Err(format!("Kind '{}' not found in component '{}'", key, self.name))
     }
 }

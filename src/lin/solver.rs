@@ -23,12 +23,7 @@ impl Default for Solver {
 
 impl Solver {
     pub fn new() -> Self {
-        Self {
-            vars: Vec::new(),
-            updates: Vec::new(),
-            tableau: BTreeMap::new(),
-            listeners: HashMap::new(),
-        }
+        Self { vars: Vec::new(), updates: Vec::new(), tableau: BTreeMap::new(), listeners: HashMap::new() }
     }
 
     pub fn new_var(&mut self) -> usize {
@@ -39,10 +34,7 @@ impl Solver {
 
     pub fn new_update(&mut self) -> usize {
         let update_id = self.updates.len();
-        self.updates.push(Updates {
-            lbs: HashMap::new(),
-            ubs: HashMap::new(),
-        });
+        self.updates.push(Updates { lbs: HashMap::new(), ubs: HashMap::new() });
         update_id
     }
 
@@ -126,10 +118,7 @@ impl Solver {
     where
         F: Fn(&Solver, usize) + 'static,
     {
-        self.listeners
-            .entry(var)
-            .or_default()
-            .push(Box::new(listener));
+        self.listeners.entry(var).or_default().push(Box::new(listener));
     }
 }
 

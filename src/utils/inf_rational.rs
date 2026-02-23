@@ -29,32 +29,17 @@ impl InfRational {
     ///
     /// The infinitesimal part is set to 0.
     pub fn from_rational(rat: Rational) -> InfRational {
-        InfRational {
-            rat,
-            inf: Rational::ZERO,
-        }
+        InfRational { rat, inf: Rational::ZERO }
     }
 
     /// Creates an `InfRational` from an integer.
     pub fn from_integer(arg: i64) -> InfRational {
-        InfRational {
-            rat: Rational::from_integer(arg),
-            inf: Rational::ZERO,
-        }
+        InfRational { rat: Rational::from_integer(arg), inf: Rational::ZERO }
     }
 
-    pub const POSITIVE_INFINITY: Self = Self {
-        rat: Rational::POSITIVE_INFINITY,
-        inf: Rational::ZERO,
-    };
-    pub const NEGATIVE_INFINITY: Self = Self {
-        rat: Rational::NEGATIVE_INFINITY,
-        inf: Rational::ZERO,
-    };
-    pub const ZERO: Self = Self {
-        rat: Rational::ZERO,
-        inf: Rational::ZERO,
-    };
+    pub const POSITIVE_INFINITY: Self = Self { rat: Rational::POSITIVE_INFINITY, inf: Rational::ZERO };
+    pub const NEGATIVE_INFINITY: Self = Self { rat: Rational::NEGATIVE_INFINITY, inf: Rational::ZERO };
+    pub const ZERO: Self = Self { rat: Rational::ZERO, inf: Rational::ZERO };
 }
 
 impl From<Rational> for InfRational {
@@ -356,10 +341,7 @@ impl Neg for InfRational {
     type Output = InfRational;
 
     fn neg(self) -> InfRational {
-        InfRational {
-            rat: -self.rat,
-            inf: -self.inf,
-        }
+        InfRational { rat: -self.rat, inf: -self.inf }
     }
 }
 
@@ -447,29 +429,17 @@ mod tests {
         let b = InfRational::new(Rational::from_integer(3), Rational::from_integer(4)); // 3 + 4ε
 
         // Add
-        assert_eq!(
-            a + &b,
-            InfRational::new(Rational::from_integer(4), Rational::from_integer(6))
-        );
+        assert_eq!(a + &b, InfRational::new(Rational::from_integer(4), Rational::from_integer(6)));
 
         // Sub
-        assert_eq!(
-            b - &a,
-            InfRational::new(Rational::from_integer(2), Rational::from_integer(2))
-        );
+        assert_eq!(b - &a, InfRational::new(Rational::from_integer(2), Rational::from_integer(2)));
 
         // Mul by scalar
         let scalar = Rational::from_integer(2);
-        assert_eq!(
-            a * &scalar,
-            InfRational::new(Rational::from_integer(2), Rational::from_integer(4))
-        );
+        assert_eq!(a * &scalar, InfRational::new(Rational::from_integer(2), Rational::from_integer(4)));
 
         // Div by scalar
-        assert_eq!(
-            a / &scalar,
-            InfRational::new(Rational::new(1, 2), Rational::from_integer(1))
-        );
+        assert_eq!(a / &scalar, InfRational::new(Rational::new(1, 2), Rational::from_integer(1)));
     }
 
     #[test]

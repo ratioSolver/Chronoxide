@@ -72,8 +72,7 @@ impl Var {
             }
             None => {
                 // we remove all the lower bounds that are less than `lb`..
-                let to_remove: Vec<InfRational> =
-                    self.lbs.keys().cloned().take_while(|&b| b < lb).collect();
+                let to_remove: Vec<InfRational> = self.lbs.keys().cloned().take_while(|&b| b < lb).collect();
                 for b in to_remove {
                     self.lbs.remove(&b);
                 }
@@ -118,13 +117,7 @@ impl Var {
             }
             None => {
                 // we remove all the upper bounds that are greater than `ub`..
-                let to_remove: Vec<InfRational> = self
-                    .ubs
-                    .keys()
-                    .cloned()
-                    .rev()
-                    .take_while(|&b| b > ub)
-                    .collect();
+                let to_remove: Vec<InfRational> = self.ubs.keys().cloned().rev().take_while(|&b| b > ub).collect();
                 for b in to_remove {
                     self.ubs.remove(&b);
                 }

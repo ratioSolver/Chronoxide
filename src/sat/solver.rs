@@ -4,10 +4,12 @@ type Callback = Box<dyn Fn(&Solver, usize)>;
 
 #[derive(Default)]
 struct Var {
-    value: LBool,            // current value
-    reason: Option<usize>,   // clause that implied the value
-    pos_clauses: Vec<usize>, // clauses where the variable appears positively
-    neg_clauses: Vec<usize>, // clauses where the variable appears negatively
+    value: LBool,                   // current value
+    current_level_vars: Vec<usize>, // variables assigned at the current decision level
+    decision_var: Option<usize>,    // decision variable that led to this assignment
+    reason: Option<usize>,          // clause that implied the value
+    pos_clauses: Vec<usize>,        // clauses where the variable appears positively
+    neg_clauses: Vec<usize>,        // clauses where the variable appears negatively
 }
 
 #[derive(Default)]
@@ -63,17 +65,13 @@ impl Solver {
     }
 
     pub fn assert(&mut self, lit: Lit) -> bool {
-        let mut current_level_vars = Vec::new();
         self.enqueue(lit, None);
         while let Some(var) = self.prop_q.pop_front() {
-            current_level_vars.push(var); // Track order!
-            let clauses = if self.value(var) == &LBool::True {
-                std::mem::take(&mut self.vars[var].neg_clauses)
-            } else {
-                std::mem::take(&mut self.vars[var].pos_clauses)
-            };
+            self.vars[lit.var()].current_level_vars.push(var);
+            let clauses = if self.value(var) == &LBool::True { std::mem::take(&mut self.vars[var].neg_clauses) } else { std::mem::take(&mut self.vars[var].pos_clauses) };
             for clause_id in clauses {
                 if !self.propagate(clause_id, var) {
+                    let current_level_vars = std::mem::take(&mut self.vars[lit.var()].current_level_vars);
                     self.analyze_conflict(clause_id, current_level_vars);
                     return false;
                 }
@@ -125,11 +123,7 @@ impl Solver {
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
         match self.value(lit.var()) {
             LBool::Undef => {
-                self.vars[lit.var()].value = if lit.is_positive() {
-                    LBool::True
-                } else {
-                    LBool::False
-                };
+                self.vars[lit.var()].value = if lit.is_positive() { LBool::True } else { LBool::False };
                 self.vars[lit.var()].reason = reason;
                 self.prop_q.push_back(lit.var());
                 self.notify(lit.var());
@@ -154,10 +148,7 @@ impl Solver {
     where
         F: Fn(&Solver, usize) + 'static,
     {
-        self.listeners
-            .entry(var)
-            .or_default()
-            .push(Box::new(listener));
+        self.listeners.entry(var).or_default().push(Box::new(listener));
     }
 }
 
@@ -247,12 +238,7 @@ mod tests {
         let v3 = solver.add_var();
 
         // Clause: v0 or v1 or v2 or v3
-        solver.add_clause(&[
-            Lit::new(v0, true),
-            Lit::new(v1, true),
-            Lit::new(v2, true),
-            Lit::new(v3, true),
-        ]);
+        solver.add_clause(&[Lit::new(v0, true), Lit::new(v1, true), Lit::new(v2, true), Lit::new(v3, true)]);
 
         // Initially, watchers are the first two literals: v0 and v1
         assert!(solver.vars[v0].pos_clauses.contains(&0));

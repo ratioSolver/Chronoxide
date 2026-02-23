@@ -41,16 +41,10 @@ impl Core for Solver {
 
 impl Scope for Solver {
     fn field(&self, key: &str) -> Result<Rc<Field>, String> {
-        self.fields
-            .get(key)
-            .cloned()
-            .ok_or_else(|| format!("Field '{}' not found", key))
+        self.fields.get(key).cloned().ok_or_else(|| format!("Field '{}' not found", key))
     }
 
     fn kind(&self, key: &str) -> Result<Rc<dyn Kind>, String> {
-        self.kinds
-            .get(key)
-            .cloned()
-            .ok_or_else(|| format!("Kind '{}' not found", key))
+        self.kinds.get(key).cloned().ok_or_else(|| format!("Kind '{}' not found", key))
     }
 }

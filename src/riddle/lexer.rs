@@ -53,9 +53,7 @@ pub(super) struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Lexer {
-            input: input.chars().peekable(),
-        }
+        Lexer { input: input.chars().peekable() }
     }
 
     pub fn next_token(&mut self) -> Token {
@@ -261,11 +259,7 @@ impl Iterator for Lexer<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let token = self.next_token();
-        if token == Token::EOF {
-            None
-        } else {
-            Some(token)
-        }
+        if token == Token::EOF { None } else { Some(token) }
     }
 }
 
@@ -308,12 +302,7 @@ mod tests {
     fn test_lexer_identifiers_and_numbers() {
         let input = "var1 var_2 123 45.67";
         let mut lexer = Lexer::new(input);
-        let expected_tokens = vec![
-            Token::Identifier("var1".to_string()),
-            Token::Identifier("var_2".to_string()),
-            Token::IntLiteral(123),
-            Token::RealLiteral(4567, 100),
-        ];
+        let expected_tokens = vec![Token::Identifier("var1".to_string()), Token::Identifier("var_2".to_string()), Token::IntLiteral(123), Token::RealLiteral(4567, 100)];
         for expected in expected_tokens {
             let token = lexer.next_token();
             assert_eq!(token, expected);
@@ -324,22 +313,7 @@ mod tests {
     fn test_lexer_keywords() {
         let input = "int real string class predicate enum new for this void return fact goal or";
         let mut lexer = Lexer::new(input);
-        let expected_tokens = vec![
-            Token::Integer,
-            Token::Real,
-            Token::String,
-            Token::Class,
-            Token::Predicate,
-            Token::Enum,
-            Token::New,
-            Token::For,
-            Token::This,
-            Token::Void,
-            Token::Return,
-            Token::Fact,
-            Token::Goal,
-            Token::Or,
-        ];
+        let expected_tokens = vec![Token::Integer, Token::Real, Token::String, Token::Class, Token::Predicate, Token::Enum, Token::New, Token::For, Token::This, Token::Void, Token::Return, Token::Fact, Token::Goal, Token::Or];
         for expected in expected_tokens {
             let token = lexer.next_token();
             assert_eq!(token, expected);
@@ -350,18 +324,7 @@ mod tests {
     fn test_lexer_riddle() {
         let input = "class Person { int age; string name; }";
         let mut lexer = Lexer::new(input);
-        let expected_tokens = vec![
-            Token::Class,
-            Token::Identifier("Person".to_string()),
-            Token::LBrace,
-            Token::Integer,
-            Token::Identifier("age".to_string()),
-            Token::Semicolon,
-            Token::String,
-            Token::Identifier("name".to_string()),
-            Token::Semicolon,
-            Token::RBrace,
-        ];
+        let expected_tokens = vec![Token::Class, Token::Identifier("Person".to_string()), Token::LBrace, Token::Integer, Token::Identifier("age".to_string()), Token::Semicolon, Token::String, Token::Identifier("name".to_string()), Token::Semicolon, Token::RBrace];
         for expected in expected_tokens {
             let token = lexer.next_token();
             assert_eq!(token, expected);

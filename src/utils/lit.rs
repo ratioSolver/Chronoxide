@@ -55,10 +55,7 @@ impl std::ops::Not for Lit {
     type Output = Lit;
 
     fn not(self) -> Lit {
-        Lit {
-            x: self.x,
-            sign: !self.sign,
-        }
+        Lit { x: self.x, sign: !self.sign }
     }
 }
 

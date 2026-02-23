@@ -8,16 +8,11 @@ pub struct Field {
 
 impl Field {
     pub fn new(component_type: Weak<dyn Kind>, name: &str) -> Self {
-        Self {
-            component_type,
-            name: name.to_string(),
-        }
+        Self { component_type, name: name.to_string() }
     }
 
     pub fn component_type(&self) -> Rc<dyn Kind> {
-        self.component_type
-            .upgrade()
-            .expect("Component type has been dropped")
+        self.component_type.upgrade().expect("Component type has been dropped")
     }
 
     pub fn name(&self) -> &str {

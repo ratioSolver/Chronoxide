@@ -37,24 +37,14 @@ pub struct Component {
 }
 
 impl Component {
-    pub fn new(
-        core: Weak<dyn Core>,
-        component_type: Weak<dyn Kind>,
-        items: HashMap<String, Rc<dyn Item>>,
-    ) -> Self {
-        Self {
-            core,
-            component_type,
-            items,
-        }
+    pub fn new(core: Weak<dyn Core>, component_type: Weak<dyn Kind>, items: HashMap<String, Rc<dyn Item>>) -> Self {
+        Self { core, component_type, items }
     }
 }
 
 impl Item for Component {
     fn kind(&self) -> Rc<dyn Kind> {
-        self.component_type
-            .upgrade()
-            .expect("Type has been dropped")
+        self.component_type.upgrade().expect("Type has been dropped")
     }
 
     fn as_env(&self) -> Option<&dyn Env> {
@@ -64,9 +54,6 @@ impl Item for Component {
 
 impl Env for Component {
     fn get(&self, key: &str) -> Result<&dyn Item, String> {
-        self.items
-            .get(key)
-            .map(|item| item.as_ref())
-            .ok_or_else(|| format!("Item '{}' not found in component", key))
+        self.items.get(key).map(|item| item.as_ref()).ok_or_else(|| format!("Item '{}' not found in component", key))
     }
 }

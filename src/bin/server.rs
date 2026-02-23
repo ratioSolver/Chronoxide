@@ -21,14 +21,7 @@ async fn main() {
     let (tx, _rx) = tokio::sync::broadcast::channel(100);
     let app_state = Arc::new(AppState { tx });
 
-    let app = Router::new()
-        .route("/ws", get(ws_handler))
-        .with_state(app_state)
-        .nest_service("/assets", ServeDir::new("gui/app/dist/assets"))
-        .fallback_service(
-            ServeDir::new("gui/app/dist")
-                .not_found_service(ServeFile::new("gui/app/dist/index.html")),
-        );
+    let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
