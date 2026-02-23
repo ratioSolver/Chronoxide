@@ -135,13 +135,8 @@ impl Solver {
                 self.notify(lit.var());
                 true
             }
-            val => {
-                *val == if lit.is_positive() {
-                    LBool::True
-                } else {
-                    LBool::False
-                }
-            }
+            LBool::True => lit.is_positive(),
+            LBool::False => !lit.is_positive(),
         }
     }
 
