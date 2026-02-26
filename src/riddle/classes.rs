@@ -13,6 +13,12 @@ pub trait Class {
     fn new_instance(&mut self) -> Rc<dyn Object>;
 }
 
+pub struct Field {
+    component_type: Weak<dyn Class>,
+    name: String,
+    expr: Option<Expr>,
+}
+
 pub struct Bool {
     solver: Weak<Solver>,
 }
@@ -38,8 +44,27 @@ impl Class for Bool {
     }
 }
 
-pub struct Field {
-    component_type: Weak<dyn Class>,
-    name: String,
-    expr: Option<Expr>,
+pub struct Int {
+    solver: Weak<Solver>,
+}
+
+impl Int {
+    pub fn new(solver: Weak<Solver>) -> Self {
+        Self { solver }
+    }
+}
+
+impl Class for Int {
+    fn name(&self) -> &str {
+        "int"
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+
+    fn new_instance(&mut self) -> Rc<dyn Object> {
+        let solver = self.solver.upgrade().expect("Solver has been dropped");
+        solver.new_int()
+    }
 }

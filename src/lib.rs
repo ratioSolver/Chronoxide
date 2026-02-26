@@ -1,8 +1,9 @@
 use consensus::LBool;
+use linspire::inf_rational::InfRational;
 
 use crate::riddle::{
-    classes::{Bool, Class, Field},
-    objects::BoolObject,
+    classes::{Bool, Class, Field, Int},
+    objects::{BoolObject, IntObject},
 };
 use std::{
     cell::RefCell,
@@ -15,8 +16,8 @@ mod riddle;
 pub struct Solver {
     weak_self: Weak<Self>,
     sat: RefCell<consensus::Engine>,
-    ac: dynamic_ac::Engine,
-    lin: linspire::Engine,
+    ac: RefCell<dynamic_ac::Engine>,
+    lin: RefCell<linspire::Engine>,
     fields: HashMap<String, Rc<Field>>,
     classes: RefCell<HashMap<String, Rc<dyn Class>>>,
 }
@@ -26,18 +27,13 @@ impl Solver {
         let slv = Rc::new_cyclic(|weak_self| Solver {
             weak_self: weak_self.clone(),
             sat: RefCell::new(consensus::Engine::new()),
-            ac: dynamic_ac::Engine::new(),
-            lin: linspire::Engine::new(),
+            ac: RefCell::new(dynamic_ac::Engine::new()),
+            lin: RefCell::new(linspire::Engine::new()),
             fields: HashMap::new(),
             classes: RefCell::new(HashMap::new()),
         });
-        let bool_class = Rc::new(Bool::new(Rc::downgrade(&slv)));
-        slv.add_class(bool_class);
+        slv.add_class(Rc::new(Bool::new(slv.weak_self.clone())));
         slv
-    }
-
-    pub fn add_class(&self, class: Rc<dyn Class>) {
-        self.classes.borrow_mut().insert(class.name().to_string(), class);
     }
 
     pub fn new_bool(&self) -> Rc<BoolObject> {
@@ -50,5 +46,21 @@ impl Solver {
 
     pub fn bool_val(&self, obj: &BoolObject) -> LBool {
         self.sat.borrow().value(obj.var).clone()
+    }
+
+    pub fn new_int(&self) -> Rc<IntObject> {
+        let var = self.lin.borrow_mut().add_var();
+        let classes = self.classes.borrow();
+        let int_class = classes.get("int").expect("Int class not found").clone();
+        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+        Rc::new(IntObject::new(Rc::downgrade(&int_class), var))
+    }
+
+    pub fn int_val(&self, obj: &IntObject) -> InfRational {
+        self.lin.borrow().val(obj.var).clone()
+    }
+
+    pub fn add_class(&self, class: Rc<dyn Class>) {
+        self.classes.borrow_mut().insert(class.name().to_string(), class);
     }
 }
