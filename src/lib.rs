@@ -16,6 +16,10 @@ use std::{
 
 mod riddle;
 
+pub enum RiddleError {
+    TypeError(String),
+}
+
 pub struct Solver {
     weak_self: Weak<Self>,
     sat: RefCell<consensus::Engine>,
@@ -77,73 +81,75 @@ impl Solver {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn new_sum(&self, terms: Vec<Rc<dyn Object>>) -> Rc<dyn Object> {
-        let classes = self.classes.borrow();
-        if terms.iter().all(|t| t.class().name() == "int") {
-            let int_class = classes.get("int").expect("Int class not found").clone();
-            let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object")).fold(c(0), |acc, lin| acc + &lin.lin);
-            Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
-        } else if terms.iter().all(|t| t.class().name() == "real") {
-            let real_class = classes.get("real").expect("Real class not found").clone();
-            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object")).fold(c(0), |acc, lin| acc + &lin.lin);
-            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
-        } else if terms.iter().all(|t| t.class().name() == "int" || t.class().name() == "real") {
-            let real_class = classes.get("real").expect("Real class not found").clone();
-            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-            let lin = terms
-                .iter()
-                .map(|t| {
-                    if t.class().name() == "int" {
-                        let int_obj = t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object");
-                        return int_obj.lin.clone();
-                    } else if t.class().name() == "real" {
-                        let real_obj = t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object");
-                        return real_obj.lin.clone();
-                    } else {
-                        panic!("Invalid term type in sum")
-                    }
-                })
-                .fold(c(0), |acc, lin| acc + lin);
-            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
-        } else {
-            panic!("Invalid term types in sum")
-        }
+    pub fn new_sum(&self, terms: Vec<Rc<dyn Object>>) -> Result<Rc<dyn Object>, RiddleError> {
+        let class = self.arith_class(&terms)?;
+        let lin = terms
+            .iter()
+            .map(|t| {
+                if t.class().name() == "int" {
+                    t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object").lin.clone()
+                } else if t.class().name() == "real" {
+                    t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object").lin.clone()
+                } else {
+                    panic!("Invalid term type in sum")
+                }
+            })
+            .fold(c(0), |acc, lin| acc + lin);
+        Ok(match class.name() {
+            "int" => {
+                let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+                Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+            }
+            "real" => {
+                let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+                Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+            }
+            _ => unreachable!(),
+        })
     }
 
-    pub fn new_sub(&self, terms: Vec<Rc<dyn Object>>) -> Rc<dyn Object> {
+    pub fn new_sub(&self, terms: Vec<Rc<dyn Object>>) -> Result<Rc<dyn Object>, RiddleError> {
+        let class = self.arith_class(&terms)?;
+        let lin: Vec<_> = terms
+            .iter()
+            .map(|t| {
+                if t.class().name() == "int" {
+                    t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object").lin.clone()
+                } else if t.class().name() == "real" {
+                    t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object").lin.clone()
+                } else {
+                    panic!("Invalid term type in subtraction")
+                }
+            })
+            .collect();
+        let (first, rest) = lin.split_first().expect("At least one term is required for subtraction");
+        let lin = rest.iter().fold(first.clone(), |acc, lin| acc - lin);
+        Ok(match class.name() {
+            "int" => {
+                let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+                Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+            }
+            "real" => {
+                let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+                Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+            }
+            _ => unreachable!(),
+        })
+    }
+
+    fn arith_class(&self, terms: &Vec<Rc<dyn Object>>) -> Result<Rc<dyn Class>, RiddleError> {
         let classes = self.classes.borrow();
         if terms.iter().all(|t| t.class().name() == "int") {
             let int_class = classes.get("int").expect("Int class not found").clone();
-            let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object")).fold(c(0), |acc, lin| acc - &lin.lin);
-            Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+            Ok(int_class)
         } else if terms.iter().all(|t| t.class().name() == "real") {
             let real_class = classes.get("real").expect("Real class not found").clone();
-            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object")).fold(c(0), |acc, lin| acc - &lin.lin);
-            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+            Ok(real_class)
         } else if terms.iter().all(|t| t.class().name() == "int" || t.class().name() == "real") {
             let real_class = classes.get("real").expect("Real class not found").clone();
-            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-            let lin = terms
-                .iter()
-                .map(|t| {
-                    if t.class().name() == "int" {
-                        let int_obj = t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object");
-                        return int_obj.lin.clone();
-                    } else if t.class().name() == "real" {
-                        let real_obj = t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object");
-                        return real_obj.lin.clone();
-                    } else {
-                        panic!("Invalid term type in sub")
-                    }
-                })
-                .fold(c(0), |acc, lin| acc - lin);
-            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+            Ok(real_class)
         } else {
-            panic!("Invalid term types in sub")
+            Err(RiddleError::TypeError("Invalid term types in arithmetic operation".to_string()))
         }
     }
 
