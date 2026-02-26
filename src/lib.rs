@@ -1,18 +1,29 @@
-pub mod utils;
-pub use utils::inf_rational::InfRational;
-pub use utils::lin::Lin;
-pub use utils::lit::Lit;
-pub use utils::rational::Rational;
+use crate::riddle::classes::{Class, Field};
+use std::{
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
-pub mod sat;
-pub use sat::solver::Solver as SatSolver;
+mod riddle;
 
-pub mod ac;
-pub use ac::solver::Solver as AcSolver;
+pub struct Solver {
+    weak_self: Weak<Self>,
+    sat: consensus::Engine,
+    ac: dynamic_ac::Engine,
+    lin: linspire::Engine,
+    fields: HashMap<String, Rc<Field>>,
+    classes: HashMap<String, Rc<dyn Class>>,
+}
 
-pub mod lin;
-pub use lin::solver::Solver as LinSolver;
-
-pub mod riddle;
-
-pub mod solver;
+impl Solver {
+    pub fn new() -> Rc<Self> {
+        Rc::new_cyclic(|weak_self| Solver {
+            weak_self: weak_self.clone(),
+            sat: consensus::Engine::new(),
+            ac: dynamic_ac::Engine::new(),
+            lin: linspire::Engine::new(),
+            fields: HashMap::new(),
+            classes: HashMap::new(),
+        })
+    }
+}

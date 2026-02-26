@@ -9,6 +9,9 @@ repository = "https://github.com/ratioSolver/Chronoxide"
 license-file = "LICENSE.txt"
 
 [dependencies]
+dynamic-ac = { git = "https://github.com/ratioSolver/dynamic-ac" }
+consensus = { git = "https://github.com/ratioSolver/Consensus" }
+linspire = { git = "https://github.com/ratioSolver/LinSpire" }
 axum = { version = "0.8.8", features = ["ws"] }
-tower-http = { version = "0.5", features = ["fs"] }
+tower-http = { version = "0.6.8", features = ["fs"] }
 tokio = { version = "1.0", features = ["full"] }

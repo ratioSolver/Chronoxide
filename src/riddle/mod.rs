@@ -1,6 +1,4 @@
-pub mod core;
-pub mod env;
-pub mod kind;
+pub mod classes;
 pub mod lexer;
+pub mod objects;
 pub mod parser;
-pub mod scope;
