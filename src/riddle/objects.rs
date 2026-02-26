@@ -1,3 +1,6 @@
+use consensus::Lit;
+use linspire::lin::Lin;
+
 use crate::riddle::classes::{Bool, Class, Int};
 use std::rc::{Rc, Weak};
 
@@ -7,12 +10,12 @@ pub trait Object {
 
 pub struct BoolObject {
     class: Weak<Bool>,
-    pub(crate) var: usize,
+    pub(crate) lit: Lit,
 }
 
 impl BoolObject {
-    pub fn new(class: Weak<Bool>, var: usize) -> Self {
-        Self { class, var }
+    pub fn new(class: Weak<Bool>, lit: Lit) -> Self {
+        Self { class, lit }
     }
 }
 
@@ -24,12 +27,12 @@ impl Object for BoolObject {
 
 pub struct IntObject {
     class: Weak<Int>,
-    pub(crate) var: usize,
+    pub(crate) lin: Lin,
 }
 
 impl IntObject {
-    pub fn new(class: Weak<Int>, var: usize) -> Self {
-        Self { class, var }
+    pub fn new(class: Weak<Int>, lin: Lin) -> Self {
+        Self { class, lin }
     }
 }
 
@@ -41,12 +44,12 @@ impl Object for IntObject {
 
 pub struct RealObject {
     class: Weak<Int>,
-    pub(crate) var: usize,
+    pub(crate) lin: Lin,
 }
 
 impl RealObject {
-    pub fn new(class: Weak<Int>, var: usize) -> Self {
-        Self { class, var }
+    pub fn new(class: Weak<Int>, lin: Lin) -> Self {
+        Self { class, lin }
     }
 }
 

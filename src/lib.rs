@@ -1,5 +1,8 @@
-use consensus::LBool;
-use linspire::inf_rational::InfRational;
+use consensus::{LBool, pos};
+use linspire::{
+    inf_rational::InfRational,
+    lin::{Lin, v},
+};
 
 use crate::riddle::{
     classes::{Bool, Class, Field, Int, Real},
@@ -43,11 +46,11 @@ impl Solver {
         let classes = self.classes.borrow();
         let bool_class = classes.get("bool").expect("Bool class not found").clone();
         let bool_class = bool_class.as_any().downcast::<Bool>().expect("Failed to downcast to Bool class");
-        Rc::new(BoolObject::new(Rc::downgrade(&bool_class), var))
+        Rc::new(BoolObject::new(Rc::downgrade(&bool_class), pos(var)))
     }
 
     pub fn bool_val(&self, obj: &BoolObject) -> LBool {
-        self.sat.borrow().value(obj.var).clone()
+        self.sat.borrow().lit_value(&obj.lit).clone()
     }
 
     pub fn new_int(&self) -> Rc<IntObject> {
@@ -55,11 +58,11 @@ impl Solver {
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(IntObject::new(Rc::downgrade(&int_class), var))
+        Rc::new(IntObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
     pub fn int_val(&self, obj: &IntObject) -> InfRational {
-        self.lin.borrow().val(obj.var).clone()
+        self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
     pub fn new_real(&self) -> Rc<RealObject> {
@@ -67,11 +70,11 @@ impl Solver {
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(RealObject::new(Rc::downgrade(&int_class), var))
+        Rc::new(RealObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
     pub fn real_val(&self, obj: &RealObject) -> InfRational {
-        self.lin.borrow().val(obj.var).clone()
+        self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
     pub fn add_class(&self, class: Rc<dyn Class>) {
