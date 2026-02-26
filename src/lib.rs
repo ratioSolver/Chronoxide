@@ -2,7 +2,7 @@ use consensus::LBool;
 use linspire::inf_rational::InfRational;
 
 use crate::riddle::{
-    classes::{Bool, Class, Field, Int},
+    classes::{Bool, Class, Field, Int, Real},
     objects::{BoolObject, IntObject, RealObject},
 };
 use std::{
@@ -34,6 +34,7 @@ impl Solver {
         });
         slv.add_class(Rc::new(Bool::new(slv.weak_self.clone())));
         slv.add_class(Rc::new(Int::new(slv.weak_self.clone())));
+        slv.add_class(Rc::new(Real::new(slv.weak_self.clone())));
         slv
     }
 
