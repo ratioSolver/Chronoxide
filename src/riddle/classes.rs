@@ -39,8 +39,7 @@ impl Class for Bool {
     }
 
     fn new_instance(&mut self) -> Rc<dyn Object> {
-        let solver = self.solver.upgrade().expect("Solver has been dropped");
-        solver.new_bool()
+        self.solver.upgrade().expect("Solver has been dropped").new_bool()
     }
 }
 
@@ -64,7 +63,30 @@ impl Class for Int {
     }
 
     fn new_instance(&mut self) -> Rc<dyn Object> {
-        let solver = self.solver.upgrade().expect("Solver has been dropped");
-        solver.new_int()
+        self.solver.upgrade().expect("Solver has been dropped").new_int()
+    }
+}
+
+pub struct Real {
+    solver: Weak<Solver>,
+}
+
+impl Real {
+    pub fn new(solver: Weak<Solver>) -> Self {
+        Self { solver }
+    }
+}
+
+impl Class for Real {
+    fn name(&self) -> &str {
+        "real"
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+
+    fn new_instance(&mut self) -> Rc<dyn Object> {
+        self.solver.upgrade().expect("Solver has been dropped").new_real()
     }
 }

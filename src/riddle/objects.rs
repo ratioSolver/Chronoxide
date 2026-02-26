@@ -38,3 +38,20 @@ impl Object for IntObject {
         self.class.upgrade().expect("Class has been dropped").clone()
     }
 }
+
+pub struct RealObject {
+    class: Weak<Int>,
+    pub(crate) var: usize,
+}
+
+impl RealObject {
+    pub fn new(class: Weak<Int>, var: usize) -> Self {
+        Self { class, var }
+    }
+}
+
+impl Object for RealObject {
+    fn class(&self) -> Rc<dyn Class> {
+        self.class.upgrade().expect("Class has been dropped").clone()
+    }
+}

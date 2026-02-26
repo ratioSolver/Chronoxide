@@ -3,7 +3,7 @@ use linspire::inf_rational::InfRational;
 
 use crate::riddle::{
     classes::{Bool, Class, Field, Int},
-    objects::{BoolObject, IntObject},
+    objects::{BoolObject, IntObject, RealObject},
 };
 use std::{
     cell::RefCell,
@@ -61,6 +61,18 @@ impl Solver {
         self.lin.borrow().val(obj.var).clone()
     }
 
+    pub fn new_real(&self) -> Rc<RealObject> {
+        let var = self.lin.borrow_mut().add_var();
+        let classes = self.classes.borrow();
+        let int_class = classes.get("int").expect("Int class not found").clone();
+        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+        Rc::new(RealObject::new(Rc::downgrade(&int_class), var))
+    }
+
+    pub fn real_val(&self, obj: &RealObject) -> InfRational {
+        self.lin.borrow().val(obj.var).clone()
+    }
+
     pub fn add_class(&self, class: Rc<dyn Class>) {
         self.classes.borrow_mut().insert(class.name().to_string(), class);
     }
@@ -77,8 +89,10 @@ mod tests {
         let solver = Solver::new();
         let bool_obj = solver.new_bool();
         let int_obj = solver.new_int();
+        let real_obj = solver.new_real();
 
         assert_eq!(solver.bool_val(&bool_obj), LBool::Undef);
         assert_eq!(solver.int_val(&int_obj), i_i(0));
+        assert_eq!(solver.real_val(&real_obj), i_i(0));
     }
 }
