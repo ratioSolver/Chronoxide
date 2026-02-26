@@ -6,7 +6,7 @@ use linspire::{
 
 use crate::riddle::{
     classes::{Bool, Class, Field, Int, Real},
-    objects::{BoolObject, IntObject, RealObject},
+    objects::{ArithObject, BoolObject},
 };
 use std::{
     cell::RefCell,
@@ -53,27 +53,27 @@ impl Solver {
         self.sat.borrow().lit_value(&obj.lit).clone()
     }
 
-    pub fn new_int(&self) -> Rc<IntObject> {
+    pub fn new_int(&self) -> Rc<ArithObject> {
         let var = self.lin.borrow_mut().add_var();
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(IntObject::new(Rc::downgrade(&int_class), v(var)))
+        Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
-    pub fn int_val(&self, obj: &IntObject) -> InfRational {
+    pub fn int_val(&self, obj: &ArithObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn new_real(&self) -> Rc<RealObject> {
+    pub fn new_real(&self) -> Rc<ArithObject> {
         let var = self.lin.borrow_mut().add_var();
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(RealObject::new(Rc::downgrade(&int_class), v(var)))
+        Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
-    pub fn real_val(&self, obj: &RealObject) -> InfRational {
+    pub fn real_val(&self, obj: &ArithObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 

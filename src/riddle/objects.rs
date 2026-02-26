@@ -25,35 +25,18 @@ impl Object for BoolObject {
     }
 }
 
-pub struct IntObject {
+pub struct ArithObject {
     class: Weak<Int>,
     pub(crate) lin: Lin,
 }
 
-impl IntObject {
+impl ArithObject {
     pub fn new(class: Weak<Int>, lin: Lin) -> Self {
         Self { class, lin }
     }
 }
 
-impl Object for IntObject {
-    fn class(&self) -> Rc<dyn Class> {
-        self.class.upgrade().expect("Class has been dropped").clone()
-    }
-}
-
-pub struct RealObject {
-    class: Weak<Int>,
-    pub(crate) lin: Lin,
-}
-
-impl RealObject {
-    pub fn new(class: Weak<Int>, lin: Lin) -> Self {
-        Self { class, lin }
-    }
-}
-
-impl Object for RealObject {
+impl Object for ArithObject {
     fn class(&self) -> Rc<dyn Class> {
         self.class.upgrade().expect("Class has been dropped").clone()
     }
