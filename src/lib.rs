@@ -8,11 +8,7 @@ use linspire::{
     inf_rational::InfRational,
     lin::{c, v},
 };
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 mod riddle;
 
@@ -21,7 +17,6 @@ pub enum RiddleError {
 }
 
 pub struct Solver {
-    weak_self: Weak<Self>,
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
@@ -31,17 +26,16 @@ pub struct Solver {
 
 impl Solver {
     pub fn new() -> Rc<Self> {
-        let slv = Rc::new_cyclic(|weak_self| Solver {
-            weak_self: weak_self.clone(),
+        let slv = Rc::new(Self {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
             fields: RefCell::new(HashMap::new()),
             classes: RefCell::new(HashMap::new()),
         });
-        slv.add_class(Rc::new(Bool::new(slv.weak_self.clone())));
-        slv.add_class(Rc::new(Int::new(slv.weak_self.clone())));
-        slv.add_class(Rc::new(Real::new(slv.weak_self.clone())));
+        slv.add_class(Rc::new(Bool::new(&slv)));
+        slv.add_class(Rc::new(Int::new(&slv)));
+        slv.add_class(Rc::new(Real::new(&slv)));
         slv
     }
 
@@ -50,7 +44,7 @@ impl Solver {
         let classes = self.classes.borrow();
         let bool_class = classes.get("bool").expect("Bool class not found").clone();
         let bool_class = bool_class.as_any().downcast::<Bool>().expect("Failed to downcast to Bool class");
-        Rc::new(BoolObject::new(Rc::downgrade(&bool_class), pos(var)))
+        Rc::new(BoolObject::new(&bool_class, pos(var)))
     }
 
     pub fn bool_val(&self, obj: &BoolObject) -> LBool {
@@ -62,7 +56,7 @@ impl Solver {
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(IntObject::new(Rc::downgrade(&int_class), v(var)))
+        Rc::new(IntObject::new(&int_class, v(var)))
     }
 
     pub fn int_val(&self, obj: &IntObject) -> InfRational {
@@ -74,7 +68,7 @@ impl Solver {
         let classes = self.classes.borrow();
         let real_class = classes.get("real").expect("Real class not found").clone();
         let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-        Rc::new(RealObject::new(Rc::downgrade(&real_class), v(var)))
+        Rc::new(RealObject::new(&real_class, v(var)))
     }
 
     pub fn real_val(&self, obj: &RealObject) -> InfRational {
@@ -98,11 +92,11 @@ impl Solver {
         Ok(match class.name() {
             "int" => {
                 let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-                Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+                Rc::new(IntObject::new(&int_class, lin))
             }
             "real" => {
                 let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-                Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+                Rc::new(RealObject::new(&real_class, lin))
             }
             _ => unreachable!(),
         })
@@ -127,11 +121,11 @@ impl Solver {
         Ok(match class.name() {
             "int" => {
                 let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-                Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+                Rc::new(IntObject::new(&int_class, lin))
             }
             "real" => {
                 let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-                Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+                Rc::new(RealObject::new(&real_class, lin))
             }
             _ => unreachable!(),
         })

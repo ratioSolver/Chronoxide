@@ -24,8 +24,8 @@ pub struct Bool {
 }
 
 impl Bool {
-    pub fn new(solver: Weak<Solver>) -> Self {
-        Self { solver }
+    pub fn new(solver: &Rc<Solver>) -> Self {
+        Self { solver: Rc::downgrade(solver) }
     }
 }
 
@@ -48,8 +48,8 @@ pub struct Int {
 }
 
 impl Int {
-    pub fn new(solver: Weak<Solver>) -> Self {
-        Self { solver }
+    pub fn new(solver: &Rc<Solver>) -> Self {
+        Self { solver: Rc::downgrade(solver) }
     }
 }
 
@@ -72,8 +72,8 @@ pub struct Real {
 }
 
 impl Real {
-    pub fn new(solver: Weak<Solver>) -> Self {
-        Self { solver }
+    pub fn new(solver: &Rc<Solver>) -> Self {
+        Self { solver: Rc::downgrade(solver) }
     }
 }
 

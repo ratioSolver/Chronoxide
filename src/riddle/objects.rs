@@ -17,8 +17,8 @@ pub struct BoolObject {
 }
 
 impl BoolObject {
-    pub fn new(class: Weak<Bool>, lit: Lit) -> Self {
-        Self { class, lit }
+    pub fn new(class: &Rc<Bool>, lit: Lit) -> Self {
+        Self { class: Rc::downgrade(class), lit }
     }
 }
 
@@ -38,8 +38,8 @@ pub struct IntObject {
 }
 
 impl IntObject {
-    pub fn new(class: Weak<Int>, lin: Lin) -> Self {
-        Self { class, lin }
+    pub fn new(class: &Rc<Int>, lin: Lin) -> Self {
+        Self { class: Rc::downgrade(class), lin }
     }
 }
 
@@ -59,8 +59,8 @@ pub struct RealObject {
 }
 
 impl RealObject {
-    pub fn new(class: Weak<Real>, lin: Lin) -> Self {
-        Self { class, lin }
+    pub fn new(class: &Rc<Real>, lin: Lin) -> Self {
+        Self { class: Rc::downgrade(class), lin }
     }
 }
 
