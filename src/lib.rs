@@ -18,7 +18,7 @@ pub struct Solver {
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
-    fields: HashMap<String, Rc<Field>>,
+    fields: RefCell<HashMap<String, Rc<Field>>>,
     classes: RefCell<HashMap<String, Rc<dyn Class>>>,
 }
 
@@ -29,7 +29,7 @@ impl Solver {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
-            fields: HashMap::new(),
+            fields: RefCell::new(HashMap::new()),
             classes: RefCell::new(HashMap::new()),
         });
         slv.add_class(Rc::new(Bool::new(slv.weak_self.clone())));
