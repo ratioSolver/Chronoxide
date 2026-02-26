@@ -112,6 +112,41 @@ impl Solver {
         }
     }
 
+    pub fn new_sub(&self, terms: Vec<Rc<dyn Object>>) -> Rc<dyn Object> {
+        let classes = self.classes.borrow();
+        if terms.iter().all(|t| t.class().name() == "int") {
+            let int_class = classes.get("int").expect("Int class not found").clone();
+            let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object")).fold(c(0), |acc, lin| acc - &lin.lin);
+            Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+        } else if terms.iter().all(|t| t.class().name() == "real") {
+            let real_class = classes.get("real").expect("Real class not found").clone();
+            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object")).fold(c(0), |acc, lin| acc - &lin.lin);
+            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+        } else if terms.iter().all(|t| t.class().name() == "int" || t.class().name() == "real") {
+            let real_class = classes.get("real").expect("Real class not found").clone();
+            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+            let lin = terms
+                .iter()
+                .map(|t| {
+                    if t.class().name() == "int" {
+                        let int_obj = t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object");
+                        return int_obj.lin.clone();
+                    } else if t.class().name() == "real" {
+                        let real_obj = t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object");
+                        return real_obj.lin.clone();
+                    } else {
+                        panic!("Invalid term type in sub")
+                    }
+                })
+                .fold(c(0), |acc, lin| acc - lin);
+            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+        } else {
+            panic!("Invalid term types in sub")
+        }
+    }
+
     pub fn add_class(&self, class: Rc<dyn Class>) {
         self.classes.borrow_mut().insert(class.name().to_string(), class);
     }
