@@ -6,7 +6,7 @@ use crate::riddle::{
 use consensus::{LBool, pos};
 use linspire::{
     inf_rational::InfRational,
-    lin::{Lin, c, v},
+    lin::{c, v},
 };
 use std::{
     cell::RefCell,
