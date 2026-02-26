@@ -75,7 +75,7 @@ impl Solver {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn new_sum(&self, terms: Vec<Rc<dyn Object>>) -> Result<Rc<dyn Object>, RiddleError> {
+    pub fn new_sum(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Object>, RiddleError> {
         let class = self.arith_class(&terms)?;
         let lin = terms
             .iter()
@@ -102,7 +102,7 @@ impl Solver {
         })
     }
 
-    pub fn new_sub(&self, terms: Vec<Rc<dyn Object>>) -> Result<Rc<dyn Object>, RiddleError> {
+    pub fn new_sub(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Object>, RiddleError> {
         let class = self.arith_class(&terms)?;
         let lin: Vec<_> = terms
             .iter()
@@ -131,7 +131,7 @@ impl Solver {
         })
     }
 
-    fn arith_class(&self, terms: &Vec<Rc<dyn Object>>) -> Result<Rc<dyn Class>, RiddleError> {
+    fn arith_class(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Class>, RiddleError> {
         let classes = self.classes.borrow();
         if terms.iter().all(|t| t.class().name() == "int") {
             let int_class = classes.get("int").expect("Int class not found").clone();
