@@ -1,12 +1,12 @@
+use crate::riddle::objects::{IntObject, Object, RealObject};
+use crate::riddle::{
+    classes::{Bool, Class, Field, Int, Real},
+    objects::BoolObject,
+};
 use consensus::{LBool, pos};
 use linspire::{
     inf_rational::InfRational,
-    lin::{Lin, v},
-};
-
-use crate::riddle::{
-    classes::{Bool, Class, Field, Int, Real},
-    objects::{ArithObject, BoolObject},
+    lin::{Lin, c, v},
 };
 use std::{
     cell::RefCell,
@@ -53,24 +53,63 @@ impl Solver {
         self.sat.borrow().lit_value(&obj.lit).clone()
     }
 
-    pub fn new_int(&self) -> Rc<ArithObject> {
+    pub fn new_int(&self) -> Rc<IntObject> {
         let var = self.lin.borrow_mut().add_var();
         let classes = self.classes.borrow();
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
+        Rc::new(IntObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
-    pub fn arith_val(&self, obj: &ArithObject) -> InfRational {
+    pub fn int_val(&self, obj: &IntObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn new_real(&self) -> Rc<ArithObject> {
+    pub fn new_real(&self) -> Rc<RealObject> {
         let var = self.lin.borrow_mut().add_var();
         let classes = self.classes.borrow();
-        let int_class = classes.get("int").expect("Int class not found").clone();
-        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
+        let real_class = classes.get("real").expect("Real class not found").clone();
+        let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+        Rc::new(RealObject::new(Rc::downgrade(&real_class), v(var)))
+    }
+
+    pub fn real_val(&self, obj: &RealObject) -> InfRational {
+        self.lin.borrow().lin_val(&obj.lin).clone()
+    }
+
+    pub fn new_sum(&self, terms: Vec<Rc<dyn Object>>) -> Rc<dyn Object> {
+        let classes = self.classes.borrow();
+        if terms.iter().all(|t| t.class().name() == "int") {
+            let int_class = classes.get("int").expect("Int class not found").clone();
+            let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object")).fold(c(0), |acc, lin| acc + &lin.lin);
+            Rc::new(IntObject::new(Rc::downgrade(&int_class), lin))
+        } else if terms.iter().all(|t| t.class().name() == "real") {
+            let real_class = classes.get("real").expect("Real class not found").clone();
+            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+            let lin = terms.iter().map(|t| t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object")).fold(c(0), |acc, lin| acc + &lin.lin);
+            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+        } else if terms.iter().all(|t| t.class().name() == "int" || t.class().name() == "real") {
+            let real_class = classes.get("real").expect("Real class not found").clone();
+            let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+            let lin = terms
+                .iter()
+                .map(|t| {
+                    if t.class().name() == "int" {
+                        let int_obj = t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object");
+                        return int_obj.lin.clone();
+                    } else if t.class().name() == "real" {
+                        let real_obj = t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object");
+                        return real_obj.lin.clone();
+                    } else {
+                        panic!("Invalid term type in sum")
+                    }
+                })
+                .fold(c(0), |acc, lin| acc + lin);
+            Rc::new(RealObject::new(Rc::downgrade(&real_class), lin))
+        } else {
+            panic!("Invalid term types in sum")
+        }
     }
 
     pub fn add_class(&self, class: Rc<dyn Class>) {
@@ -92,7 +131,7 @@ mod tests {
         let real_obj = solver.new_real();
 
         assert_eq!(solver.bool_val(&bool_obj), LBool::Undef);
-        assert_eq!(solver.arith_val(&int_obj), i_i(0));
-        assert_eq!(solver.arith_val(&real_obj), i_i(0));
+        assert_eq!(solver.int_val(&int_obj), i_i(0));
+        assert_eq!(solver.real_val(&real_obj), i_i(0));
     }
 }
