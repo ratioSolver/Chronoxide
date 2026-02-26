@@ -61,7 +61,7 @@ impl Solver {
         Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
     }
 
-    pub fn int_val(&self, obj: &ArithObject) -> InfRational {
+    pub fn arith_val(&self, obj: &ArithObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
@@ -71,10 +71,6 @@ impl Solver {
         let int_class = classes.get("int").expect("Int class not found").clone();
         let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
         Rc::new(ArithObject::new(Rc::downgrade(&int_class), v(var)))
-    }
-
-    pub fn real_val(&self, obj: &ArithObject) -> InfRational {
-        self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
     pub fn add_class(&self, class: Rc<dyn Class>) {
@@ -96,7 +92,7 @@ mod tests {
         let real_obj = solver.new_real();
 
         assert_eq!(solver.bool_val(&bool_obj), LBool::Undef);
-        assert_eq!(solver.int_val(&int_obj), i_i(0));
-        assert_eq!(solver.real_val(&real_obj), i_i(0));
+        assert_eq!(solver.arith_val(&int_obj), i_i(0));
+        assert_eq!(solver.arith_val(&real_obj), i_i(0));
     }
 }
