@@ -33,6 +33,7 @@ impl Solver {
             classes: RefCell::new(HashMap::new()),
         });
         slv.add_class(Rc::new(Bool::new(slv.weak_self.clone())));
+        slv.add_class(Rc::new(Int::new(slv.weak_self.clone())));
         slv
     }
 
@@ -62,5 +63,22 @@ impl Solver {
 
     pub fn add_class(&self, class: Rc<dyn Class>) {
         self.classes.borrow_mut().insert(class.name().to_string(), class);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use linspire::inf_rational::i_i;
+
+    use super::*;
+
+    #[test]
+    fn test_solver() {
+        let solver = Solver::new();
+        let bool_obj = solver.new_bool();
+        let int_obj = solver.new_int();
+
+        assert_eq!(solver.bool_val(&bool_obj), LBool::Undef);
+        assert_eq!(solver.int_val(&int_obj), i_i(0));
     }
 }
