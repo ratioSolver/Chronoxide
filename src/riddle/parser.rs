@@ -29,6 +29,7 @@ pub enum Statement {
     Assign { name: Vec<String>, value: Expr },
     ForAll { var_type: Vec<String>, var_name: String, statements: Vec<Statement> },
     Disjunction { disjuncts: Vec<(Vec<Statement>, Expr)> },
+    Formula { is_fact: bool, name: String, args: Vec<(String, Expr)> },
     Return { value: Expr },
 }
 
@@ -310,8 +311,36 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expression()?;
                 Ok(Statement::Return { value })
             }
+            Some(Token::Fact) | Some(Token::Goal) => {
+                let is_fact = matches!(self.next(), Some(Token::Fact)); // consume 'fact' or 'goal'
+                let name = match self.next() {
+                    Some(Token::Identifier(name)) => name,
+                    _ => return Err("Expected identifier after 'fact' or 'goal'".to_string()),
+                };
+                self.expect(Token::Equal)?;
+                self.expect(Token::New)?; // consume 'new'
+                self.expect(Token::LParen)?;
+                let mut args = Vec::new();
+                while !matches!(self.peek(), Some(Token::RParen)) {
+                    let arg_name = match self.next() {
+                        Some(Token::Identifier(name)) => name,
+                        _ => return Err("Expected identifier in formula arguments".to_string()),
+                    };
+                    self.expect(Token::Colon)?;
+                    let arg_expr = self.parse_expression()?;
+                    args.push((arg_name, arg_expr));
+                    if let Some(Token::Comma) = self.peek() {
+                        self.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RParen)?;
+                Ok(Statement::Formula { is_fact, name, args })
+            }
             _ => {
                 let expr = self.parse_expression()?;
+                self.expect(Token::Semicolon)?;
                 Ok(Statement::Expr(expr))
             }
         }

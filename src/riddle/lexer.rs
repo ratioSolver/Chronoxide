@@ -21,6 +21,7 @@ pub enum Token {
     LBrace,
     RBrace,
     Comma,
+    Colon,
     Equal,
     EqualEqual,
     NotEqual,
@@ -126,6 +127,10 @@ impl<'a> Lexer<'a> {
                 ',' => {
                     self.input.next();
                     Token::Comma
+                }
+                ':' => {
+                    self.input.next();
+                    Token::Colon
                 }
                 '=' => {
                     self.input.next();
