@@ -46,6 +46,7 @@ pub struct Constructor {
 }
 
 pub struct Method {
+    return_type: Option<Vec<String>>,
     name: String,
     args: Vec<(Vec<String>, String)>,
     statements: Vec<Statement>,
@@ -125,6 +126,44 @@ impl<'a> Parser<'a> {
         Ok(Constructor { args, init, statements })
     }
 
+    pub fn parse_method(&mut self) -> Result<Method, String> {
+        let return_type = match self.peek() {
+            Some(Token::Void) => {
+                self.next(); // consume 'void'
+                None
+            }
+            Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) | Some(Token::Identifier(_)) => Some(self.parse_type()?),
+            _ => return Err("Expected return type or 'void'".to_string()),
+        };
+        let name = match self.next() {
+            Some(Token::Identifier(name)) => name,
+            _ => return Err("Expected method name".to_string()),
+        };
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        while !matches!(self.peek(), Some(Token::RParen)) {
+            let arg_type = self.parse_type()?;
+            let arg_name = match self.next() {
+                Some(Token::Identifier(name)) => name,
+                _ => return Err("Expected identifier in method arguments".to_string()),
+            };
+            args.push((arg_type, arg_name));
+            if let Some(Token::Comma) = self.peek() {
+                self.next(); // consume ','
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::LBrace)?;
+        let mut statements = Vec::new();
+        while !matches!(self.peek(), Some(Token::RBrace)) {
+            statements.push(self.parse_statement()?);
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Method { return_type, name, args, statements })
+    }
+
     pub fn parse_predicate(&mut self) -> Result<Predicate, String> {
         self.expect(Token::Predicate)?;
         let name = match self.next() {
@@ -156,83 +195,83 @@ impl<'a> Parser<'a> {
         Ok(Predicate { name, args, statements })
     }
 
-    pub fn parse_expression(&mut self) -> Result<Expr, String> {
-        self.parse_or_expression()
+    pub fn parse_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        self.parse_or_expression(first)
     }
 
-    fn parse_or_expression(&mut self) -> Result<Expr, String> {
-        let mut terms = vec![self.parse_and_expression()?];
+    fn parse_or_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let mut terms = vec![self.parse_and_expression(first)?];
         while let Some(Token::Bar) = self.peek() {
             self.next(); // consume '|'
-            terms.push(self.parse_and_expression()?);
+            terms.push(self.parse_and_expression(None)?);
         }
         if terms.len() == 1 { Ok(terms.remove(0)) } else { Ok(Expr::Or { terms }) }
     }
 
-    fn parse_and_expression(&mut self) -> Result<Expr, String> {
-        let mut terms = vec![self.parse_equality_expression()?];
+    fn parse_and_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let mut terms = vec![self.parse_equality_expression(first)?];
         while let Some(Token::Amp) = self.peek() {
             self.next(); // consume '&'
-            terms.push(self.parse_equality_expression()?);
+            terms.push(self.parse_equality_expression(None)?);
         }
         if terms.len() == 1 { Ok(terms.remove(0)) } else { Ok(Expr::And { terms }) }
     }
 
-    fn parse_equality_expression(&mut self) -> Result<Expr, String> {
-        let left = self.parse_relational_expression()?;
+    fn parse_equality_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let left = self.parse_relational_expression(first)?;
         match self.peek() {
             Some(Token::EqualEqual) => {
                 self.next(); // consume '=='
-                let right = self.parse_relational_expression()?;
+                let right = self.parse_relational_expression(None)?;
                 Ok(Expr::Eq { left: Box::new(left), right: Box::new(right) })
             }
             Some(Token::NotEqual) => {
                 self.next(); // consume '!='
-                let right = self.parse_relational_expression()?;
+                let right = self.parse_relational_expression(None)?;
                 Ok(Expr::Neq { left: Box::new(left), right: Box::new(right) })
             }
             _ => Ok(left),
         }
     }
 
-    fn parse_relational_expression(&mut self) -> Result<Expr, String> {
-        let left = self.parse_additive_expression()?;
+    fn parse_relational_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let left = self.parse_additive_expression(first)?;
         match self.peek() {
             Some(Token::LessThan) => {
                 self.next(); // consume '<'
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_additive_expression(None)?;
                 Ok(Expr::Lt { left: Box::new(left), right: Box::new(right) })
             }
             Some(Token::LessEqual) => {
                 self.next(); // consume '<='
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_additive_expression(None)?;
                 Ok(Expr::Leq { left: Box::new(left), right: Box::new(right) })
             }
             Some(Token::GreaterThan) => {
                 self.next(); // consume '>'
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_additive_expression(None)?;
                 Ok(Expr::Gt { left: Box::new(left), right: Box::new(right) })
             }
             Some(Token::GreaterEqual) => {
                 self.next(); // consume '>='
-                let right = self.parse_additive_expression()?;
+                let right = self.parse_additive_expression(None)?;
                 Ok(Expr::Geq { left: Box::new(left), right: Box::new(right) })
             }
             _ => Ok(left),
         }
     }
 
-    fn parse_additive_expression(&mut self) -> Result<Expr, String> {
-        let mut terms = vec![self.parse_multiplicative_expression()?];
+    fn parse_additive_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let mut terms = vec![self.parse_multiplicative_expression(first)?];
         while let Some(token) = self.peek() {
             match token {
                 Token::Plus => {
                     self.next(); // consume '+'
-                    terms.push(self.parse_multiplicative_expression()?);
+                    terms.push(self.parse_multiplicative_expression(None)?);
                 }
                 Token::Minus => {
                     self.next(); // consume '-'
-                    let right = self.parse_multiplicative_expression()?;
+                    let right = self.parse_multiplicative_expression(None)?;
                     terms.push(Expr::Opposite { term: Box::new(right) });
                 }
                 _ => break,
@@ -241,8 +280,8 @@ impl<'a> Parser<'a> {
         if terms.len() == 1 { Ok(terms.remove(0)) } else { Ok(Expr::Sum { terms }) }
     }
 
-    fn parse_multiplicative_expression(&mut self) -> Result<Expr, String> {
-        let mut factors = vec![self.parse_primary_expression()?];
+    fn parse_multiplicative_expression(&mut self, first: Option<Expr>) -> Result<Expr, String> {
+        let mut factors = vec![if let Some(expr) = first { expr } else { self.parse_primary_expression()? }];
         while let Some(token) = self.peek() {
             match token {
                 Token::Asterisk => {
@@ -286,7 +325,7 @@ impl<'a> Parser<'a> {
                 }
             }
             Some(Token::LParen) => {
-                let expr = self.parse_expression()?;
+                let expr = self.parse_expression(None)?;
                 self.expect(Token::RParen)?;
                 Ok(expr)
             }
@@ -331,7 +370,7 @@ impl<'a> Parser<'a> {
     fn parse_expr_list(&mut self) -> Result<Vec<Expr>, String> {
         let mut exprs = Vec::new();
         while !matches!(self.peek(), Some(Token::RParen)) {
-            exprs.push(self.parse_expression()?);
+            exprs.push(self.parse_expression(None)?);
             if let Some(Token::Comma) = self.peek() {
                 self.next(); // consume ','
             } else {
@@ -348,7 +387,7 @@ impl<'a> Parser<'a> {
         };
         let init_expr = if let Some(Token::Equal) = self.peek() {
             self.next(); // consume '='
-            Some(self.parse_expression()?)
+            Some(self.parse_expression(None)?)
         } else {
             None
         };
@@ -377,7 +416,7 @@ impl<'a> Parser<'a> {
                 match self.peek() {
                     Some(Token::Equal) => {
                         self.next(); // consume '='
-                        let value = self.parse_expression()?;
+                        let value = self.parse_expression(None)?;
                         self.expect(Token::Semicolon)?;
                         Ok(Statement::Assign { name: ids, value })
                     }
@@ -391,7 +430,7 @@ impl<'a> Parser<'a> {
                         Ok(Statement::LocalField { field_type: ids, fields })
                     }
                     _ => {
-                        let expr = self.parse_expression()?;
+                        let expr = self.parse_expression(Some(Expr::QualifiedId { ids }))?;
                         self.expect(Token::Semicolon)?;
                         return Ok(Statement::Expr(expr));
                     }
@@ -409,7 +448,7 @@ impl<'a> Parser<'a> {
 
                     let cost = if let Some(Token::LBracket) = self.peek() {
                         self.next(); // consume '['
-                        let cost_expr = self.parse_expression()?;
+                        let cost_expr = self.parse_expression(None)?;
                         self.expect(Token::RBracket)?;
                         cost_expr
                     } else {
@@ -418,11 +457,11 @@ impl<'a> Parser<'a> {
                     branches.push((statements, cost));
                     if let Some(Token::Or) = self.peek() {
                         self.next(); // consume 'or'
+                        self.expect(Token::LBrace)?; // consume '{' for the next branch
                     } else {
                         break;
                     }
                 }
-                self.expect(Token::RBrace)?;
                 Ok(Statement::Disjunction { disjuncts: branches })
             }
             Some(Token::For) => {
@@ -444,7 +483,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Return) => {
                 self.next(); // consume 'return'
-                let value = self.parse_expression()?;
+                let value = self.parse_expression(None)?;
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Return { value })
             }
@@ -464,7 +503,7 @@ impl<'a> Parser<'a> {
                         _ => return Err("Expected identifier in formula arguments".to_string()),
                     };
                     self.expect(Token::Colon)?;
-                    let arg_expr = self.parse_expression()?;
+                    let arg_expr = self.parse_expression(None)?;
                     args.push((arg_name, arg_expr));
                     if let Some(Token::Comma) = self.peek() {
                         self.next(); // consume ','
@@ -476,7 +515,7 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Formula { is_fact, name, args })
             }
             _ => {
-                let expr = self.parse_expression()?;
+                let expr = self.parse_expression(None)?;
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Expr(expr))
             }
@@ -488,71 +527,71 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
 
-    fn parse(input: &str) -> Expr {
+    fn parse_expression(input: &str) -> Expr {
         let lexer = Lexer::new(input);
         let mut parser = Parser::new(lexer);
-        parser.parse_expression().expect("Failed to parse expression")
+        parser.parse_expression(None).expect("Failed to parse expression")
     }
 
     #[test]
     fn test_literals() {
-        assert_eq!(parse("true"), Expr::Bool(true));
-        assert_eq!(parse("false"), Expr::Bool(false));
-        assert_eq!(parse("123"), Expr::Int(123));
-        assert_eq!(parse("12.34"), Expr::Real(1234, 100));
+        assert_eq!(parse_expression("true"), Expr::Bool(true));
+        assert_eq!(parse_expression("false"), Expr::Bool(false));
+        assert_eq!(parse_expression("123"), Expr::Int(123));
+        assert_eq!(parse_expression("12.34"), Expr::Real(1234, 100));
     }
 
     #[test]
     fn test_identifiers() {
-        assert_eq!(parse("foo"), Expr::QualifiedId { ids: vec!["foo".to_string()] });
-        assert_eq!(parse("foo.bar"), Expr::QualifiedId { ids: vec!["foo".to_string(), "bar".to_string()] });
+        assert_eq!(parse_expression("foo"), Expr::QualifiedId { ids: vec!["foo".to_string()] });
+        assert_eq!(parse_expression("foo.bar"), Expr::QualifiedId { ids: vec!["foo".to_string(), "bar".to_string()] });
     }
 
     #[test]
     fn test_parentheses() {
-        assert_eq!(parse("(123)"), Expr::Int(123));
+        assert_eq!(parse_expression("(123)"), Expr::Int(123));
     }
 
     #[test]
     fn test_function_calls() {
-        assert_eq!(parse("f()"), Expr::Function { name: vec!["f".to_string()], args: vec![] });
-        assert_eq!(parse("g(1, true)"), Expr::Function { name: vec!["g".to_string()], args: vec![Expr::Int(1), Expr::Bool(true)] });
-        assert_eq!(parse("Math.max(1, 2)"), Expr::Function { name: vec!["Math".to_string(), "max".to_string()], args: vec![Expr::Int(1), Expr::Int(2)] });
+        assert_eq!(parse_expression("f()"), Expr::Function { name: vec!["f".to_string()], args: vec![] });
+        assert_eq!(parse_expression("g(1, true)"), Expr::Function { name: vec!["g".to_string()], args: vec![Expr::Int(1), Expr::Bool(true)] });
+        assert_eq!(parse_expression("Math.max(1, 2)"), Expr::Function { name: vec!["Math".to_string(), "max".to_string()], args: vec![Expr::Int(1), Expr::Int(2)] });
     }
 
     #[test]
     fn test_arithmetic() {
         // 1 + 2
-        assert_eq!(parse("1 + 2"), Expr::Sum { terms: vec![Expr::Int(1), Expr::Int(2)] });
+        assert_eq!(parse_expression("1 + 2"), Expr::Sum { terms: vec![Expr::Int(1), Expr::Int(2)] });
 
         // 1 * 2
-        assert_eq!(parse("1 * 2"), Expr::Mul { factors: vec![Expr::Int(1), Expr::Int(2)] });
+        assert_eq!(parse_expression("1 * 2"), Expr::Mul { factors: vec![Expr::Int(1), Expr::Int(2)] });
 
         // 1 + 2 * 3
-        assert_eq!(parse("1 + 2 * 3"), Expr::Sum { terms: vec![Expr::Int(1), Expr::Mul { factors: vec![Expr::Int(2), Expr::Int(3)] },] });
+        assert_eq!(parse_expression("1 + 2 * 3"), Expr::Sum { terms: vec![Expr::Int(1), Expr::Mul { factors: vec![Expr::Int(2), Expr::Int(3)] },] });
 
         // (1 + 2) * 3
-        assert_eq!(parse("(1 + 2) * 3"), Expr::Mul { factors: vec![Expr::Sum { terms: vec![Expr::Int(1), Expr::Int(2)] }, Expr::Int(3),] });
+        assert_eq!(parse_expression("(1 + 2) * 3"), Expr::Mul { factors: vec![Expr::Sum { terms: vec![Expr::Int(1), Expr::Int(2)] }, Expr::Int(3),] });
     }
 
     #[test]
     fn test_relational() {
-        assert_eq!(parse("1 < 2"), Expr::Lt { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
-        assert_eq!(parse("1 <= 2"), Expr::Leq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
-        assert_eq!(parse("1 > 2"), Expr::Gt { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
-        assert_eq!(parse("1 >= 2"), Expr::Geq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
-        assert_eq!(parse("1 == 1"), Expr::Eq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(1)) });
-        assert_eq!(parse("1 != 2"), Expr::Neq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
+        assert_eq!(parse_expression("1 < 2"), Expr::Lt { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
+        assert_eq!(parse_expression("1 <= 2"), Expr::Leq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
+        assert_eq!(parse_expression("1 > 2"), Expr::Gt { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
+        assert_eq!(parse_expression("1 >= 2"), Expr::Geq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
+        assert_eq!(parse_expression("1 == 1"), Expr::Eq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(1)) });
+        assert_eq!(parse_expression("1 != 2"), Expr::Neq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
     }
 
     #[test]
     fn test_logical() {
-        assert_eq!(parse("true & false"), Expr::And { terms: vec![Expr::Bool(true), Expr::Bool(false)] });
-        assert_eq!(parse("true | false"), Expr::Or { terms: vec![Expr::Bool(true), Expr::Bool(false)] });
+        assert_eq!(parse_expression("true & false"), Expr::And { terms: vec![Expr::Bool(true), Expr::Bool(false)] });
+        assert_eq!(parse_expression("true | false"), Expr::Or { terms: vec![Expr::Bool(true), Expr::Bool(false)] });
 
         // n-ary logical ops
         assert_eq!(
-            parse("a & b & c"),
+            parse_expression("a & b & c"),
             Expr::And {
                 terms: vec![Expr::QualifiedId { ids: vec!["a".to_string()] }, Expr::QualifiedId { ids: vec!["b".to_string()] }, Expr::QualifiedId { ids: vec!["c".to_string()] },]
             }
@@ -560,7 +599,7 @@ mod tests {
 
         // Mixed precedence: & binds tighter than |
         assert_eq!(
-            parse("a | b & c"),
+            parse_expression("a | b & c"),
             Expr::Or {
                 terms: vec![
                     Expr::QualifiedId { ids: vec!["a".to_string()] },
@@ -575,7 +614,7 @@ mod tests {
     #[test]
     fn test_complex_expression() {
         assert_eq!(
-            parse("f(x) + 3 * (y - 2) >= 10 & g(z) != 5"),
+            parse_expression("f(x) + 3 * (y - 2) >= 10 & g(z) != 5"),
             Expr::And {
                 terms: vec![
                     Expr::Geq {
@@ -657,6 +696,102 @@ mod tests {
             );
         } else {
             panic!("Expected assignment statement in constructor body");
+        }
+    }
+
+    #[test]
+    fn test_method() {
+        let input = r#"
+            void move(int dx, int dy) {
+                x = x + dx;
+                y = y + dy;
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let method = parser.parse_method().expect("Failed to parse method");
+        assert_eq!(method.return_type, None);
+        assert_eq!(method.name, "move");
+        assert_eq!(method.args, vec![(vec!["int".to_string()], "dx".to_string()), (vec!["int".to_string()], "dy".to_string())]);
+        assert_eq!(method.statements.len(), 2);
+        if let Statement::Assign { name, value } = &method.statements[0] {
+            assert_eq!(name, &vec!["x".to_string()]);
+            assert_eq!(
+                *value,
+                Expr::Sum {
+                    terms: vec![Expr::QualifiedId { ids: vec!["x".to_string()] }, Expr::QualifiedId { ids: vec!["dx".to_string()] }]
+                }
+            );
+        } else {
+            panic!("Expected assignment statement in method body");
+        }
+        if let Statement::Assign { name, value } = &method.statements[1] {
+            assert_eq!(name, &vec!["y".to_string()]);
+            assert_eq!(
+                *value,
+                Expr::Sum {
+                    terms: vec![Expr::QualifiedId { ids: vec!["y".to_string()] }, Expr::QualifiedId { ids: vec!["dy".to_string()] }]
+                }
+            );
+        } else {
+            panic!("Expected assignment statement in method body");
+        }
+    }
+
+    #[test]
+    fn test_function() {
+        let input = r#"
+                int add(int a, int b) {
+                    return a + b;
+                }
+            "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let method = parser.parse_method().expect("Failed to parse function");
+        assert_eq!(method.return_type, Some(vec!["int".to_string()]));
+        assert_eq!(method.name, "add");
+        assert_eq!(method.args, vec![(vec!["int".to_string()], "a".to_string()), (vec!["int".to_string()], "b".to_string())]);
+        assert_eq!(method.statements.len(), 1);
+        if let Statement::Return { value } = &method.statements[0] {
+            assert_eq!(
+                *value,
+                Expr::Sum {
+                    terms: vec![Expr::QualifiedId { ids: vec!["a".to_string()] }, Expr::QualifiedId { ids: vec!["b".to_string()] }]
+                }
+            );
+        } else {
+            panic!("Expected return statement in function body");
+        }
+    }
+
+    #[test]
+    fn test_disjunction() {
+        let input = r#"
+            {
+                x == 1;
+            } or {
+                x == 2;
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let statement = parser.parse_statement().expect("Failed to parse disjunction");
+        if let Statement::Disjunction { disjuncts } = statement {
+            assert_eq!(disjuncts.len(), 2);
+            if let Statement::Expr(Expr::Eq { left, right }) = &disjuncts[0].0[0] {
+                assert_eq!(**left, Expr::QualifiedId { ids: vec!["x".to_string()] });
+                assert_eq!(**right, Expr::Int(1));
+            } else {
+                panic!("Expected equality statement in first disjunct");
+            }
+            if let Statement::Expr(Expr::Eq { left, right }) = &disjuncts[1].0[0] {
+                assert_eq!(**left, Expr::QualifiedId { ids: vec!["x".to_string()] });
+                assert_eq!(**right, Expr::Int(2));
+            } else {
+                panic!("Expected equality statement in second disjunct");
+            }
+        } else {
+            panic!("Expected disjunction statement");
         }
     }
 }
