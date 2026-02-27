@@ -29,7 +29,7 @@ pub enum Statement {
     Assign { name: Vec<String>, value: Expr },
     ForAll { var_type: Vec<String>, var_name: String, statements: Vec<Statement> },
     Disjunction { disjuncts: Vec<(Vec<Statement>, Expr)> },
-    Formula { is_fact: bool, name: String, args: Vec<(String, Expr)> },
+    Formula { is_fact: bool, name: String, predicate_name: Vec<String>, args: Vec<(String, Expr)> },
     Return { value: Expr },
 }
 
@@ -50,6 +50,14 @@ pub struct Method {
     name: String,
     args: Vec<(Vec<String>, String)>,
     statements: Vec<Statement>,
+}
+
+pub struct ClassDef {
+    name: String,
+    parents: Vec<Vec<String>>,
+    constructors: Vec<Constructor>,
+    methods: Vec<Method>,
+    predicates: Vec<Predicate>,
 }
 
 pub(super) struct Parser<'a> {
@@ -75,6 +83,43 @@ impl<'a> Parser<'a> {
             Some(token) => Err(format!("Expected {:?}, found {:?}", expected, token)),
             None => Err(format!("Expected {:?}, found end of input", expected)),
         }
+    }
+
+    pub fn parse_class_def(&mut self) -> Result<ClassDef, String> {
+        self.expect(Token::Class)?;
+        let name = match self.next() {
+            Some(Token::Identifier(name)) => name,
+            _ => return Err("Expected class name".to_string()),
+        };
+        let parents = if let Some(Token::Colon) = self.peek() {
+            self.next(); // consume ':'
+            let mut parents = Vec::new();
+            loop {
+                parents.push(self.parse_qualified_id()?);
+                if let Some(Token::Comma) = self.peek() {
+                    self.next(); // consume ','
+                } else {
+                    break;
+                }
+            }
+            parents
+        } else {
+            Vec::new()
+        };
+        self.expect(Token::LBrace)?;
+        let mut constructors = Vec::new();
+        let mut methods = Vec::new();
+        let mut predicates = Vec::new();
+        while !matches!(self.peek(), Some(Token::RBrace)) {
+            match self.peek() {
+                Some(Token::Identifier(id)) if id == &name => constructors.push(self.parse_constructor()?),
+                Some(Token::Predicate) => predicates.push(self.parse_predicate()?),
+                Some(Token::Void) | Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) | Some(Token::Identifier(_)) => methods.push(self.parse_method()?),
+                _ => return Err("Expected 'constructor', 'predicate', or method definition".to_string()),
+            }
+        }
+        self.expect(Token::RBrace)?;
+        Ok(ClassDef { name, parents, constructors, methods, predicates })
     }
 
     pub fn parse_constructor(&mut self) -> Result<Constructor, String> {
@@ -495,6 +540,7 @@ impl<'a> Parser<'a> {
                 };
                 self.expect(Token::Equal)?;
                 self.expect(Token::New)?; // consume 'new'
+                let predicate_name = self.parse_qualified_id()?;
                 self.expect(Token::LParen)?;
                 let mut args = Vec::new();
                 while !matches!(self.peek(), Some(Token::RParen)) {
@@ -512,7 +558,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(Token::RParen)?;
-                Ok(Statement::Formula { is_fact, name, args })
+                self.expect(Token::Semicolon)?;
+                Ok(Statement::Formula { is_fact, name, predicate_name, args })
             }
             _ => {
                 let expr = self.parse_expression(None)?;
@@ -838,6 +885,85 @@ mod tests {
             }
         } else {
             panic!("Expected for loop statement");
+        }
+    }
+
+    #[test]
+    fn test_formula() {
+        let input = r#"
+            fact isEven = new Even(x: 2*x);
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let statement = parser.parse_statement().expect("Failed to parse formula");
+        if let Statement::Formula { is_fact, name, predicate_name, args } = statement {
+            assert!(is_fact);
+            assert_eq!(name, "isEven");
+            assert_eq!(predicate_name, vec!["Even".to_string()]);
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0].0, "x");
+            if let Expr::Mul { factors } = &args[0].1 {
+                assert_eq!(factors.len(), 2);
+                assert_eq!(factors[0], Expr::Int(2));
+                assert_eq!(factors[1], Expr::QualifiedId { ids: vec!["x".to_string()] });
+            } else {
+                panic!("Expected multiplication expression in formula argument");
+            }
+        } else {
+            panic!("Expected formula statement");
+        }
+    }
+
+    #[test]
+    fn test_complex_statement() {
+        let input = r#"
+            {
+                x == 1;
+                for (int i) {
+                    y == i;
+                }
+            } or {
+                x == 2;
+                for (int j) {
+                    y == j;
+                }
+            } [42.0]
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let statement = parser.parse_statement().expect("Failed to parse complex statement");
+        if let Statement::Disjunction { disjuncts } = statement {
+            assert_eq!(disjuncts.len(), 2);
+            // First disjunct
+            assert_eq!(disjuncts[0].1, Expr::Int(1));
+            if let Statement::ForAll { var_type, var_name, statements } = &disjuncts[0].0[1] {
+                assert_eq!(var_type, &vec!["int".to_string()]);
+                assert_eq!(var_name, "i");
+                assert_eq!(statements.len(), 1);
+                if let Statement::Expr(Expr::Eq { left, right }) = &statements[0] {
+                    assert_eq!(**left, Expr::QualifiedId { ids: vec!["y".to_string()] });
+                    assert_eq!(**right, Expr::QualifiedId { ids: vec!["i".to_string()] });
+                } else {
+                    panic!("Expected equality statement in first for loop body");
+                }
+            } else {
+                panic!("Expected for loop in first disjunct");
+            }
+            // Second disjunct
+            assert_eq!(disjuncts[1].1, Expr::Real(420, 10));
+            if let Statement::ForAll { var_type, var_name, statements } = &disjuncts[1].0[1] {
+                assert_eq!(var_type, &vec!["int".to_string()]);
+                assert_eq!(var_name, "j");
+                assert_eq!(statements.len(), 1);
+                if let Statement::Expr(Expr::Eq { left, right }) = &statements[0] {
+                    assert_eq!(**left, Expr::QualifiedId { ids: vec!["y".to_string()] });
+                    assert_eq!(**right, Expr::QualifiedId { ids: vec!["j".to_string()] });
+                } else {
+                    panic!("Expected equality statement in second for loop body");
+                }
+            } else {
+                panic!("Expected for loop in second disjunct");
+            }
         }
     }
 }
