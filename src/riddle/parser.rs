@@ -73,18 +73,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::LParen)?;
         let mut args = Vec::new();
         while !matches!(self.peek(), Some(Token::RParen)) {
-            let mut arg_type = match self.next() {
-                Some(Token::Identifier(type_name)) => vec![type_name],
-                _ => return Err("Expected type name in predicate arguments".to_string()),
-            };
-            while let Some(Token::Dot) = self.peek() {
-                self.next(); // consume '.'
-                if let Some(Token::Identifier(next_type)) = self.next() {
-                    arg_type.push(next_type);
-                } else {
-                    return Err("Expected identifier after '.' in type name".to_string());
-                }
-            }
+            let arg_type = self.parse_type()?;
             let arg_name = match self.next() {
                 Some(Token::Identifier(name)) => name,
                 _ => return Err("Expected identifier in predicate arguments".to_string()),
