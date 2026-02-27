@@ -88,7 +88,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::RParen)?;
         self.expect(Token::LBrace)?;
         let mut statements = Vec::new();
-        while let Some(Token::RBrace) = self.peek() {
+        while !matches!(self.peek(), Some(Token::RBrace)) {
             statements.push(self.parse_statement()?);
         }
         self.expect(Token::RBrace)?;
@@ -120,8 +120,8 @@ impl<'a> Parser<'a> {
     fn parse_equality_expression(&mut self) -> Result<Expr, String> {
         let left = self.parse_relational_expression()?;
         match self.peek() {
-            Some(Token::Equal) => {
-                self.next(); // consume '='
+            Some(Token::EqualEqual) => {
+                self.next(); // consume '=='
                 let right = self.parse_relational_expression()?;
                 Ok(Expr::Eq { left: Box::new(left), right: Box::new(right) })
             }
@@ -233,19 +233,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Vec<String>, String> {
-        let mut type_name = match self.next() {
-            Some(Token::Identifier(name)) => vec![name],
-            _ => return Err("Expected type name".to_string()),
-        };
-        while let Some(Token::Dot) = self.peek() {
-            self.next(); // consume '.'
-            if let Some(Token::Identifier(next_name)) = self.next() {
-                type_name.push(next_name);
-            } else {
-                return Err("Expected identifier after '.' in type name".to_string());
+        match self.peek() {
+            Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) => {
+                let type_name = match self.next().unwrap() {
+                    Token::Bool => "bool".to_string(),
+                    Token::Int => "int".to_string(),
+                    Token::Real => "real".to_string(),
+                    Token::String => "string".to_string(),
+                    _ => unreachable!(),
+                };
+                return Ok(vec![type_name]);
             }
+            Some(Token::Identifier(_)) => self.parse_qualified_id(),
+            _ => Err("Expected type name".to_string()),
         }
-        Ok(type_name)
     }
 
     fn parse_qualified_id(&mut self) -> Result<Vec<String>, String> {
@@ -340,7 +341,7 @@ impl<'a> Parser<'a> {
                 let mut branches = Vec::new();
                 loop {
                     let mut statements = Vec::new();
-                    while let Some(Token::RBrace) = self.peek() {
+                    while !matches!(self.peek(), Some(Token::RBrace)) {
                         statements.push(self.parse_statement()?);
                     }
                     self.expect(Token::RBrace)?;
@@ -374,7 +375,7 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RParen)?;
                 self.expect(Token::LBrace)?;
                 let mut statements = Vec::new();
-                while let Some(Token::RBrace) = self.peek() {
+                while !matches!(self.peek(), Some(Token::RBrace)) {
                     statements.push(self.parse_statement()?);
                 }
                 self.expect(Token::RBrace)?;
@@ -539,5 +540,26 @@ mod tests {
                 ]
             }
         );
+    }
+
+    #[test]
+    fn test_predicate() {
+        let input = r#"
+            predicate isEven(int x) {
+                2*x == 0;
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let predicate = parser.parse_predicate().expect("Failed to parse predicate");
+        assert_eq!(predicate.name, "isEven");
+        assert_eq!(predicate.args, vec![(vec!["int".to_string()], "x".to_string())]);
+        assert_eq!(predicate.statements.len(), 1);
+        if let Statement::Expr(Expr::Eq { left, right }) = &predicate.statements[0] {
+            assert_eq!(**left, Expr::Mul { factors: vec![Expr::Int(2), Expr::QualifiedId { ids: vec!["x".to_string()] }] });
+            assert_eq!(**right, Expr::Int(0));
+        } else {
+            panic!("Expected equality statement in predicate body");
+        }
     }
 }
