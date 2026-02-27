@@ -126,11 +126,44 @@ impl<'a> Parser<'a> {
         let mut predicates = Vec::new();
         while !matches!(self.peek(), Some(Token::RBrace)) {
             match self.peek() {
-                Some(Token::Identifier(id)) if id == &name => constructors.push(self.parse_constructor()?),
                 Some(Token::Predicate) => predicates.push(self.parse_predicate()?),
                 Some(Token::Void) => methods.push(self.parse_method()?),
-                Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) | Some(Token::Identifier(_)) => methods.push(self.parse_method()?),
-                _ => return Err("Expected 'constructor', 'predicate', or method definition".to_string()),
+                _ => {
+                    // Lookahead to distinguish between constructor and field/method declaration
+                    let mut lookahead = 0;
+                    while let Some(Token::Identifier(_)) = self.peek_n(lookahead + 1) {
+                        lookahead += 1;
+                        if let Some(Token::Dot) = self.peek_n(lookahead + 1) {
+                            lookahead += 1; // consume '.'
+                        } else {
+                            break;
+                        }
+                    }
+                    if lookahead == 0 && matches!(self.peek(), Some(Token::Identifier(id)) if id == &name) {
+                        constructors.push(self.parse_constructor()?);
+                    } else {
+                        let t0 = self.peek_n(lookahead + 1).cloned();
+                        let t1 = self.peek_n(lookahead + 2).cloned();
+                        match (t0, t1) {
+                            (Some(Token::Identifier(_)), Some(Token::LParen)) => methods.push(self.parse_method()?),
+                            _ => {
+                                let field_type = self.parse_type()?;
+                                let mut field_names = Vec::new();
+                                while let Some(Token::Identifier(name)) = self.peek() {
+                                    field_names.push(name.clone());
+                                    self.next(); // consume identifier
+                                    if let Some(Token::Comma) = self.peek() {
+                                        self.next(); // consume ','
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                self.expect(Token::Semicolon)?;
+                                fields.push((field_type, field_names));
+                            }
+                        }
+                    }
+                }
             }
         }
         self.expect(Token::RBrace)?;
@@ -395,33 +428,26 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Vec<String>, String> {
-        match self.peek() {
-            Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) => {
-                let type_name = match self.next().unwrap() {
-                    Token::Bool => "bool".to_string(),
-                    Token::Int => "int".to_string(),
-                    Token::Real => "real".to_string(),
-                    Token::String => "string".to_string(),
-                    _ => unreachable!(),
-                };
-                return Ok(vec![type_name]);
+        match self.next() {
+            Some(Token::Bool) => Ok(vec!["bool".to_string()]),
+            Some(Token::Int) => Ok(vec!["int".to_string()]),
+            Some(Token::Real) => Ok(vec!["real".to_string()]),
+            Some(Token::String) => Ok(vec!["string".to_string()]),
+            Some(Token::Identifier(name)) => {
+                let mut ids = vec![name];
+                while let Some(Token::Dot) = self.peek() {
+                    self.next(); // consume '.'
+                    if let Some(Token::Identifier(next_name)) = self.next() {
+                        ids.push(next_name);
+                    } else {
+                        return Err("Expected identifier after '.' in type".to_string());
+                    }
+                }
+                Ok(ids)
             }
-            Some(Token::Identifier(_)) => self.parse_qualified_id(),
-            _ => Err("Expected type name".to_string()),
+            Some(token) => Err(format!("Unexpected token in type: {:?}", token)),
+            None => Err("Unexpected end of input while parsing type".to_string()),
         }
-    }
-
-    fn is_qualified_id(&mut self) -> bool {
-        let mut lookahead = 0;
-        while let Some(Token::Identifier(_)) = self.peek_n(lookahead + 1) {
-            lookahead += 1;
-            if let Some(Token::Dot) = self.peek_n(lookahead + 1) {
-                lookahead += 1; // consume '.'
-            } else {
-                break;
-            }
-        }
-        lookahead > 0
     }
 
     fn parse_qualified_id(&mut self) -> Result<Vec<String>, String> {
@@ -485,8 +511,14 @@ impl<'a> Parser<'a> {
                 Ok(Statement::LocalField { field_type, fields })
             }
             Some(Token::Identifier(_)) => {
-                if !self.is_qualified_id() {
-                    return Err("Expected qualified identifier".to_string());
+                let mut lookahead = 0;
+                while let Some(Token::Identifier(_)) = self.peek_n(lookahead + 1) {
+                    lookahead += 1;
+                    if let Some(Token::Dot) = self.peek_n(lookahead + 1) {
+                        lookahead += 1; // consume '.'
+                    } else {
+                        break;
+                    }
                 }
                 match self.peek() {
                     Some(Token::Equal) => {
