@@ -8,7 +8,7 @@ pub enum Expr {
     Real(i64, i64),
     QualifiedId { ids: Vec<String> },
     Sum { terms: Vec<Expr> },
-    Sub { terms: Vec<Expr> },
+    Opposite { term: Box<Expr> },
     Mul { factors: Vec<Expr> },
     Div { left: Box<Expr>, right: Box<Expr> },
     Function { name: Vec<String>, args: Vec<Expr> },
@@ -172,7 +172,7 @@ impl<'a> Parser<'a> {
                 Token::Minus => {
                     self.next(); // consume '-'
                     let right = self.parse_multiplicative_expression()?;
-                    terms.push(Expr::Sub { terms: vec![right] });
+                    terms.push(Expr::Opposite { term: Box::new(right) });
                 }
                 _ => break,
             }
@@ -267,11 +267,7 @@ impl<'a> Parser<'a> {
     fn parse_expr_list(&mut self) -> Result<Vec<Expr>, String> {
         self.expect(Token::LParen)?;
         let mut exprs = Vec::new();
-        if let Some(Token::RParen) = self.peek() {
-            self.next(); // consume ')'
-            return Ok(exprs);
-        }
-        loop {
+        while !matches!(self.peek(), Some(Token::RParen)) {
             exprs.push(self.parse_expression()?);
             if let Some(Token::Comma) = self.peek() {
                 self.next(); // consume ','
@@ -279,6 +275,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+        self.expect(Token::RParen)?;
         Ok(exprs)
     }
 
@@ -507,6 +504,37 @@ mod tests {
                     Expr::QualifiedId { ids: vec!["a".to_string()] },
                     Expr::And {
                         terms: vec![Expr::QualifiedId { ids: vec!["b".to_string()] }, Expr::QualifiedId { ids: vec!["c".to_string()] },]
+                    }
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn test_complex_expression() {
+        assert_eq!(
+            parse("f(x) + 3 * (y - 2) >= 10 & g(z) != 5"),
+            Expr::And {
+                terms: vec![
+                    Expr::Geq {
+                        left: Box::new(Expr::Sum {
+                            terms: vec![
+                                Expr::Function { name: vec!["f".to_string()], args: vec![Expr::QualifiedId { ids: vec!["x".to_string()] }] },
+                                Expr::Mul {
+                                    factors: vec![
+                                        Expr::Int(3),
+                                        Expr::Sum {
+                                            terms: vec![Expr::QualifiedId { ids: vec!["y".to_string()] }, Expr::Opposite { term: Box::new(Expr::Int(2)) },]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }),
+                        right: Box::new(Expr::Int(10))
+                    },
+                    Expr::Neq {
+                        left: Box::new(Expr::Function { name: vec!["g".to_string()], args: vec![Expr::QualifiedId { ids: vec!["z".to_string()] }] }),
+                        right: Box::new(Expr::Int(5))
                     }
                 ]
             }
