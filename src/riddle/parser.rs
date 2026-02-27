@@ -794,4 +794,50 @@ mod tests {
             panic!("Expected disjunction statement");
         }
     }
+
+    #[test]
+    fn test_priced_disjunction() {
+        let input = r#"
+            {
+                x == 1;
+            } [5] or {
+                x == 2;
+            } [10.0]
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let statement = parser.parse_statement().expect("Failed to parse priced disjunction");
+        if let Statement::Disjunction { disjuncts } = statement {
+            assert_eq!(disjuncts.len(), 2);
+            assert_eq!(disjuncts[0].1, Expr::Int(5));
+            assert_eq!(disjuncts[1].1, Expr::Real(100, 10));
+        } else {
+            panic!("Expected disjunction statement");
+        }
+    }
+
+    #[test]
+    fn test_for_all() {
+        let input = r#"
+            for (int i) {
+                x == i;
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let statement = parser.parse_statement().expect("Failed to parse for loop");
+        if let Statement::ForAll { var_type, var_name, statements } = statement {
+            assert_eq!(var_type, vec!["int".to_string()]);
+            assert_eq!(var_name, "i");
+            assert_eq!(statements.len(), 1);
+            if let Statement::Expr(Expr::Eq { left, right }) = &statements[0] {
+                assert_eq!(**left, Expr::QualifiedId { ids: vec!["x".to_string()] });
+                assert_eq!(**right, Expr::QualifiedId { ids: vec!["i".to_string()] });
+            } else {
+                panic!("Expected equality statement in for loop body");
+            }
+        } else {
+            panic!("Expected for loop statement");
+        }
+    }
 }
