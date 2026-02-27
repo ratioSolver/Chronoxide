@@ -207,6 +207,115 @@ impl<'a> Parser<'a> {
             None => Err("Unexpected end of input".to_string()),
         }
     }
+
+    pub fn parse_statement(&mut self) -> Result<Statement, String> {
+        match self.peek() {
+            Some(Token::Bool | Token::Int | Token::Real | Token::String) => {
+                let field_type = match self.next().unwrap() {
+                    Token::Bool => vec!["bool".to_string()],
+                    Token::Int => vec!["int".to_string()],
+                    Token::Real => vec!["real".to_string()],
+                    _ => unreachable!(),
+                };
+                let mut fields = Vec::new();
+                loop {
+                    if let Some(Token::Identifier(name)) = self.next() {
+                        let init_expr = if let Some(Token::Equal) = self.peek() {
+                            self.next(); // consume '='
+                            Some(self.parse_expression()?)
+                        } else {
+                            None
+                        };
+                        fields.push((name, init_expr));
+                    } else {
+                        return Err("Expected identifier in field declaration".to_string());
+                    }
+                    if let Some(Token::Comma) = self.peek() {
+                        self.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                Ok(Statement::LocalField { field_type, fields })
+            }
+            Some(Token::Identifier(id)) => {
+                let mut name = vec![id.clone()];
+                while let Some(Token::Dot) = self.peek() {
+                    self.next(); // consume '.'
+                    if let Some(Token::Identifier(next_id)) = self.next() {
+                        name.push(next_id);
+                    } else {
+                        return Err("Expected identifier after '.'".to_string());
+                    }
+                }
+                if let Some(Token::Equal) = self.peek() {
+                    self.next(); // consume '='
+                    let value = self.parse_expression()?;
+                    Ok(Statement::Assign { name, value })
+                } else {
+                    let expr = self.parse_expression()?;
+                    Ok(Statement::Expr(expr))
+                }
+            }
+            Some(Token::LBrace) => {
+                self.next(); // consume '{'
+                let mut branches = Vec::new();
+                loop {
+                    let mut statements = Vec::new();
+                    while let Some(Token::RBrace) = self.peek() {
+                        statements.push(self.parse_statement()?);
+                    }
+                    self.expect(Token::RBrace)?;
+
+                    let cost = if let Some(Token::LBracket) = self.peek() {
+                        self.next(); // consume '['
+                        let cost_expr = self.parse_expression()?;
+                        self.expect(Token::RBracket)?;
+                        cost_expr
+                    } else {
+                        Expr::Int(1) // default cost
+                    };
+                    branches.push((statements, cost));
+                    if let Some(Token::Or) = self.peek() {
+                        self.next(); // consume 'or'
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                Ok(Statement::Disjunction { disjuncts: branches })
+            }
+            Some(Token::For) => {
+                self.next(); // consume 'for'
+                self.expect(Token::LParen)?;
+                let var_type = match self.next() {
+                    Some(Token::Identifier(type_name)) => vec![type_name],
+                    _ => return Err("Expected type name in for loop".to_string()),
+                };
+                let var_name = match self.next() {
+                    Some(Token::Identifier(name)) => name,
+                    _ => return Err("Expected variable name in for loop".to_string()),
+                };
+                self.expect(Token::RParen)?;
+                self.expect(Token::LBrace)?;
+                let mut statements = Vec::new();
+                while let Some(Token::RBrace) = self.peek() {
+                    statements.push(self.parse_statement()?);
+                }
+                self.expect(Token::RBrace)?;
+                Ok(Statement::ForAll { var_type, var_name, statements })
+            }
+            Some(Token::Return) => {
+                self.next(); // consume 'return'
+                let value = self.parse_expression()?;
+                Ok(Statement::Return { value })
+            }
+            _ => {
+                let expr = self.parse_expression()?;
+                Ok(Statement::Expr(expr))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

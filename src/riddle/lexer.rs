@@ -30,7 +30,7 @@ pub enum Token {
     GreaterEqual,
     Semicolon,
     Bool,
-    Integer,
+    Int,
     Real,
     String,
     Class,
@@ -235,7 +235,7 @@ impl<'a> Lexer<'a> {
             "true" => Token::BoolLiteral(true),
             "false" => Token::BoolLiteral(false),
             "bool" => Token::Bool,
-            "int" => Token::Integer,
+            "int" => Token::Int,
             "real" => Token::Real,
             "string" => Token::String,
             "class" => Token::Class,
@@ -313,7 +313,7 @@ mod tests {
     fn test_lexer_keywords() {
         let input = "int real string class predicate enum new for this void return fact goal or";
         let mut lexer = Lexer::new(input);
-        let expected_tokens = vec![Token::Integer, Token::Real, Token::String, Token::Class, Token::Predicate, Token::Enum, Token::New, Token::For, Token::This, Token::Void, Token::Return, Token::Fact, Token::Goal, Token::Or];
+        let expected_tokens = vec![Token::Int, Token::Real, Token::String, Token::Class, Token::Predicate, Token::Enum, Token::New, Token::For, Token::This, Token::Void, Token::Return, Token::Fact, Token::Goal, Token::Or];
         for expected in expected_tokens {
             let token = lexer.next_token();
             assert_eq!(token, expected);
@@ -324,7 +324,7 @@ mod tests {
     fn test_lexer_riddle() {
         let input = "class Person { int age; string name; }";
         let mut lexer = Lexer::new(input);
-        let expected_tokens = vec![Token::Class, Token::Identifier("Person".to_string()), Token::LBrace, Token::Integer, Token::Identifier("age".to_string()), Token::Semicolon, Token::String, Token::Identifier("name".to_string()), Token::Semicolon, Token::RBrace];
+        let expected_tokens = vec![Token::Class, Token::Identifier("Person".to_string()), Token::LBrace, Token::Int, Token::Identifier("age".to_string()), Token::Semicolon, Token::String, Token::Identifier("name".to_string()), Token::Semicolon, Token::RBrace];
         for expected in expected_tokens {
             let token = lexer.next_token();
             assert_eq!(token, expected);
