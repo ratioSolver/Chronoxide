@@ -39,6 +39,18 @@ pub struct Predicate {
     statements: Vec<Statement>,
 }
 
+pub struct Constructor {
+    args: Vec<(Vec<String>, String)>,
+    init: Vec<(String, Vec<Expr>)>,
+    statements: Vec<Statement>,
+}
+
+pub struct Method {
+    name: String,
+    args: Vec<(Vec<String>, String)>,
+    statements: Vec<Statement>,
+}
+
 pub(super) struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
 }
@@ -62,6 +74,55 @@ impl<'a> Parser<'a> {
             Some(token) => Err(format!("Expected {:?}, found {:?}", expected, token)),
             None => Err(format!("Expected {:?}, found end of input", expected)),
         }
+    }
+
+    pub fn parse_constructor(&mut self) -> Result<Constructor, String> {
+        let _ = match self.next() {
+            Some(Token::Identifier(name)) => name,
+            _ => return Err("Expected constructor name".to_string()),
+        };
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        while !matches!(self.peek(), Some(Token::RParen)) {
+            let arg_type = self.parse_type()?;
+            let arg_name = match self.next() {
+                Some(Token::Identifier(name)) => name,
+                _ => return Err("Expected identifier in constructor arguments".to_string()),
+            };
+            args.push((arg_type, arg_name));
+            if let Some(Token::Comma) = self.peek() {
+                self.next(); // consume ','
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::RParen)?;
+        let mut init = Vec::new();
+        if let Some(Token::Colon) = self.peek() {
+            self.next(); // consume ':'
+            while !matches!(self.peek(), Some(Token::LBrace)) {
+                let field_name = match self.next() {
+                    Some(Token::Identifier(name)) => name,
+                    _ => return Err("Expected identifier in constructor initialization".to_string()),
+                };
+                self.expect(Token::LParen)?;
+                let args = self.parse_expr_list()?;
+                self.expect(Token::RParen)?;
+                init.push((field_name, args));
+                if let Some(Token::Comma) = self.peek() {
+                    self.next(); // consume ','
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::LBrace)?;
+        let mut statements = Vec::new();
+        while !matches!(self.peek(), Some(Token::RBrace)) {
+            statements.push(self.parse_statement()?);
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Constructor { args, init, statements })
     }
 
     pub fn parse_predicate(&mut self) -> Result<Predicate, String> {
@@ -216,7 +277,9 @@ impl<'a> Parser<'a> {
                     }
                 }
                 if let Some(Token::LParen) = self.peek() {
+                    self.expect(Token::LParen)?;
                     let args = self.parse_expr_list()?;
+                    self.expect(Token::RParen)?;
                     Ok(Expr::Function { name: ids, args })
                 } else {
                     Ok(Expr::QualifiedId { ids })
@@ -266,7 +329,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr_list(&mut self) -> Result<Vec<Expr>, String> {
-        self.expect(Token::LParen)?;
         let mut exprs = Vec::new();
         while !matches!(self.peek(), Some(Token::RParen)) {
             exprs.push(self.parse_expression()?);
@@ -276,7 +338,6 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        self.expect(Token::RParen)?;
         Ok(exprs)
     }
 
@@ -480,7 +541,7 @@ mod tests {
         assert_eq!(parse("1 <= 2"), Expr::Leq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
         assert_eq!(parse("1 > 2"), Expr::Gt { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
         assert_eq!(parse("1 >= 2"), Expr::Geq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
-        assert_eq!(parse("1 = 1"), Expr::Eq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(1)) });
+        assert_eq!(parse("1 == 1"), Expr::Eq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(1)) });
         assert_eq!(parse("1 != 2"), Expr::Neq { left: Box::new(Expr::Int(1)), right: Box::new(Expr::Int(2)) });
     }
 
@@ -560,6 +621,42 @@ mod tests {
             assert_eq!(**right, Expr::Int(0));
         } else {
             panic!("Expected equality statement in predicate body");
+        }
+    }
+
+    #[test]
+    fn test_constructor() {
+        let input = r#"
+            Point(int x, int y) : distance(x, y) {
+                distance = sqrt(x*x + y*y);
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let constructor = parser.parse_constructor().expect("Failed to parse constructor");
+        assert_eq!(constructor.args, vec![(vec!["int".to_string()], "x".to_string()), (vec!["int".to_string()], "y".to_string())]);
+        assert_eq!(constructor.init, vec![("distance".to_string(), vec![Expr::QualifiedId { ids: vec!["x".to_string()] }, Expr::QualifiedId { ids: vec!["y".to_string()] }])]);
+        assert_eq!(constructor.statements.len(), 1);
+        if let Statement::Assign { name, value } = &constructor.statements[0] {
+            assert_eq!(name, &vec!["distance".to_string()]);
+            assert_eq!(
+                *value,
+                Expr::Function {
+                    name: vec!["sqrt".to_string()],
+                    args: vec![Expr::Sum {
+                        terms: vec![
+                            Expr::Mul {
+                                factors: vec![Expr::QualifiedId { ids: vec!["x".to_string()] }, Expr::QualifiedId { ids: vec!["x".to_string()] }]
+                            },
+                            Expr::Mul {
+                                factors: vec![Expr::QualifiedId { ids: vec!["y".to_string()] }, Expr::QualifiedId { ids: vec!["y".to_string()] }]
+                            },
+                        ]
+                    }]
+                }
+            );
+        } else {
+            panic!("Expected assignment statement in constructor body");
         }
     }
 }
