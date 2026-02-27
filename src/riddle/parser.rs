@@ -52,9 +52,10 @@ pub struct Method {
     statements: Vec<Statement>,
 }
 
-pub struct ClassDef {
+pub struct Class {
     name: String,
     parents: Vec<Vec<String>>,
+    fields: Vec<(Vec<String>, Vec<String>)>,
     constructors: Vec<Constructor>,
     methods: Vec<Method>,
     predicates: Vec<Predicate>,
@@ -85,7 +86,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_class_def(&mut self) -> Result<ClassDef, String> {
+    pub fn parse_class(&mut self) -> Result<Class, String> {
         self.expect(Token::Class)?;
         let name = match self.next() {
             Some(Token::Identifier(name)) => name,
@@ -107,6 +108,7 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         self.expect(Token::LBrace)?;
+        let mut fields = Vec::new();
         let mut constructors = Vec::new();
         let mut methods = Vec::new();
         let mut predicates = Vec::new();
@@ -114,12 +116,13 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 Some(Token::Identifier(id)) if id == &name => constructors.push(self.parse_constructor()?),
                 Some(Token::Predicate) => predicates.push(self.parse_predicate()?),
-                Some(Token::Void) | Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) | Some(Token::Identifier(_)) => methods.push(self.parse_method()?),
+                Some(Token::Void) => methods.push(self.parse_method()?),
+                Some(Token::Bool) | Some(Token::Int) | Some(Token::Real) | Some(Token::String) | Some(Token::Identifier(_)) => methods.push(self.parse_method()?),
                 _ => return Err("Expected 'constructor', 'predicate', or method definition".to_string()),
             }
         }
         self.expect(Token::RBrace)?;
-        Ok(ClassDef { name, parents, constructors, methods, predicates })
+        Ok(Class { name, parents, fields, constructors, methods, predicates })
     }
 
     pub fn parse_constructor(&mut self) -> Result<Constructor, String> {
@@ -965,5 +968,32 @@ mod tests {
                 panic!("Expected for loop in second disjunct");
             }
         }
+    }
+
+    #[test]
+    fn test_class() {
+        let input = r#"
+            class Point {
+                int x, y;
+
+                void move(int dx, int dy) {
+                    x = x + dx;
+                    y = y + dy;
+                }
+            }
+        "#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let class = parser.parse_class().expect("Failed to parse class");
+        assert_eq!(class.name, "Point");
+        assert_eq!(class.fields.len(), 1);
+        assert_eq!(class.fields[0].0, vec!["int".to_string()]);
+        assert_eq!(class.fields[0].1, vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(class.methods.len(), 1);
+        let method = &class.methods[0];
+        assert_eq!(method.return_type, None);
+        assert_eq!(method.name, "move");
+        assert_eq!(method.args, vec![(vec!["int".to_string()], "dx".to_string()), (vec!["int".to_string()], "dy".to_string())]);
+        assert_eq!(method.statements.len(), 2);
     }
 }
