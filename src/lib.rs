@@ -1,3 +1,4 @@
+use crate::env::Scope;
 use crate::env::classes::{Bool, CString, Class, Int, Real};
 use crate::env::objects::{BoolObject, IntObject, Object, RealObject, StringObject};
 use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
@@ -7,6 +8,7 @@ use linspire::{
     inf_rational::InfRational,
     lin::{c, v},
 };
+use riddle::language::{Field, MethodDef};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 mod env;
@@ -185,6 +187,32 @@ impl Solver {
 
     pub fn add_class(&self, class: Rc<dyn Class>) {
         self.classes.borrow_mut().insert(class.name().to_string(), class);
+    }
+}
+
+impl Scope for Solver {
+    fn solver(self: Rc<Self>) -> Rc<Solver> {
+        self
+    }
+
+    fn parent(&self) -> Option<Rc<dyn Scope>> {
+        None
+    }
+
+    fn get_field(&self, _name: &str) -> Option<Field> {
+        None
+    }
+
+    fn get_method(&self, _name: &str) -> Option<MethodDef> {
+        None
+    }
+
+    fn get_class(&self, name: &str) -> Option<Rc<dyn Class>> {
+        self.classes.borrow().get(name).cloned()
+    }
+
+    fn get_predicate(&self, _name: &str) -> Option<riddle::language::PredicateDef> {
+        None
     }
 }
 

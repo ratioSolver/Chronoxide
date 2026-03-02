@@ -6,6 +6,9 @@ use consensus::Lit;
 use linspire::lin::Lin;
 use std::{
     any::Any,
+    cell::RefCell,
+    collections::HashMap,
+    hash::Hash,
     rc::{Rc, Weak},
 };
 
@@ -98,5 +101,36 @@ impl Object for StringObject {
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
         self
+    }
+}
+
+pub struct CompositeObject {
+    class: Weak<dyn Class>,
+    fields: RefCell<HashMap<String, Rc<dyn Object>>>,
+}
+
+impl CompositeObject {
+    pub fn new(class: Rc<dyn Class>) -> Self {
+        Self { class: Rc::downgrade(&class), fields: RefCell::new(HashMap::new()) }
+    }
+}
+
+impl Object for CompositeObject {
+    fn class(&self) -> Rc<dyn Class> {
+        self.class.upgrade().expect("Class has been dropped").clone()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+}
+
+impl Env for CompositeObject {
+    fn parent(&self) -> Option<Rc<dyn Env>> {
+        None
+    }
+
+    fn get(&self, name: &str) -> Option<Rc<dyn Object>> {
+        self.fields.borrow().get(name).cloned()
     }
 }

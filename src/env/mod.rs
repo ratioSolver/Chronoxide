@@ -10,7 +10,7 @@ pub mod classes;
 pub mod objects;
 
 pub trait Scope {
-    fn solver(&self) -> Rc<Solver>;
+    fn solver(self: Rc<Self>) -> Rc<Solver>;
     fn parent(&self) -> Option<Rc<dyn Scope>>;
 
     fn get_field(&self, name: &str) -> Option<Field>;
