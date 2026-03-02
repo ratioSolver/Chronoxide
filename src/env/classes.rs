@@ -1,5 +1,4 @@
 use crate::{Solver, env::objects::Object};
-use riddle::language::Expr;
 use std::{
     any::Any,
     rc::{Rc, Weak},
@@ -9,12 +8,6 @@ pub trait Class {
     fn name(&self) -> &str;
     fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
     fn new_instance(&mut self) -> Rc<dyn Object>;
-}
-
-pub struct Field {
-    component_type: Weak<dyn Class>,
-    name: String,
-    expr: Option<Expr>,
 }
 
 pub struct Bool {
@@ -86,5 +79,29 @@ impl Class for Real {
 
     fn new_instance(&mut self) -> Rc<dyn Object> {
         self.solver.upgrade().expect("Solver has been dropped").new_real()
+    }
+}
+
+pub struct CString {
+    solver: Weak<Solver>,
+}
+
+impl CString {
+    pub fn new(solver: &Rc<Solver>) -> Self {
+        Self { solver: Rc::downgrade(solver) }
+    }
+}
+
+impl Class for CString {
+    fn name(&self) -> &str {
+        "string"
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+
+    fn new_instance(&mut self) -> Rc<dyn Object> {
+        self.solver.upgrade().expect("Solver has been dropped").new_string("")
     }
 }

@@ -1,4 +1,4 @@
-use crate::env::classes::{Bool, Class, Int, Real};
+use crate::env::classes::{Bool, CString, Class, Int, Real};
 use consensus::Lit;
 use linspire::lin::Lin;
 use std::{
@@ -65,6 +65,27 @@ impl RealObject {
 }
 
 impl Object for RealObject {
+    fn class(&self) -> Rc<dyn Class> {
+        self.class.upgrade().expect("Class has been dropped").clone()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+}
+
+pub struct StringObject {
+    class: Weak<CString>,
+    pub(crate) value: String,
+}
+
+impl StringObject {
+    pub fn new(class: &Rc<CString>, value: String) -> Self {
+        Self { class: Rc::downgrade(class), value }
+    }
+}
+
+impl Object for StringObject {
     fn class(&self) -> Rc<dyn Class> {
         self.class.upgrade().expect("Class has been dropped").clone()
     }

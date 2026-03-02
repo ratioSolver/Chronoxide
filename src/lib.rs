@@ -1,8 +1,5 @@
-use crate::env::objects::{IntObject, Object, RealObject};
-use crate::env::{
-    classes::{Bool, Class, Field, Int, Real},
-    objects::BoolObject,
-};
+use crate::env::classes::{Bool, CString, Class, Int, Real};
+use crate::env::objects::{BoolObject, IntObject, Object, RealObject, StringObject};
 use consensus::{LBool, pos};
 use linspire::{
     inf_rational::InfRational,
@@ -20,7 +17,6 @@ pub struct Solver {
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
-    fields: RefCell<HashMap<String, Rc<Field>>>,
     classes: RefCell<HashMap<String, Rc<dyn Class>>>,
 }
 
@@ -30,12 +26,12 @@ impl Solver {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
-            fields: RefCell::new(HashMap::new()),
             classes: RefCell::new(HashMap::new()),
         });
         slv.add_class(Rc::new(Bool::new(&slv)));
         slv.add_class(Rc::new(Int::new(&slv)));
         slv.add_class(Rc::new(Real::new(&slv)));
+        slv.add_class(Rc::new(CString::new(&slv)));
         slv
     }
 
@@ -73,6 +69,17 @@ impl Solver {
 
     pub fn real_val(&self, obj: &RealObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
+    }
+
+    pub fn new_string(&self, value: &str) -> Rc<dyn Object> {
+        let classes = self.classes.borrow();
+        let string_class = classes.get("string").expect("String class not found").clone();
+        let string_class = string_class.as_any().downcast::<CString>().expect("Failed to downcast to String class");
+        Rc::new(StringObject::new(&string_class, value.to_string()))
+    }
+
+    pub fn string_val(&self, obj: &StringObject) -> String {
+        obj.value.clone()
     }
 
     pub fn new_sum(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Object>, RiddleError> {
