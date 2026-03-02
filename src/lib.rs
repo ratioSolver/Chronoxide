@@ -1,6 +1,8 @@
 use crate::env::classes::{Bool, CString, Class, Int, Real};
 use crate::env::objects::{BoolObject, IntObject, Object, RealObject, StringObject};
-use consensus::{LBool, pos};
+use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
+use linspire::lin::Lin;
+use linspire::rational::Rational;
 use linspire::{
     inf_rational::InfRational,
     lin::{c, v},
@@ -35,6 +37,14 @@ impl Solver {
         slv
     }
 
+    pub fn new_bool_const(&self, value: bool) -> Rc<BoolObject> {
+        let lit = if value { TRUE_LIT } else { FALSE_LIT };
+        let classes = self.classes.borrow();
+        let bool_class = classes.get("bool").expect("Bool class not found").clone();
+        let bool_class = bool_class.as_any().downcast::<Bool>().expect("Failed to downcast to Bool class");
+        Rc::new(BoolObject::new(&bool_class, lit))
+    }
+
     pub fn new_bool(&self) -> Rc<BoolObject> {
         let var = self.sat.borrow_mut().add_var();
         let classes = self.classes.borrow();
@@ -47,6 +57,14 @@ impl Solver {
         self.sat.borrow().lit_value(&obj.lit).clone()
     }
 
+    pub fn new_int_const(&self, value: i64) -> Rc<IntObject> {
+        let lin = c(value);
+        let classes = self.classes.borrow();
+        let int_class = classes.get("int").expect("Int class not found").clone();
+        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
+        Rc::new(IntObject::new(&int_class, lin))
+    }
+
     pub fn new_int(&self) -> Rc<IntObject> {
         let var = self.lin.borrow_mut().add_var();
         let classes = self.classes.borrow();
@@ -57,6 +75,14 @@ impl Solver {
 
     pub fn int_val(&self, obj: &IntObject) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
+    }
+
+    pub fn new_real_const(&self, value: Rational) -> Rc<RealObject> {
+        let lin = Lin::new_const(value);
+        let classes = self.classes.borrow();
+        let real_class = classes.get("real").expect("Real class not found").clone();
+        let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
+        Rc::new(RealObject::new(&real_class, lin))
     }
 
     pub fn new_real(&self) -> Rc<RealObject> {
