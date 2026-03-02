@@ -1,5 +1,5 @@
-use crate::riddle::objects::{IntObject, Object, RealObject};
-use crate::riddle::{
+use crate::env::objects::{IntObject, Object, RealObject};
+use crate::env::{
     classes::{Bool, Class, Field, Int, Real},
     objects::BoolObject,
 };
@@ -10,7 +10,7 @@ use linspire::{
 };
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-mod riddle;
+mod env;
 
 pub enum RiddleError {
     TypeError(String),

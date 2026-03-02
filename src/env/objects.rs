@@ -1,4 +1,4 @@
-use crate::riddle::classes::{Bool, Class, Int, Real};
+use crate::env::classes::{Bool, Class, Int, Real};
 use consensus::Lit;
 use linspire::lin::Lin;
 use std::{

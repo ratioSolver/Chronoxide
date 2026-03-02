@@ -104,6 +104,7 @@ dependencies = [
  "consensus",
  "dynamic-ac",
  "linspire",
+ "riddle",
  "tokio",
  "tower-http",
 ]
@@ -511,6 +512,11 @@ checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
 ]
+
+[[package]]
+name = "riddle"
+version = "0.1.0"
+source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#bc010a392a911711391646ad005c967d1409b2a6"
 
 [[package]]
 name = "ryu"

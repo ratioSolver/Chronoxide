@@ -1,7 +1,5 @@
-use crate::{
-    Solver,
-    riddle::{objects::Object, parser::Expr},
-};
+use crate::{Solver, env::objects::Object};
+use riddle::language::Expr;
 use std::{
     any::Any,
     rc::{Rc, Weak},
