@@ -47,11 +47,9 @@ pub fn evaluate(scp: Rc<dyn Scope>, env: Rc<dyn Env>, expr: &Expr) -> Result<Rc<
         Expr::Real(num, den) => Ok(scp.solver().new_real_const(rat(*num, *den))),
         Expr::String(string) => Ok(scp.solver().new_string(string)),
         Expr::QualifiedId { ids } => {
-            let env = env.get(ids[0].as_str()).ok_or_else(|| RiddleError::TypeError(format!("Identifier '{}' not found", ids[0])))?;
-            for id in &ids[1..] {
-                env = env.as_any().downcast_ref::<dyn Env>().ok_or_else(|| RiddleError::TypeError(format!("Identifier '{}' is not an environment", id)))?.get(id.as_str()).ok_or_else(|| RiddleError::TypeError(format!("Identifier '{}' not found in '{}'", id, ids[..ids.len() - 1].join("."))))?;
-            }
-            Ok(obj.new_instance())
+            let (first, rest) = ids.split_first().ok_or_else(|| RiddleError::RuntimeError("Empty identifier path".into()))?;
+            let root = env.get(first).ok_or_else(|| RiddleError::NotFound(first.to_string()))?;
+            rest.iter().try_fold(root, |acc, id| acc.as_env().ok_or_else(|| RiddleError::NotAnEnvironment(id.to_string()))?.get(id).ok_or_else(|| RiddleError::NotFound(format!("Member '{}' in path", id))))
         }
         _ => unimplemented!(),
     }

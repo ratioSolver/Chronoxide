@@ -12,7 +12,10 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 mod env;
 
 pub enum RiddleError {
+    NotAnEnvironment(String),
     TypeError(String),
+    NotFound(String),
+    RuntimeError(String),
 }
 
 pub struct Solver {

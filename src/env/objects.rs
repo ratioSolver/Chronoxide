@@ -1,4 +1,7 @@
-use crate::env::classes::{Bool, CString, Class, Int, Real};
+use crate::env::{
+    Env,
+    classes::{Bool, CString, Class, Int, Real},
+};
 use consensus::Lit;
 use linspire::lin::Lin;
 use std::{
@@ -9,6 +12,9 @@ use std::{
 pub trait Object {
     fn class(&self) -> Rc<dyn Class>;
     fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
+    fn as_env(&self) -> Option<&dyn Env> {
+        None
+    }
 }
 
 pub struct BoolObject {
