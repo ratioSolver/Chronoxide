@@ -1,236 +1,195 @@
-use crate::env::Scope;
-use crate::env::classes::{Bool, CString, Class, Int, Real};
-use crate::env::objects::{BoolObject, IntObject, Object, RealObject, StringObject};
 use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
-use linspire::lin::Lin;
-use linspire::rational::Rational;
 use linspire::{
     inf_rational::InfRational,
-    lin::{c, v},
+    lin::{Lin, c, v},
+    rational::rat,
 };
-use riddle::language::{Field, MethodDef};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use riddle::{
+    env::{BoolType, CommonEnv, CommonScope, Core, Env, Field, IntType, Method, RealType, Scope, StringType, Type, Var},
+    language::{EnumDef, PredicateDef},
+};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
-mod env;
+use crate::objects::{BoolVar, IntVar, RealVar, StringVar};
 
-pub enum RiddleError {
-    NotAnEnvironment(String),
-    TypeError(String),
-    NotFound(String),
-    RuntimeError(String),
-}
+mod objects;
 
 pub struct Solver {
+    scope: Rc<CommonScope>,
+    env: Rc<CommonEnv>,
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
-    classes: RefCell<HashMap<String, Rc<dyn Class>>>,
 }
 
 impl Solver {
     pub fn new() -> Rc<Self> {
-        let slv = Rc::new(Self {
+        let core = Rc::new_cyclic(|core| Self {
+            scope: {
+                let core: Weak<Solver> = core.clone();
+                Rc::new(CommonScope::new(core.clone(), None))
+            },
+            env: Rc::new(CommonEnv::new(None)),
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
-            classes: RefCell::new(HashMap::new()),
         });
-        slv.add_class(Rc::new(Bool::new(&slv)));
-        slv.add_class(Rc::new(Int::new(&slv)));
-        slv.add_class(Rc::new(Real::new(&slv)));
-        slv.add_class(Rc::new(CString::new(&slv)));
-        slv
+        core
     }
 
-    pub fn new_bool_const(&self, value: bool) -> Rc<BoolObject> {
-        let lit = if value { TRUE_LIT } else { FALSE_LIT };
-        let classes = self.classes.borrow();
-        let bool_class = classes.get("bool").expect("Bool class not found").clone();
-        let bool_class = bool_class.as_any().downcast::<Bool>().expect("Failed to downcast to Bool class");
-        Rc::new(BoolObject::new(&bool_class, lit))
-    }
-
-    pub fn new_bool(&self) -> Rc<BoolObject> {
-        let var = self.sat.borrow_mut().add_var();
-        let classes = self.classes.borrow();
-        let bool_class = classes.get("bool").expect("Bool class not found").clone();
-        let bool_class = bool_class.as_any().downcast::<Bool>().expect("Failed to downcast to Bool class");
-        Rc::new(BoolObject::new(&bool_class, pos(var)))
-    }
-
-    pub fn bool_val(&self, obj: &BoolObject) -> LBool {
+    pub fn bool_val(&self, obj: &BoolVar) -> LBool {
         self.sat.borrow().lit_value(&obj.lit).clone()
     }
 
-    pub fn new_int_const(&self, value: i64) -> Rc<IntObject> {
-        let lin = c(value);
-        let classes = self.classes.borrow();
-        let int_class = classes.get("int").expect("Int class not found").clone();
-        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(IntObject::new(&int_class, lin))
-    }
-
-    pub fn new_int(&self) -> Rc<IntObject> {
-        let var = self.lin.borrow_mut().add_var();
-        let classes = self.classes.borrow();
-        let int_class = classes.get("int").expect("Int class not found").clone();
-        let int_class = int_class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-        Rc::new(IntObject::new(&int_class, v(var)))
-    }
-
-    pub fn int_val(&self, obj: &IntObject) -> InfRational {
+    pub fn int_val(&self, obj: &IntVar) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn new_real_const(&self, value: Rational) -> Rc<RealObject> {
-        let lin = Lin::new_const(value);
-        let classes = self.classes.borrow();
-        let real_class = classes.get("real").expect("Real class not found").clone();
-        let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-        Rc::new(RealObject::new(&real_class, lin))
-    }
-
-    pub fn new_real(&self) -> Rc<RealObject> {
-        let var = self.lin.borrow_mut().add_var();
-        let classes = self.classes.borrow();
-        let real_class = classes.get("real").expect("Real class not found").clone();
-        let real_class = real_class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-        Rc::new(RealObject::new(&real_class, v(var)))
-    }
-
-    pub fn real_val(&self, obj: &RealObject) -> InfRational {
+    pub fn real_val(&self, obj: &RealVar) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
-    }
-
-    pub fn new_string(&self, value: &str) -> Rc<dyn Object> {
-        let classes = self.classes.borrow();
-        let string_class = classes.get("string").expect("String class not found").clone();
-        let string_class = string_class.as_any().downcast::<CString>().expect("Failed to downcast to String class");
-        Rc::new(StringObject::new(&string_class, value.to_string()))
-    }
-
-    pub fn string_val(&self, obj: &StringObject) -> String {
-        obj.value.clone()
-    }
-
-    pub fn new_sum(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Object>, RiddleError> {
-        let class = self.arith_class(&terms)?;
-        let lin = terms
-            .iter()
-            .map(|t| {
-                if t.class().name() == "int" {
-                    t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object").lin.clone()
-                } else if t.class().name() == "real" {
-                    t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object").lin.clone()
-                } else {
-                    panic!("Invalid term type in sum")
-                }
-            })
-            .fold(c(0), |acc, lin| acc + lin);
-        Ok(match class.name() {
-            "int" => {
-                let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-                Rc::new(IntObject::new(&int_class, lin))
-            }
-            "real" => {
-                let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-                Rc::new(RealObject::new(&real_class, lin))
-            }
-            _ => unreachable!(),
-        })
-    }
-
-    pub fn new_sub(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Object>, RiddleError> {
-        let class = self.arith_class(&terms)?;
-        let lin: Vec<_> = terms
-            .iter()
-            .map(|t| {
-                if t.class().name() == "int" {
-                    t.clone().as_any().downcast::<IntObject>().expect("Failed to downcast to Int object").lin.clone()
-                } else if t.class().name() == "real" {
-                    t.clone().as_any().downcast::<RealObject>().expect("Failed to downcast to Real object").lin.clone()
-                } else {
-                    panic!("Invalid term type in subtraction")
-                }
-            })
-            .collect();
-        let (first, rest) = lin.split_first().expect("At least one term is required for subtraction");
-        let lin = rest.iter().fold(first.clone(), |acc, lin| acc - lin);
-        Ok(match class.name() {
-            "int" => {
-                let int_class = class.as_any().downcast::<Int>().expect("Failed to downcast to Int class");
-                Rc::new(IntObject::new(&int_class, lin))
-            }
-            "real" => {
-                let real_class = class.as_any().downcast::<Real>().expect("Failed to downcast to Real class");
-                Rc::new(RealObject::new(&real_class, lin))
-            }
-            _ => unreachable!(),
-        })
-    }
-
-    fn arith_class(&self, terms: &[Rc<dyn Object>]) -> Result<Rc<dyn Class>, RiddleError> {
-        let classes = self.classes.borrow();
-        if terms.iter().all(|t| t.class().name() == "int") {
-            let int_class = classes.get("int").expect("Int class not found").clone();
-            Ok(int_class)
-        } else if terms.iter().all(|t| t.class().name() == "real") {
-            let real_class = classes.get("real").expect("Real class not found").clone();
-            Ok(real_class)
-        } else if terms.iter().all(|t| t.class().name() == "int" || t.class().name() == "real") {
-            let real_class = classes.get("real").expect("Real class not found").clone();
-            Ok(real_class)
-        } else {
-            Err(RiddleError::TypeError("Invalid term types in arithmetic operation".to_string()))
-        }
-    }
-
-    pub fn add_class(&self, class: Rc<dyn Class>) {
-        self.classes.borrow_mut().insert(class.name().to_string(), class);
     }
 }
 
 impl Scope for Solver {
-    fn solver(self: Rc<Self>) -> Rc<Solver> {
+    fn core(self: Rc<Self>) -> Rc<dyn Core> {
         self
     }
-
     fn parent(&self) -> Option<Rc<dyn Scope>> {
         None
     }
 
-    fn get_field(&self, _name: &str) -> Option<Field> {
+    fn get_field(&self, name: &str) -> Option<Rc<Field>> {
+        self.scope.get_field(name)
+    }
+    fn get_method(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Method>> {
+        self.scope.get_method(name, types)
+    }
+    fn get_class(&self, name: &str) -> Option<Rc<dyn Type>> {
+        self.scope.get_class(name)
+    }
+    fn get_enum(&self, name: &str) -> Option<Rc<EnumDef>> {
+        self.scope.get_enum(name)
+    }
+    fn get_predicate(&self, name: &str) -> Option<Rc<PredicateDef>> {
+        self.scope.get_predicate(name)
+    }
+}
+
+impl Env for Solver {
+    fn parent(&self) -> Option<Rc<dyn Env>> {
         None
     }
+    fn get(&self, name: &str) -> Option<Rc<dyn Var>> {
+        self.env.get(name)
+    }
+    fn set(&self, name: String, value: Rc<dyn Var>) {
+        self.env.set(name, value)
+    }
+}
 
-    fn get_method(&self, _name: &str) -> Option<MethodDef> {
-        None
+impl Core for Solver {
+    fn new_bool(&self, value: bool) -> Rc<dyn Var> {
+        let bool_type = self.scope.get_class("bool").expect("Bool type not found").as_any().downcast::<BoolType>().expect("Bool type is not BoolType");
+        Rc::new(BoolVar::new(bool_type, if value { TRUE_LIT } else { FALSE_LIT }))
+    }
+    fn new_bool_var(&self) -> Rc<dyn Var> {
+        let var = self.sat.borrow_mut().add_var();
+        let bool_type = self.scope.get_class("bool").expect("Bool type not found").as_any().downcast::<BoolType>().expect("Bool type is not BoolType");
+        Rc::new(BoolVar::new(bool_type, pos(var)))
+    }
+    fn new_int(&self, value: i64) -> Rc<dyn Var> {
+        let int_type = self.scope.get_class("Int").expect("Int type not found").as_any().downcast::<IntType>().expect("Int type is not IntType");
+        Rc::new(IntVar::new(int_type, c(value)))
+    }
+    fn new_int_var(&self) -> Rc<dyn Var> {
+        let var = self.lin.borrow_mut().add_var();
+        let int_type = self.scope.get_class("Int").expect("Int type not found").as_any().downcast::<IntType>().expect("Int type is not IntType");
+        Rc::new(IntVar::new(int_type, v(var)))
+    }
+    fn new_real(&self, num: i64, den: i64) -> Rc<dyn Var> {
+        let real_type = self.scope.get_class("real").expect("Real type not found").as_any().downcast::<RealType>().expect("Real type is not RealType");
+        Rc::new(RealVar::new(real_type, Lin::new_const(rat(num, den))))
+    }
+    fn new_real_var(&self) -> Rc<dyn Var> {
+        let var = self.lin.borrow_mut().add_var();
+        let real_type = self.scope.get_class("real").expect("Real type not found").as_any().downcast::<RealType>().expect("Real type is not RealType");
+        Rc::new(RealVar::new(real_type, v(var)))
+    }
+    fn new_string(&self, value: &str) -> Rc<dyn Var> {
+        let string_type = self.scope.get_class("string").expect("String type not found").as_any().downcast::<StringType>().expect("String type is not StringType");
+        Rc::new(StringVar::new(string_type, value.to_string()))
+    }
+    fn new_string_var(&self) -> Rc<dyn Var> {
+        let string_type = self.scope.get_class("string").expect("String type not found").as_any().downcast::<StringType>().expect("String type is not StringType");
+        Rc::new(StringVar::new(string_type, String::new()))
     }
 
-    fn get_class(&self, name: &str) -> Option<Rc<dyn Class>> {
-        self.classes.borrow().get(name).cloned()
+    fn sum(&self, sum: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn opposite(&self, term: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn mul(&self, mul: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn div(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
     }
 
-    fn get_predicate(&self, _name: &str) -> Option<riddle::language::PredicateDef> {
-        None
+    fn eq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn neq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+
+    fn lt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn leq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn geq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn gt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+
+    fn or(&self, terms: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn and(&self, terms: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+
+    fn assert(&self, term: Rc<dyn Var>) -> bool {
+        unimplemented!()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use consensus::LBool;
     use linspire::inf_rational::i_i;
+
+    use crate::objects::{IntVar, RealVar};
 
     use super::*;
 
     #[test]
     fn test_solver() {
         let solver = Solver::new();
-        let bool_obj = solver.new_bool();
-        let int_obj = solver.new_int();
-        let real_obj = solver.new_real();
+        let bool_obj = solver.new_bool_var();
+        let int_obj = solver.new_int_var();
+        let real_obj = solver.new_real_var();
 
-        assert_eq!(solver.bool_val(&bool_obj), LBool::Undef);
-        assert_eq!(solver.int_val(&int_obj), i_i(0));
-        assert_eq!(solver.real_val(&real_obj), i_i(0));
+        assert_eq!(solver.bool_val(bool_obj.as_any().downcast_ref::<BoolVar>().unwrap()), LBool::Undef);
+        assert_eq!(solver.int_val(int_obj.as_any().downcast_ref::<IntVar>().unwrap()), i_i(0));
+        assert_eq!(solver.real_val(real_obj.as_any().downcast_ref::<RealVar>().unwrap()), i_i(0));
     }
 }
