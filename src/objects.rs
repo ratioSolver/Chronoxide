@@ -1,26 +1,28 @@
+use consensus::Lit;
+use linspire::lin::Lin;
+use riddle::{
+    env::Var,
+    scope::{BoolType, IntType, RealType, StringType, Type},
+};
 use std::{
     any::Any,
     rc::{Rc, Weak},
 };
 
-use consensus::Lit;
-use linspire::lin::Lin;
-use riddle::env::{BoolType, IntType, RealType, StringType, Type, Var};
-
 pub struct BoolVar {
-    class: Weak<BoolType>,
+    var_type: Weak<BoolType>,
     pub(crate) lit: Lit,
 }
 
 impl BoolVar {
-    pub fn new(class: Rc<BoolType>, lit: Lit) -> Self {
-        Self { class: Rc::downgrade(&class), lit }
+    pub fn new(var_type: Rc<BoolType>, lit: Lit) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), lit }
     }
 }
 
 impl Var for BoolVar {
-    fn class(&self) -> Rc<dyn Type> {
-        self.class.upgrade().expect("Class has been dropped").clone()
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -29,19 +31,19 @@ impl Var for BoolVar {
 }
 
 pub struct IntVar {
-    class: Weak<IntType>,
+    var_type: Weak<IntType>,
     pub(crate) lin: Lin,
 }
 
 impl IntVar {
-    pub fn new(class: Rc<IntType>, lin: Lin) -> Self {
-        Self { class: Rc::downgrade(&class), lin }
+    pub fn new(var_type: Rc<IntType>, lin: Lin) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
 
 impl Var for IntVar {
-    fn class(&self) -> Rc<dyn Type> {
-        self.class.upgrade().expect("Class has been dropped").clone()
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -50,19 +52,19 @@ impl Var for IntVar {
 }
 
 pub struct RealVar {
-    class: Weak<RealType>,
+    var_type: Weak<RealType>,
     pub(crate) lin: Lin,
 }
 
 impl RealVar {
-    pub fn new(class: Rc<RealType>, lin: Lin) -> Self {
-        Self { class: Rc::downgrade(&class), lin }
+    pub fn new(var_type: Rc<RealType>, lin: Lin) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
 
 impl Var for RealVar {
-    fn class(&self) -> Rc<dyn Type> {
-        self.class.upgrade().expect("Class has been dropped").clone()
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -71,19 +73,19 @@ impl Var for RealVar {
 }
 
 pub struct StringVar {
-    class: Weak<StringType>,
+    var_type: Weak<StringType>,
     value: String,
 }
 
 impl StringVar {
-    pub fn new(class: Rc<StringType>, value: String) -> Self {
-        Self { class: Rc::downgrade(&class), value }
+    pub fn new(var_type: Rc<StringType>, value: String) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), value }
     }
 }
 
 impl Var for StringVar {
-    fn class(&self) -> Rc<dyn Type> {
-        self.class.upgrade().expect("Class has been dropped").clone()
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {

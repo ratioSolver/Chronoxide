@@ -5,8 +5,10 @@ use linspire::{
     rational::rat,
 };
 use riddle::{
-    env::{BoolType, CommonCore, CommonEnv, CommonScope, Core, Env, Field, IntType, Method, RealType, Scope, StringType, Type, Var},
-    language::{EnumDef, PredicateDef},
+    core::{CommonCore, Core},
+    env::{Atom, Env, Var},
+    language::{Disjunction, EnumDef, PredicateDef},
+    scope::{Field, Method, Predicate, Scope, Type},
 };
 use std::{
     cell::RefCell,
@@ -54,7 +56,7 @@ impl Scope for Solver {
     fn core(self: Rc<Self>) -> Rc<dyn Core> {
         self
     }
-    fn parent(&self) -> Option<Rc<dyn Scope>> {
+    fn scope(&self) -> Option<Rc<dyn Scope>> {
         None
     }
 
@@ -64,13 +66,13 @@ impl Scope for Solver {
     fn get_method(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Method>> {
         self.core.get_method(name, types)
     }
-    fn get_class(&self, name: &str) -> Option<Rc<dyn Type>> {
-        self.core.get_class(name)
+    fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
+        self.core.get_type(name)
     }
     fn get_enum(&self, name: &str) -> Option<Rc<EnumDef>> {
         self.core.get_enum(name)
     }
-    fn get_predicate(&self, name: &str) -> Option<Rc<PredicateDef>> {
+    fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
         self.core.get_predicate(name)
     }
 }
@@ -154,6 +156,18 @@ impl Core for Solver {
     }
 
     fn assert(&self, term: Rc<dyn Var>) -> bool {
+        unimplemented!()
+    }
+    fn new_enum(&self, variants: &[&str]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn new_var(&self, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+        unimplemented!()
+    }
+    fn new_disjunction(&self, disjunction: Disjunction) {
+        unimplemented!()
+    }
+    fn new_atom(&self, atom: Rc<Atom>) {
         unimplemented!()
     }
 }
