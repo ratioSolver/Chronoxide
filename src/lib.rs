@@ -50,6 +50,10 @@ impl Solver {
     pub fn real_val(&self, obj: &RealVar) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
+
+    pub fn read(&self, script: &str) {
+        self.core.read(script);
+    }
 }
 
 impl Scope for Solver {

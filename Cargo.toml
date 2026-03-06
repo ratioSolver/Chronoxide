@@ -8,11 +8,19 @@ readme = "README.md"
 repository = "https://github.com/ratioSolver/Chronoxide"
 license-file = "LICENSE.txt"
 
+[features]
+server = ["dep:axum", "dep:tower-http", "dep:tokio"]
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+required-features = ["server"]
+
 [dependencies]
 dynamic-ac = { git = "https://github.com/ratioSolver/dynamic-ac" }
 consensus = { git = "https://github.com/ratioSolver/Consensus" }
 linspire = { git = "https://github.com/ratioSolver/LinSpire" }
 riddle = { git = "https://github.com/ratioSolver/RiDDLe", branch = "rust" }
-axum = { version = "0.8.8", features = ["ws"] }
-tower-http = { version = "0.6.8", features = ["fs"] }
-tokio = { version = "1.0", features = ["full"] }
+axum = { version = "0.8.8", features = ["ws"], optional = true }
+tower-http = { version = "0.6.8", features = ["fs"], optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
