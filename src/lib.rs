@@ -7,7 +7,7 @@ use linspire::{
 use riddle::{
     core::{CommonCore, Core},
     env::{Atom, Env, Var},
-    language::{Disjunction, EnumDef, PredicateDef, RiddleError},
+    language::{Disjunction, EnumDef, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
 };
 use std::{
@@ -17,6 +17,7 @@ use std::{
 
 use crate::objects::{BoolVar, IntVar, RealVar, StringVar};
 
+mod flaw;
 mod objects;
 
 pub struct Solver {
