@@ -74,7 +74,7 @@ impl Var for RealVar {
 
 pub struct StringVar {
     var_type: Weak<StringType>,
-    value: String,
+    pub(crate) value: String,
 }
 
 impl StringVar {

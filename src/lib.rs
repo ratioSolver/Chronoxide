@@ -7,8 +7,8 @@ use linspire::{
 use riddle::{
     core::{CommonCore, Core},
     env::{Atom, Env, Var},
-    language::{Disjunction, EnumDef, PredicateDef},
-    scope::{Field, Method, Predicate, Scope, Type},
+    language::{Disjunction, EnumDef, PredicateDef, RiddleError},
+    scope::{Field, Method, Predicate, Scope, Type, arith_class},
 };
 use std::{
     cell::RefCell,
@@ -49,6 +49,10 @@ impl Solver {
 
     pub fn real_val(&self, obj: &RealVar) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
+    }
+
+    pub fn string_val(&self, obj: &StringVar) -> String {
+        obj.value.clone()
     }
 
     pub fn read(&self, script: &str) {
@@ -119,59 +123,78 @@ impl Core for Solver {
         Rc::new(StringVar::new(self.core.string_type(), String::new()))
     }
 
-    fn sum(&self, sum: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+    fn sum(self: Rc<Self>, sum: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        let mut result = c(0);
+        for var in sum {
+            if let Some(int_var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                result += &int_var.lin
+            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<RealVar>() {
+                result += &real_var.lin
+            } else {
+                panic!("Expected IntVar or RealVar");
+            };
+        }
+        let tp = arith_class(self.clone(), sum)?;
+        if tp.name() == "Int" { Ok(Rc::new(IntVar::new(self.core.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.core.real_type(), result))) }
+    }
+    fn opposite(self: Rc<Self>, term: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+        if let Some(bool_var) = term.clone().as_any().downcast_ref::<BoolVar>() {
+            Ok(Rc::new(BoolVar::new(self.core.bool_type(), !bool_var.lit)))
+        } else if let Some(int_var) = term.clone().as_any().downcast_ref::<IntVar>() {
+            Ok(Rc::new(IntVar::new(self.core.int_type(), -int_var.lin.clone())))
+        } else if let Some(real_var) = term.clone().as_any().downcast_ref::<RealVar>() {
+            Ok(Rc::new(RealVar::new(self.core.real_type(), -real_var.lin.clone())))
+        } else {
+            panic!("Expected BoolVar, IntVar, or RealVar");
+        }
+    }
+    fn mul(self: Rc<Self>, mul: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn opposite(&self, term: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn mul(&self, mul: &[Rc<dyn Var>]) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn div(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-
-    fn eq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn neq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-
-    fn lt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn leq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn geq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn gt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-
-    fn or(&self, terms: &[Rc<dyn Var>]) -> Rc<dyn Var> {
-        unimplemented!()
-    }
-    fn and(&self, terms: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+    fn div(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
 
-    fn assert(&self, term: Rc<dyn Var>) -> bool {
+    fn eq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_enum(&self, variants: &[&str]) -> Rc<dyn Var> {
+    fn neq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_var(&self, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Rc<dyn Var> {
+
+    fn lt(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_disjunction(&self, disjunction: Disjunction) {
+    fn leq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_atom(&self, atom: Rc<Atom>) {
+    fn geq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+    fn gt(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+
+    fn or(self: Rc<Self>, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+    fn and(self: Rc<Self>, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+
+    fn assert(self: Rc<Self>, term: Rc<dyn Var>) -> bool {
+        unimplemented!()
+    }
+    fn new_enum(self: Rc<Self>, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+    fn new_var(self: Rc<Self>, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        unimplemented!()
+    }
+    fn new_disjunction(self: Rc<Self>, disjunction: Disjunction) {
+        unimplemented!()
+    }
+    fn new_atom(self: Rc<Self>, atom: Rc<Atom>) {
         unimplemented!()
     }
 }
