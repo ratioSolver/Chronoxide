@@ -123,7 +123,7 @@ impl Core for Solver {
         Rc::new(StringVar::new(self.core.string_type(), String::new()))
     }
 
-    fn sum(self: Rc<Self>, sum: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn sum(&self, sum: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         let mut result = c(0);
         for var in sum {
             if let Some(int_var) = var.clone().as_any().downcast_ref::<IntVar>() {
@@ -131,13 +131,13 @@ impl Core for Solver {
             } else if let Some(real_var) = var.clone().as_any().downcast_ref::<RealVar>() {
                 result += &real_var.lin
             } else {
-                panic!("Expected IntVar or RealVar");
+                panic!("Expected int or RealVar");
             };
         }
         let tp = arith_class(self.clone(), sum)?;
-        if tp.name() == "Int" { Ok(Rc::new(IntVar::new(self.core.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.core.real_type(), result))) }
+        if tp.name() == "int" { Ok(Rc::new(IntVar::new(self.core.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.core.real_type(), result))) }
     }
-    fn opposite(self: Rc<Self>, term: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn opposite(&self, term: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         if let Some(bool_var) = term.clone().as_any().downcast_ref::<BoolVar>() {
             Ok(Rc::new(BoolVar::new(self.core.bool_type(), !bool_var.lit)))
         } else if let Some(int_var) = term.clone().as_any().downcast_ref::<IntVar>() {
@@ -145,56 +145,104 @@ impl Core for Solver {
         } else if let Some(real_var) = term.clone().as_any().downcast_ref::<RealVar>() {
             Ok(Rc::new(RealVar::new(self.core.real_type(), -real_var.lin.clone())))
         } else {
-            panic!("Expected BoolVar, IntVar, or RealVar");
+            panic!("Expected bool, int, or real");
         }
     }
-    fn mul(self: Rc<Self>, mul: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn mul(&self, mul: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        let mut result = c(1);
+        for var in mul {
+            if let Some(int_var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                if result.vars.is_empty() {
+                    result = &int_var.lin * result.known_term;
+                } else if int_var.lin.vars.is_empty() {
+                    result = &result * int_var.lin.known_term;
+                } else {
+                    return Err(RiddleError::RuntimeError("Non-linear multiplication is not supported".to_string()));
+                }
+            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<RealVar>() {
+                if result.vars.is_empty() {
+                    result = &real_var.lin * result.known_term;
+                } else if real_var.lin.vars.is_empty() {
+                    result = &result * real_var.lin.known_term;
+                } else {
+                    return Err(RiddleError::RuntimeError("Non-linear multiplication is not supported".to_string()));
+                }
+            } else {
+                panic!("Expected int or real");
+            };
+        }
+        if arith_class(self, mul)?.name() == "int" { Ok(Rc::new(IntVar::new(self.core.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.core.real_type(), result))) }
+    }
+    fn div(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+        if let Some(int_var) = right.clone().as_any().downcast_ref::<IntVar>() {
+            if int_var.lin.vars.is_empty() {
+                if let Some(int_var_left) = left.clone().as_any().downcast_ref::<IntVar>() {
+                    Ok(Rc::new(IntVar::new(self.core.int_type(), int_var_left.lin.clone() / int_var.lin.known_term)))
+                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<RealVar>() {
+                    Ok(Rc::new(RealVar::new(self.core.real_type(), real_var_left.lin.clone() / int_var.lin.known_term)))
+                } else {
+                    Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                }
+            } else {
+                Err(RiddleError::RuntimeError("Non-linear division is not supported".to_string()))
+            }
+        } else if let Some(real_var) = right.clone().as_any().downcast_ref::<RealVar>() {
+            if real_var.lin.vars.is_empty() {
+                if let Some(int_var_left) = left.clone().as_any().downcast_ref::<IntVar>() {
+                    Ok(Rc::new(IntVar::new(self.core.int_type(), int_var_left.lin.clone() / real_var.lin.known_term)))
+                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<RealVar>() {
+                    Ok(Rc::new(RealVar::new(self.core.real_type(), real_var_left.lin.clone() / real_var.lin.known_term)))
+                } else {
+                    Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                }
+            } else {
+                Err(RiddleError::RuntimeError("Non-linear division is not supported".to_string()))
+            }
+        } else {
+            Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+        }
+    }
+
+    fn eq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn div(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn neq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
 
-    fn eq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn lt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn neq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn leq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-
-    fn lt(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn geq(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn leq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
-        unimplemented!()
-    }
-    fn geq(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
-        unimplemented!()
-    }
-    fn gt(self: Rc<Self>, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
+    fn gt(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
 
-    fn or(self: Rc<Self>, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn or(&self, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn and(self: Rc<Self>, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn and(&self, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
 
-    fn assert(self: Rc<Self>, term: Rc<dyn Var>) -> bool {
+    fn assert(&self, term: Rc<dyn Var>) -> bool {
         unimplemented!()
     }
-    fn new_enum(self: Rc<Self>, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn new_enum(&self, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_var(self: Rc<Self>, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn new_var(&self, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_disjunction(self: Rc<Self>, disjunction: Disjunction) {
+    fn new_disjunction(&self, disjunction: Disjunction) {
         unimplemented!()
     }
-    fn new_atom(self: Rc<Self>, atom: Rc<Atom>) {
+    fn new_atom(&self, atom: Rc<Atom>) {
         unimplemented!()
     }
 }
@@ -218,5 +266,14 @@ mod tests {
         assert_eq!(solver.bool_val(bool_obj.as_any().downcast_ref::<BoolVar>().unwrap()), LBool::Undef);
         assert_eq!(solver.int_val(int_obj.as_any().downcast_ref::<IntVar>().unwrap()), i_i(0));
         assert_eq!(solver.real_val(real_obj.as_any().downcast_ref::<RealVar>().unwrap()), i_i(0));
+    }
+
+    #[test]
+    fn test_int_sum() {
+        let solver = Solver::new();
+        let int_obj1 = solver.new_int_var();
+        let int_obj2 = solver.new_int_var();
+        let sum = solver.sum(&[int_obj1.clone(), int_obj2.clone()]).unwrap();
+        assert_eq!(solver.int_val(sum.as_any().downcast_ref::<IntVar>().unwrap()), i_i(0));
     }
 }
