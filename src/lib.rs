@@ -1,3 +1,7 @@
+use crate::{
+    flaw::{Flaw, Resolver},
+    objects::{ArithVar, BoolVar, RealVar, StringVar},
+};
 use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
 use linspire::{
     inf_rational::InfRational,
@@ -15,8 +19,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::objects::{ArithVar, BoolVar, RealVar, StringVar};
-
 mod flaw;
 mod objects;
 
@@ -25,6 +27,9 @@ pub struct Solver {
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
+    flaws: RefCell<Vec<Rc<dyn Flaw>>>,
+    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    c_res: Option<Rc<dyn Resolver>>,
 }
 
 impl Solver {
@@ -37,6 +42,9 @@ impl Solver {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
+            flaws: RefCell::new(vec![]),
+            resolvers: RefCell::new(vec![]),
+            c_res: None,
         })
     }
 

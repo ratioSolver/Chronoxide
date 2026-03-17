@@ -1,32 +1,71 @@
+use crate::Solver;
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
 
-use crate::Solver;
-
-pub struct Flaw {
-    slv: Weak<Solver>,
-    phi: usize,
-    resolvers: RefCell<Vec<Rc<Resolver>>>,
+pub trait Flaw {
+    fn slv(&self) -> Rc<Solver>;
+    fn phi(&self) -> usize;
+    fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
 }
 
-impl Flaw {
+pub trait Resolver {
+    fn flaw(&self) -> Rc<dyn Flaw>;
+    fn rho(&self) -> usize;
+    fn lin_constraints(&self) -> usize;
+}
+
+pub struct CommonFlaw {
+    slv: Weak<Solver>,
+    phi: usize,
+    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+}
+
+impl CommonFlaw {
     pub fn new(slv: Rc<Solver>, phi: usize) -> Rc<Self> {
         Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(vec![]) })
     }
 }
 
-pub struct Resolver {
-    flaw: Weak<Flaw>,
+impl Flaw for CommonFlaw {
+    fn slv(&self) -> Rc<Solver> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    fn phi(&self) -> usize {
+        self.phi
+    }
+
+    fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
+        self.resolvers.borrow().iter().map(|r| Rc::clone(r)).collect()
+    }
+}
+
+pub struct CommonResolver {
+    flaw: Weak<CommonFlaw>,
     rho: usize,
     lin_constraints: usize,
 }
 
-impl Resolver {
-    pub fn new(flaw: Rc<Flaw>, rho: usize, lin_constraints: usize) -> Rc<Self> {
+impl CommonResolver {
+    pub fn new(flaw: Rc<CommonFlaw>, rho: usize, lin_constraints: usize) -> Rc<Self> {
         let resolver = Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, lin_constraints });
-        flaw.resolvers.borrow_mut().push(Rc::clone(&resolver));
+        flaw.resolvers.borrow_mut().push(Rc::clone(&resolver) as Rc<dyn Resolver>);
         resolver
+    }
+}
+
+impl Resolver for CommonResolver {
+    fn flaw(&self) -> Rc<dyn Flaw> {
+        self.flaw.upgrade().expect("Flaw has been dropped") as Rc<dyn Flaw>
+    }
+
+    fn rho(&self) -> usize {
+        self.rho
+    }
+
+    fn lin_constraints(&self) -> usize {
+        self.lin_constraints
     }
 }
