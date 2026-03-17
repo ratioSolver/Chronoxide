@@ -2,7 +2,7 @@ use consensus::Lit;
 use linspire::lin::Lin;
 use riddle::{
     env::Var,
-    scope::{BoolType, IntType, RealType, StringType, Type},
+    scope::{BoolType, StringType, Type},
 };
 use std::{
     any::Any,
@@ -30,18 +30,18 @@ impl Var for BoolVar {
     }
 }
 
-pub struct IntVar {
-    var_type: Weak<IntType>,
+pub struct ArithVar {
+    var_type: Weak<dyn Type>,
     pub(crate) lin: Lin,
 }
 
-impl IntVar {
-    pub fn new(var_type: Rc<IntType>, lin: Lin) -> Self {
+impl ArithVar {
+    pub fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
 
-impl Var for IntVar {
+impl Var for ArithVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped").clone()
     }
@@ -52,12 +52,12 @@ impl Var for IntVar {
 }
 
 pub struct RealVar {
-    var_type: Weak<RealType>,
+    var_type: Weak<dyn Type>,
     pub(crate) lin: Lin,
 }
 
 impl RealVar {
-    pub fn new(var_type: Rc<RealType>, lin: Lin) -> Self {
+    pub fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
