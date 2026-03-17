@@ -1,5 +1,5 @@
 use crate::{
-    flaw::{Flaw, Resolver},
+    flaw::{Flaw, OrFlaw, Resolver},
     objects::{ArithVar, BoolVar, RealVar, StringVar},
 };
 use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
@@ -24,6 +24,7 @@ mod objects;
 
 pub struct Solver {
     core: Rc<CommonCore>,
+    slv: Weak<Solver>,
     sat: RefCell<consensus::Engine>,
     ac: RefCell<dynamic_ac::Engine>,
     lin: RefCell<linspire::Engine>,
@@ -39,6 +40,7 @@ impl Solver {
                 let core: Weak<Solver> = core.clone();
                 CommonCore::new(core)
             },
+            slv: core.clone(),
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
@@ -233,7 +235,20 @@ impl Core for Solver {
     }
 
     fn or(&self, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
-        unimplemented!()
+        let lits = terms
+            .iter()
+            .map(|term| {
+                if let Some(bool_var) = term.clone().as_any().downcast_ref::<BoolVar>() {
+                    bool_var.lit
+                } else {
+                    panic!("Expected BoolVar");
+                }
+            })
+            .collect();
+        let phi = if self.c_res.is_none() { 0 } else { self.c_res.as_ref().unwrap().rho() };
+        let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), phi, lits);
+        self.flaws.borrow_mut().push(flaw.clone());
+        Ok(Rc::new(BoolVar::new(self.core.bool_type(), pos(flaw.resolvers().first().unwrap().rho()))))
     }
     fn and(&self, terms: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()

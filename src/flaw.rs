@@ -1,3 +1,5 @@
+use consensus::{Lit, pos};
+
 use crate::Solver;
 use std::rc::{Rc, Weak};
 
@@ -5,27 +7,30 @@ pub trait Flaw {
     fn slv(&self) -> Rc<Solver>;
     fn phi(&self) -> usize;
     fn resolvers(&self) -> &Vec<Rc<dyn Resolver>>;
+    fn compute_resolvers(&mut self);
 }
 
 pub trait Resolver {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
-    fn lin_constraints(&self) -> usize;
+    fn lin_constraints(&self) -> Option<usize>;
 }
 
-pub struct CommonFlaw {
+pub struct OrFlaw {
     slv: Weak<Solver>,
+    flw: Weak<OrFlaw>,
     phi: usize,
     resolvers: Vec<Rc<dyn Resolver>>,
+    lits: Vec<Lit>,
 }
 
-impl CommonFlaw {
-    pub fn new(slv: Rc<Solver>, phi: usize) -> Rc<Self> {
-        Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: vec![] })
+impl OrFlaw {
+    pub fn new(slv: Rc<Solver>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
+        Rc::new_cyclic(|flw| Self { slv: Rc::downgrade(&slv), flw: flw.clone(), phi, resolvers: vec![], lits })
     }
 }
 
-impl Flaw for CommonFlaw {
+impl Flaw for OrFlaw {
     fn slv(&self) -> Rc<Solver> {
         self.slv.upgrade().expect("Solver has been dropped")
     }
@@ -37,21 +42,30 @@ impl Flaw for CommonFlaw {
     fn resolvers(&self) -> &Vec<Rc<dyn Resolver>> {
         &self.resolvers
     }
-}
 
-pub struct CommonResolver {
-    flaw: Weak<CommonFlaw>,
-    rho: usize,
-    lin_constraints: usize,
-}
-
-impl CommonResolver {
-    pub fn new(flaw: Rc<CommonFlaw>, rho: usize, lin_constraints: usize) -> Rc<Self> {
-        Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, lin_constraints })
+    fn compute_resolvers(&mut self) {
+        for lit in &self.lits {
+            let rho = self.slv().sat.borrow_mut().add_var();
+            let c = self.slv().sat.borrow_mut().add_clause(vec![!lit, pos(rho)]);
+            assert!(c, "Failed to add clause for OR flaw resolver");
+            self.resolvers.push(OrResolver::new(Rc::clone(&self.flw.upgrade().expect("Flaw has been dropped")), rho, *lit));
+        }
     }
 }
 
-impl Resolver for CommonResolver {
+pub struct OrResolver {
+    flaw: Weak<OrFlaw>,
+    rho: usize,
+    lit: Lit,
+}
+
+impl OrResolver {
+    fn new(flaw: Rc<OrFlaw>, rho: usize, lit: Lit) -> Rc<Self> {
+        Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, lit })
+    }
+}
+
+impl Resolver for OrResolver {
     fn flaw(&self) -> Rc<dyn Flaw> {
         self.flaw.upgrade().expect("Flaw has been dropped") as Rc<dyn Flaw>
     }
@@ -60,7 +74,7 @@ impl Resolver for CommonResolver {
         self.rho
     }
 
-    fn lin_constraints(&self) -> usize {
-        self.lin_constraints
+    fn lin_constraints(&self) -> Option<usize> {
+        None
     }
 }
