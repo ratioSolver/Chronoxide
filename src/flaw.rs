@@ -1,13 +1,10 @@
 use crate::Solver;
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
 
 pub trait Flaw {
     fn slv(&self) -> Rc<Solver>;
     fn phi(&self) -> usize;
-    fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
+    fn resolvers(&self) -> &Vec<Rc<dyn Resolver>>;
 }
 
 pub trait Resolver {
@@ -19,12 +16,12 @@ pub trait Resolver {
 pub struct CommonFlaw {
     slv: Weak<Solver>,
     phi: usize,
-    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    resolvers: Vec<Rc<dyn Resolver>>,
 }
 
 impl CommonFlaw {
     pub fn new(slv: Rc<Solver>, phi: usize) -> Rc<Self> {
-        Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(vec![]) })
+        Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: vec![] })
     }
 }
 
@@ -37,8 +34,8 @@ impl Flaw for CommonFlaw {
         self.phi
     }
 
-    fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
-        self.resolvers.borrow().iter().map(|r| Rc::clone(r)).collect()
+    fn resolvers(&self) -> &Vec<Rc<dyn Resolver>> {
+        &self.resolvers
     }
 }
 
@@ -50,9 +47,7 @@ pub struct CommonResolver {
 
 impl CommonResolver {
     pub fn new(flaw: Rc<CommonFlaw>, rho: usize, lin_constraints: usize) -> Rc<Self> {
-        let resolver = Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, lin_constraints });
-        flaw.resolvers.borrow_mut().push(Rc::clone(&resolver) as Rc<dyn Resolver>);
-        resolver
+        Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, lin_constraints })
     }
 }
 
