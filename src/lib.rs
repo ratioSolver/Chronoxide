@@ -224,6 +224,9 @@ impl Core for Solver {
                     return self.sat.borrow_mut().add_clause(vec![bool_var.lit]);
                 }
             }
+            BoolExpr::Eq { left, right, .. } => {
+                unimplemented!()
+            }
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
                 let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
@@ -259,6 +262,34 @@ impl Core for Solver {
                 }
                 return true;
             }
+            BoolExpr::Not { term, .. } => match term.as_ref() {
+                BoolExpr::Term { term, .. } => {
+                    let bool_var = term.clone().as_any().downcast::<BoolVar>().expect("Expected BoolVar");
+                    if let Some(res) = &self.c_res {
+                        return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), !bool_var.lit]);
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![!bool_var.lit]);
+                    }
+                }
+                BoolExpr::Eq { left, right, .. } => {
+                    unimplemented!()
+                }
+                BoolExpr::Lt { left, right, .. } => {
+                    let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
+                    self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr);
+                    return true;
+                }
+                BoolExpr::Leq { left, right, .. } => {
+                    let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
+                    self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
+                    return true;
+                }
+                _ => panic!("Expected BoolExpr::Term"),
+            },
             _ => panic!("Expected a BoolExpr in assert"),
         }
     }
