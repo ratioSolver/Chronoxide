@@ -224,6 +224,20 @@ impl Core for Solver {
                     return self.sat.borrow_mut().add_clause(vec![bool_var.lit]);
                 }
             }
+            BoolExpr::Lt { left, right, .. } => {
+                let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
+                self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr);
+                return true;
+            }
+            BoolExpr::Leq { left, right, .. } => {
+                let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
+                self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr);
+                return true;
+            }
             BoolExpr::Or { terms, .. } => {
                 let lits = terms
                     .iter()
@@ -235,6 +249,14 @@ impl Core for Solver {
                 let phi = if self.c_res.is_none() { 0 } else { self.c_res.as_ref().unwrap().rho() };
                 let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), phi, lits);
                 self.flaws.borrow_mut().push(flaw.clone());
+                return true;
+            }
+            BoolExpr::And { terms, .. } => {
+                for term in terms {
+                    if !self.assert(term.clone()) {
+                        return false;
+                    }
+                }
                 return true;
             }
             _ => panic!("Expected a BoolExpr in assert"),
