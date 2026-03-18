@@ -288,7 +288,7 @@ impl Core for Solver {
                     self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
                     return true;
                 }
-                _ => panic!("Expected BoolExpr::Term"),
+                _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
             },
             _ => panic!("Expected a BoolExpr in assert"),
         }
