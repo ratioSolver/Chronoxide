@@ -2,7 +2,7 @@ use crate::{
     flaw::{Flaw, OrFlaw, Resolver},
     objects::{ArithVar, BoolVar, RealVar, StringVar},
 };
-use consensus::{FALSE_LIT, LBool, TRUE_LIT, pos};
+use consensus::{FALSE_LIT, LBool, TRUE_LIT, neg, pos};
 use linspire::{
     inf_rational::InfRational,
     lin::{Lin, c, v},
@@ -216,15 +216,20 @@ impl Core for Solver {
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
         match term.as_ref() {
+            BoolExpr::Term { term, .. } => {
+                let bool_var = term.clone().as_any().downcast::<BoolVar>().expect("Expected BoolVar");
+                if let Some(res) = &self.c_res {
+                    return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), bool_var.lit]);
+                } else {
+                    return self.sat.borrow_mut().add_clause(vec![bool_var.lit]);
+                }
+            }
             BoolExpr::Or { terms, .. } => {
                 let lits = terms
                     .iter()
-                    .map(|term| {
-                        if let Some(bool_var) = term.clone().as_any().downcast_ref::<BoolVar>() {
-                            bool_var.lit
-                        } else {
-                            panic!("Expected BoolVar");
-                        }
+                    .map(|term| match term.as_ref() {
+                        BoolExpr::Term { term, .. } => term.clone().as_any().downcast::<BoolVar>().expect("Expected BoolVar").lit,
+                        _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
                 let phi = if self.c_res.is_none() { 0 } else { self.c_res.as_ref().unwrap().rho() };
@@ -232,7 +237,7 @@ impl Core for Solver {
                 self.flaws.borrow_mut().push(flaw.clone());
                 return true;
             }
-            _ => panic!("Expected BoolExpr::Term"),
+            _ => panic!("Expected a BoolExpr in assert"),
         }
     }
     fn new_enum(&self, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {

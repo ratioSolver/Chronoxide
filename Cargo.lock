@@ -514,7 +514,7 @@ dependencies = [
 [[package]]
 name = "riddle"
 version = "0.1.0"
-source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#411cec7f0c9fde6a4813cd2be50d1a35ad6c3c44"
+source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#396740451c643ed61452003047c7ca49622355ee"
 
 [[package]]
 name = "ryu"
