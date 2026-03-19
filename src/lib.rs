@@ -221,21 +221,34 @@ impl Core for Solver {
                 }
             }
             BoolExpr::Eq { left, right, .. } => {
-                unimplemented!()
+                let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
+                    if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
+                        let left_lit = left_bool_var.lit;
+                        let right_lit = right_bool_var.lit;
+                        if self.c_res.is_some() {
+                            return self.sat.borrow_mut().add_clause(vec![neg(rho), left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, right_lit]);
+                        } else {
+                            return self.sat.borrow_mut().add_clause(vec![left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![!left_lit, right_lit]);
+                        }
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                    }
+                } else {
+                    return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                }
             }
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
-                self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr);
-                return true;
+                let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr);
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
-                self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr);
-                return true;
+                let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr);
             }
             BoolExpr::Or { terms, .. } => {
                 let lits = terms
@@ -245,8 +258,8 @@ impl Core for Solver {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let phi = if self.c_res.is_none() { 0 } else { self.c_res.as_ref().unwrap().rho() };
-                let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), phi, lits);
+                let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
                 self.flaws.borrow_mut().push(flaw.clone());
                 return true;
             }
@@ -273,20 +286,17 @@ impl Core for Solver {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
-                    self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr);
-                    return true;
+                    let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                    return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr);
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
-                    self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
-                    return true;
+                    let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                    return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
             },
-            _ => panic!("Expected a BoolExpr in assert"),
         }
     }
     fn new_enum(&self, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
