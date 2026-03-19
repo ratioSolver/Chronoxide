@@ -1,5 +1,5 @@
 use crate::{
-    flaw::{Flaw, OrFlaw, Resolver},
+    flaw::{EnumFlaw, Flaw, OrFlaw, Resolver},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
@@ -382,7 +382,10 @@ impl Core for Solver {
             }
         }
         let var = self.ac.borrow_mut().add_var(vals);
-        Ok(Rc::new(EnumVar::new(enum_type, var)))
+        let var = Rc::new(EnumVar::new(enum_type, var));
+        let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), 0, var.clone());
+        self.flaws.borrow_mut().push(flaw);
+        Ok(var)
     }
     fn new_var(&self, _class: Rc<dyn Type>, _instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
