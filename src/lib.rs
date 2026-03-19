@@ -1,8 +1,8 @@
 use crate::{
     flaw::{Flaw, OrFlaw, Resolver},
-    objects::{ArithVar, BoolVar, RealVar, StringVar},
+    objects::{ArithVar, BoolVar, StringVar},
 };
-use consensus::{FALSE_LIT, LBool, TRUE_LIT, neg, pos};
+use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 use linspire::{
     inf_rational::InfRational,
     lin::{Lin, c, v},
@@ -58,7 +58,7 @@ impl Solver {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
-    pub fn real_val(&self, obj: &RealVar) -> InfRational {
+    pub fn real_val(&self, obj: &ArithVar) -> InfRational {
         self.lin.borrow().lin_val(&obj.lin).clone()
     }
 
@@ -122,10 +122,10 @@ impl Core for Solver {
         Rc::new(ArithVar::new(self.int_type(), v(self.lin.borrow_mut().add_var())))
     }
     fn new_real(&self, num: i64, den: i64) -> Rc<dyn Var> {
-        Rc::new(RealVar::new(self.real_type(), Lin::new_const(rat(num, den))))
+        Rc::new(ArithVar::new(self.real_type(), Lin::new_const(rat(num, den))))
     }
     fn new_real_var(&self) -> Rc<dyn Var> {
-        Rc::new(RealVar::new(self.real_type(), v(self.lin.borrow_mut().add_var())))
+        Rc::new(ArithVar::new(self.real_type(), v(self.lin.borrow_mut().add_var())))
     }
     fn new_string(&self, value: &str) -> Rc<dyn Var> {
         Rc::new(StringVar::new(self.string_type(), value.to_string()))
@@ -139,24 +139,20 @@ impl Core for Solver {
         for var in sum {
             if let Some(int_var) = var.clone().as_any().downcast_ref::<ArithVar>() {
                 result += &int_var.lin
-            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<RealVar>() {
+            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<ArithVar>() {
                 result += &real_var.lin
             } else {
-                panic!("Expected int or RealVar");
+                panic!("Expected int or ArithVar");
             };
         }
-        let tp = arith_class(self.clone(), sum)?;
-        if tp.name() == "int" { Ok(Rc::new(ArithVar::new(self.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.real_type(), result))) }
+        let tp = arith_class(self, sum)?;
+        if tp.name() == "int" { Ok(Rc::new(ArithVar::new(self.int_type(), result))) } else { Ok(Rc::new(ArithVar::new(self.real_type(), result))) }
     }
     fn opposite(&self, term: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
-        if let Some(bool_var) = term.clone().as_any().downcast_ref::<BoolVar>() {
-            Ok(Rc::new(BoolVar::new(self.bool_type(), !bool_var.lit)))
-        } else if let Some(int_var) = term.clone().as_any().downcast_ref::<ArithVar>() {
-            Ok(Rc::new(ArithVar::new(self.int_type(), -int_var.lin.clone())))
-        } else if let Some(real_var) = term.clone().as_any().downcast_ref::<RealVar>() {
-            Ok(Rc::new(RealVar::new(self.real_type(), -real_var.lin.clone())))
+        if let Some(arith_var) = term.clone().as_any().downcast_ref::<ArithVar>() {
+            Ok(Rc::new(ArithVar::new(arith_var.var_type(), -arith_var.lin.clone())))
         } else {
-            panic!("Expected bool, int, or real");
+            panic!("Expected int or real");
         }
     }
     fn mul(&self, mul: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
@@ -170,7 +166,7 @@ impl Core for Solver {
                 } else {
                     return Err(RiddleError::RuntimeError("Non-linear multiplication is not supported".to_string()));
                 }
-            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<RealVar>() {
+            } else if let Some(real_var) = var.clone().as_any().downcast_ref::<ArithVar>() {
                 if result.vars.is_empty() {
                     result = &real_var.lin * result.known_term;
                 } else if real_var.lin.vars.is_empty() {
@@ -182,27 +178,27 @@ impl Core for Solver {
                 panic!("Expected int or real");
             };
         }
-        if arith_class(self, mul)?.name() == "int" { Ok(Rc::new(ArithVar::new(self.int_type(), result))) } else { Ok(Rc::new(RealVar::new(self.real_type(), result))) }
+        if arith_class(self, mul)?.name() == "int" { Ok(Rc::new(ArithVar::new(self.int_type(), result))) } else { Ok(Rc::new(ArithVar::new(self.real_type(), result))) }
     }
     fn div(&self, left: Rc<dyn Var>, right: Rc<dyn Var>) -> Result<Rc<dyn Var>, RiddleError> {
         if let Some(int_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
             if int_var.lin.vars.is_empty() {
                 if let Some(int_var_left) = left.clone().as_any().downcast_ref::<ArithVar>() {
                     Ok(Rc::new(ArithVar::new(self.int_type(), int_var_left.lin.clone() / int_var.lin.known_term)))
-                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<RealVar>() {
-                    Ok(Rc::new(RealVar::new(self.real_type(), real_var_left.lin.clone() / int_var.lin.known_term)))
+                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<ArithVar>() {
+                    Ok(Rc::new(ArithVar::new(self.real_type(), real_var_left.lin.clone() / int_var.lin.known_term)))
                 } else {
                     Err(RiddleError::RuntimeError("Expected int or real".to_string()))
                 }
             } else {
                 Err(RiddleError::RuntimeError("Non-linear division is not supported".to_string()))
             }
-        } else if let Some(real_var) = right.clone().as_any().downcast_ref::<RealVar>() {
+        } else if let Some(real_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
             if real_var.lin.vars.is_empty() {
                 if let Some(int_var_left) = left.clone().as_any().downcast_ref::<ArithVar>() {
                     Ok(Rc::new(ArithVar::new(self.int_type(), int_var_left.lin.clone() / real_var.lin.known_term)))
-                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<RealVar>() {
-                    Ok(Rc::new(RealVar::new(self.real_type(), real_var_left.lin.clone() / real_var.lin.known_term)))
+                } else if let Some(real_var_left) = left.clone().as_any().downcast_ref::<ArithVar>() {
+                    Ok(Rc::new(ArithVar::new(self.real_type(), real_var_left.lin.clone() / real_var.lin.known_term)))
                 } else {
                     Err(RiddleError::RuntimeError("Expected int or real".to_string()))
                 }
@@ -217,26 +213,26 @@ impl Core for Solver {
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
-                let bool_var = term.clone().as_any().downcast::<BoolVar>().expect("Expected BoolVar");
+                let lit = bool_lit(term);
                 if let Some(res) = &self.c_res {
-                    return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), bool_var.lit]);
+                    return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), lit]);
                 } else {
-                    return self.sat.borrow_mut().add_clause(vec![bool_var.lit]);
+                    return self.sat.borrow_mut().add_clause(vec![lit]);
                 }
             }
             BoolExpr::Eq { left, right, .. } => {
                 unimplemented!()
             }
             BoolExpr::Lt { left, right, .. } => {
-                let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
-                let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let left_lin = numeric_lin(left);
+                let right_lin = numeric_lin(right);
                 let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
                 self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr);
                 return true;
             }
             BoolExpr::Leq { left, right, .. } => {
-                let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
-                let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                let left_lin = numeric_lin(left);
+                let right_lin = numeric_lin(right);
                 let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
                 self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr);
                 return true;
@@ -264,26 +260,26 @@ impl Core for Solver {
             }
             BoolExpr::Not { term, .. } => match term.as_ref() {
                 BoolExpr::Term { term, .. } => {
-                    let bool_var = term.clone().as_any().downcast::<BoolVar>().expect("Expected BoolVar");
+                    let lit = bool_lit(term);
                     if let Some(res) = &self.c_res {
-                        return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), !bool_var.lit]);
+                        return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), !lit]);
                     } else {
-                        return self.sat.borrow_mut().add_clause(vec![!bool_var.lit]);
+                        return self.sat.borrow_mut().add_clause(vec![!lit]);
                     }
                 }
                 BoolExpr::Eq { left, right, .. } => {
                     unimplemented!()
                 }
                 BoolExpr::Lt { left, right, .. } => {
-                    let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
-                    let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let left_lin = numeric_lin(left);
+                    let right_lin = numeric_lin(right);
                     let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
                     self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr);
                     return true;
                 }
                 BoolExpr::Leq { left, right, .. } => {
-                    let left_lin = left.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
-                    let right_lin = right.clone().as_any().downcast::<ArithVar>().expect("Expected ArithVar").lin.clone();
+                    let left_lin = numeric_lin(left);
+                    let right_lin = numeric_lin(right);
                     let lin_cnstr = if self.c_res.is_none() { None } else { self.c_res.as_ref().unwrap().lin_constraints() };
                     self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
                     return true;
@@ -307,14 +303,20 @@ impl Core for Solver {
     }
 }
 
+fn bool_lit(var: &Rc<dyn Var>) -> Lit {
+    var.clone().as_any().downcast_ref::<BoolVar>().expect("Expected BoolVar").lit
+}
+
+fn numeric_lin(var: &Rc<dyn Var>) -> Lin {
+    var.clone().as_any().downcast_ref::<ArithVar>().expect("Expected ArithVar").lin.clone()
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::objects::ArithVar;
     use consensus::LBool;
     use linspire::inf_rational::i_i;
-
-    use crate::objects::{ArithVar, RealVar};
-
-    use super::*;
 
     #[test]
     fn test_solver() {
@@ -325,7 +327,7 @@ mod tests {
 
         assert_eq!(solver.bool_val(bool_obj.as_any().downcast_ref::<BoolVar>().unwrap()), LBool::Undef);
         assert_eq!(solver.int_val(int_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
-        assert_eq!(solver.real_val(real_obj.as_any().downcast_ref::<RealVar>().unwrap()), i_i(0));
+        assert_eq!(solver.real_val(real_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
     }
 
     #[test]

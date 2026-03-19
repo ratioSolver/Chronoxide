@@ -51,27 +51,6 @@ impl Var for ArithVar {
     }
 }
 
-pub struct RealVar {
-    var_type: Weak<dyn Type>,
-    pub(crate) lin: Lin,
-}
-
-impl RealVar {
-    pub fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
-        Self { var_type: Rc::downgrade(&var_type), lin }
-    }
-}
-
-impl Var for RealVar {
-    fn var_type(&self) -> Rc<dyn Type> {
-        self.var_type.upgrade().expect("Type has been dropped").clone()
-    }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
-    }
-}
-
 pub struct StringVar {
     var_type: Weak<StringType>,
     pub(crate) value: String,
