@@ -55,11 +55,11 @@ impl Solver {
     }
 
     pub fn int_val(&self, obj: &ArithVar) -> InfRational {
-        self.lin.borrow().lin_val(&obj.lin).clone()
+        self.lin.borrow().lin_val(&obj.lin)
     }
 
     pub fn real_val(&self, obj: &ArithVar) -> InfRational {
-        self.lin.borrow().lin_val(&obj.lin).clone()
+        self.lin.borrow().lin_val(&obj.lin)
     }
 
     pub fn string_val(&self, obj: &StringVar) -> String {
@@ -248,7 +248,7 @@ impl Core for Solver {
                         if self.c_res.is_some() {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                         } else {
-                            return left_string_var.value == right_string_var.value;
+                            left_string_var.value == right_string_var.value
                         }
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
@@ -280,7 +280,7 @@ impl Core for Solver {
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
                 let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
                 self.flaws.borrow_mut().push(flaw.clone());
-                return true;
+                true
             }
             BoolExpr::And { terms, .. } => {
                 for term in terms {
@@ -288,7 +288,7 @@ impl Core for Solver {
                         return false;
                     }
                 }
-                return true;
+                true
             }
             BoolExpr::Not { term, .. } => match term.as_ref() {
                 BoolExpr::Term { term, .. } => {
@@ -311,23 +311,21 @@ impl Core for Solver {
                                 return self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]);
                             }
                         }
-                    } else if let Some(_) = left.clone().as_any().downcast_ref::<ArithVar>() {
-                        if let Some(_) = right.clone().as_any().downcast_ref::<ArithVar>() {
-                            return self.assert(Rc::new(BoolExpr::Or {
-                                var_type: Rc::downgrade(&self.bool_type()),
-                                terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: right.clone(), right: left.clone() })],
-                            }));
-                        }
-                    } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>() {
-                        if let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>() {
-                            if self.c_res.is_some() && left_string_var.value == right_string_var.value {
-                                return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
-                            } else {
-                                return left_string_var.value != right_string_var.value;
-                            }
+                    } else if left.clone().as_any().downcast_ref::<ArithVar>().is_some() && right.clone().as_any().downcast_ref::<ArithVar>().is_some() {
+                        return self.assert(Rc::new(BoolExpr::Or {
+                            var_type: Rc::downgrade(&self.bool_type()),
+                            terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: right.clone(), right: left.clone() })],
+                        }));
+                    } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>()
+                        && let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>()
+                    {
+                        if self.c_res.is_some() && left_string_var.value == right_string_var.value {
+                            return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                        } else {
+                            return left_string_var.value != right_string_var.value;
                         }
                     }
-                    return true;
+                    true
                 }
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
@@ -345,16 +343,16 @@ impl Core for Solver {
             },
         }
     }
-    fn new_enum(&self, variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn new_enum(&self, _variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_var(&self, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+    fn new_var(&self, _class: Rc<dyn Type>, _instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
-    fn new_disjunction(&self, disjunction: Disjunction) {
+    fn new_disjunction(&self, _disjunction: Disjunction) {
         unimplemented!()
     }
-    fn new_atom(&self, atom: Rc<Atom>) {
+    fn new_atom(&self, _atom: Rc<Atom>) {
         unimplemented!()
     }
 }
