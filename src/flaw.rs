@@ -34,7 +34,7 @@ pub(crate) struct OrFlaw {
 }
 
 impl OrFlaw {
-    pub fn new(slv: Rc<Solver>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
+    pub(crate) fn new(slv: Rc<Solver>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(Vec::new()), lits })
     }
 }
@@ -90,7 +90,7 @@ pub(crate) struct EnumFlaw {
 }
 
 impl EnumFlaw {
-    pub fn new(slv: Rc<Solver>, phi: usize, var: Rc<EnumVar>) -> Rc<Self> {
+    pub(crate) fn new(slv: Rc<Solver>, phi: usize, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(Vec::new()), var })
     }
 }

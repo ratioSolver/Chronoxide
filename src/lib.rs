@@ -441,6 +441,8 @@ mod tests {
         let color_type = solver.get_type("Color").unwrap();
         assert_eq!(color_type.name(), "Color");
 
-        let color_var = color_type.new_instance();
+        solver.read("Color c1, c2;");
+        let c1 = solver.get("c1").unwrap();
+        let c2 = solver.get("c2").unwrap();
     }
 }
