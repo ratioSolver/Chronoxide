@@ -234,6 +234,25 @@ impl Core for Solver {
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
+                } else if let Some(left_arith_var) = left.clone().as_any().downcast_ref::<ArithVar>() {
+                    if let Some(right_arith_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
+                        let left_lin = &left_arith_var.lin;
+                        let right_lin = &right_arith_var.lin;
+                        let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                        return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr);
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                    }
+                } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>() {
+                    if let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>() {
+                        if self.c_res.is_some() {
+                            return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                        } else {
+                            return left_string_var.value == right_string_var.value;
+                        }
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                    }
                 } else {
                     return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                 }
@@ -281,7 +300,34 @@ impl Core for Solver {
                     }
                 }
                 BoolExpr::Eq { left, right, .. } => {
-                    unimplemented!()
+                    let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                    if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
+                        if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
+                            let left_lit = left_bool_var.lit;
+                            let right_lit = right_bool_var.lit;
+                            if self.c_res.is_some() {
+                                return self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, !right_lit]);
+                            } else {
+                                return self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]);
+                            }
+                        }
+                    } else if let Some(_) = left.clone().as_any().downcast_ref::<ArithVar>() {
+                        if let Some(_) = right.clone().as_any().downcast_ref::<ArithVar>() {
+                            return self.assert(Rc::new(BoolExpr::Or {
+                                var_type: Rc::downgrade(&self.bool_type()),
+                                terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: right.clone(), right: left.clone() })],
+                            }));
+                        }
+                    } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>() {
+                        if let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>() {
+                            if self.c_res.is_some() && left_string_var.value == right_string_var.value {
+                                return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                            } else {
+                                return left_string_var.value != right_string_var.value;
+                            }
+                        }
+                    }
+                    return true;
                 }
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
