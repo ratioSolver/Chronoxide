@@ -222,10 +222,10 @@ impl Core for Solver {
             }
             BoolExpr::Eq { left, right, .. } => {
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
-                if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
-                    if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
-                        let left_lit = left_bool_var.lit;
-                        let right_lit = right_bool_var.lit;
+                if let Some(left_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
+                    if let Some(right_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
+                        let left_lit = left_var.lit;
+                        let right_lit = right_var.lit;
                         if self.c_res.is_some() {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho), left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, right_lit]);
                         } else {
@@ -234,21 +234,35 @@ impl Core for Solver {
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
-                } else if let Some(left_arith_var) = left.clone().as_any().downcast_ref::<ArithVar>() {
-                    if let Some(right_arith_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
-                        let left_lin = &left_arith_var.lin;
-                        let right_lin = &right_arith_var.lin;
+                } else if let Some(left_var) = left.clone().as_any().downcast_ref::<ArithVar>() {
+                    if let Some(right_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
+                        let left_lin = &left_var.lin;
+                        let right_lin = &right_var.lin;
                         let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
                         return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr);
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
-                } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>() {
-                    if let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>() {
+                } else if let Some(left_var) = left.clone().as_any().downcast_ref::<StringVar>() {
+                    if let Some(right_var) = right.clone().as_any().downcast_ref::<StringVar>() {
                         if self.c_res.is_some() {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                         } else {
-                            left_string_var.value == right_string_var.value
+                            left_var.value == right_var.value
+                        }
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                    }
+                } else if let Some(left_var) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                    if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                        match self.ac.borrow_mut().new_eq(left_var.var, right_var.var) {
+                            Ok(c) => {
+                                if let Some(res) = &self.c_res {
+                                    res.add_ac_constraint(c);
+                                }
+                                return true;
+                            }
+                            Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
                         }
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
@@ -324,6 +338,18 @@ impl Core for Solver {
                         } else {
                             return left_string_var.value != right_string_var.value;
                         }
+                    } else if let Some(left_var) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                        if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                            match self.ac.borrow_mut().new_neq(left_var.var, right_var.var) {
+                                Ok(c) => {
+                                    if let Some(res) = &self.c_res {
+                                        res.add_ac_constraint(c);
+                                    }
+                                    return true;
+                                }
+                                Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
+                            }
+                        }
                     }
                     true
                 }
@@ -375,6 +401,10 @@ fn bool_lit(var: &Rc<dyn Var>) -> Lit {
 
 fn numeric_lin(var: &Rc<dyn Var>) -> Lin {
     var.clone().as_any().downcast_ref::<ArithVar>().expect("Expected ArithVar").lin.clone()
+}
+
+fn enum_var(var: &Rc<dyn Var>) -> usize {
+    var.clone().as_any().downcast_ref::<EnumVar>().expect("Expected EnumVar").var
 }
 
 #[cfg(test)]

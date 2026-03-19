@@ -13,7 +13,15 @@ pub trait Flaw {
 pub trait Resolver {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
-    fn lin_constraints(&self) -> Option<usize>;
+    fn ac_constraints(&self) -> Option<Vec<usize>> {
+        None
+    }
+    fn add_ac_constraint(&self, _constraint: usize) {
+        unimplemented!()
+    }
+    fn lin_constraints(&self) -> Option<usize> {
+        None
+    }
 }
 
 pub struct OrFlaw {
@@ -72,9 +80,5 @@ impl Resolver for OrResolver {
 
     fn rho(&self) -> usize {
         self.rho
-    }
-
-    fn lin_constraints(&self) -> Option<usize> {
-        None
     }
 }
