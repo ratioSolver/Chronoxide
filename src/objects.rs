@@ -15,7 +15,7 @@ pub struct BoolVar {
 }
 
 impl BoolVar {
-    pub fn new(var_type: Rc<BoolType>, lit: Lit) -> Self {
+    pub(crate) fn new(var_type: Rc<BoolType>, lit: Lit) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lit }
     }
 }
@@ -36,7 +36,7 @@ pub struct ArithVar {
 }
 
 impl ArithVar {
-    pub fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
@@ -57,12 +57,33 @@ pub struct StringVar {
 }
 
 impl StringVar {
-    pub fn new(var_type: Rc<StringType>, value: String) -> Self {
+    pub(crate) fn new(var_type: Rc<StringType>, value: String) -> Self {
         Self { var_type: Rc::downgrade(&var_type), value }
     }
 }
 
 impl Var for StringVar {
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+}
+
+pub struct EnumVar {
+    var_type: Weak<dyn Type>,
+    pub(crate) var: usize,
+}
+
+impl EnumVar {
+    pub(crate) fn new(var_type: Rc<dyn Type>, var: usize) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), var }
+    }
+}
+
+impl Var for EnumVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped").clone()
     }

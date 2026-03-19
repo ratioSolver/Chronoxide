@@ -1,6 +1,6 @@
 use crate::{
     flaw::{Flaw, OrFlaw, Resolver},
-    objects::{ArithVar, BoolVar, StringVar},
+    objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 use linspire::{
@@ -11,11 +11,12 @@ use linspire::{
 use riddle::{
     core::{CommonCore, Core},
     env::{Atom, BoolExpr, Env, Var},
-    language::{Disjunction, EnumDef, RiddleError},
-    scope::{Field, Method, Predicate, Scope, Type, arith_class},
+    language::{Disjunction, RiddleError},
+    scope::{Enum, Field, Method, Predicate, Scope, Type, arith_class},
 };
 use std::{
     cell::RefCell,
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 
@@ -31,6 +32,7 @@ pub struct Solver {
     flaws: RefCell<Vec<Rc<dyn Flaw>>>,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
     c_res: Option<Rc<dyn Resolver>>,
+    variants: RefCell<HashMap<String, i32>>,
 }
 
 impl Solver {
@@ -47,6 +49,7 @@ impl Solver {
             flaws: RefCell::new(vec![]),
             resolvers: RefCell::new(vec![]),
             c_res: None,
+            variants: RefCell::new(HashMap::new()),
         })
     }
 
@@ -87,9 +90,6 @@ impl Scope for Solver {
     }
     fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
         self.core.get_type(name)
-    }
-    fn get_enum(&self, name: &str) -> Option<Rc<EnumDef>> {
-        self.core.get_enum(name)
     }
     fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
         self.core.get_predicate(name)
@@ -343,8 +343,20 @@ impl Core for Solver {
             },
         }
     }
-    fn new_enum(&self, _variants: &[&str]) -> Result<Rc<dyn Var>, RiddleError> {
-        unimplemented!()
+    fn new_enum(&self, enum_type: Rc<Enum>) -> Result<Rc<dyn Var>, RiddleError> {
+        let mut map = self.variants.borrow_mut();
+        let mut vals: Vec<i32> = Vec::new();
+        for variant in enum_type.values() {
+            if let Some(val) = map.get(variant) {
+                vals.push(*val);
+            } else {
+                let val = map.len() as i32;
+                map.insert(variant.to_string(), val);
+                vals.push(val);
+            }
+        }
+        let var = self.ac.borrow_mut().add_var(vals);
+        Ok(Rc::new(EnumVar::new(enum_type, var)))
     }
     fn new_var(&self, _class: Rc<dyn Type>, _instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
@@ -391,5 +403,15 @@ mod tests {
         let int_obj2 = solver.new_int_var();
         let sum = solver.sum(&[int_obj1.clone(), int_obj2.clone()]).unwrap();
         assert_eq!(solver.int_val(sum.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
+    }
+
+    #[test]
+    fn test_basic_enum() {
+        let solver = Solver::new();
+        solver.read("enum Color { Red, Green, Blue }");
+        let color_type = solver.get_type("Color").unwrap();
+        assert_eq!(color_type.name(), "Color");
+
+        let color_var = color_type.new_instance();
     }
 }
