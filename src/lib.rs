@@ -403,10 +403,6 @@ fn numeric_lin(var: &Rc<dyn Var>) -> Lin {
     var.clone().as_any().downcast_ref::<ArithVar>().expect("Expected ArithVar").lin.clone()
 }
 
-fn enum_var(var: &Rc<dyn Var>) -> usize {
-    var.clone().as_any().downcast_ref::<EnumVar>().expect("Expected EnumVar").var
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
