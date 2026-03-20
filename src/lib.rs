@@ -271,6 +271,14 @@ impl Core for Solver {
                             }
                             Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
                         }
+                    } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
+                        unimplemented!()
+                    } else {
+                        return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
+                    }
+                } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
+                    if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                        unimplemented!()
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
