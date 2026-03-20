@@ -12,11 +12,12 @@ use riddle::{
     core::{CommonCore, Core},
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
-    scope::{Enum, Field, Method, Predicate, Scope, Type, arith_class},
+    scope::{Field, Method, Predicate, Scope, Type, arith_class},
 };
 use std::{
     cell::RefCell,
     collections::HashMap,
+    fmt,
     rc::{Rc, Weak},
 };
 
@@ -369,24 +370,6 @@ impl Core for Solver {
             },
         }
     }
-    fn new_enum(&self, enum_type: Rc<Enum>) -> Result<Rc<dyn Var>, RiddleError> {
-        let mut map = self.variants.borrow_mut();
-        let mut vals: Vec<i32> = Vec::new();
-        for variant in enum_type.values() {
-            if let Some(val) = map.get(variant) {
-                vals.push(*val);
-            } else {
-                let val = map.len() as i32;
-                map.insert(variant.to_string(), val);
-                vals.push(val);
-            }
-        }
-        let var = self.ac.borrow_mut().add_var(vals);
-        let var = Rc::new(EnumVar::new(enum_type, var));
-        let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), 0, var.clone());
-        self.flaws.borrow_mut().push(flaw);
-        Ok(var)
-    }
     fn new_var(&self, _class: Rc<dyn Type>, _instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
         unimplemented!()
     }
@@ -395,6 +378,12 @@ impl Core for Solver {
     }
     fn new_atom(&self, _atom: Rc<Atom>) {
         unimplemented!()
+    }
+}
+
+impl fmt::Debug for Solver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Solver").field("core", &"CommonCore").finish()
     }
 }
 
@@ -437,7 +426,7 @@ mod tests {
     #[test]
     fn test_basic_enum() {
         let solver = Solver::new();
-        solver.read("enum Color { Red, Green, Blue }");
+        solver.read("class Color {} Color red = new Color(); Color blue = new Color();");
         let color_type = solver.get_type("Color").unwrap();
         assert_eq!(color_type.name(), "Color");
 

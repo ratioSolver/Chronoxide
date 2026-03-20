@@ -9,6 +9,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
+#[derive(Debug)]
 pub struct BoolVar {
     var_type: Weak<BoolType>,
     pub(crate) lit: Lit,
@@ -30,6 +31,7 @@ impl Var for BoolVar {
     }
 }
 
+#[derive(Debug)]
 pub struct ArithVar {
     var_type: Weak<dyn Type>,
     pub(crate) lin: Lin,
@@ -51,6 +53,7 @@ impl Var for ArithVar {
     }
 }
 
+#[derive(Debug)]
 pub struct StringVar {
     var_type: Weak<StringType>,
     pub(crate) value: String,
@@ -72,6 +75,7 @@ impl Var for StringVar {
     }
 }
 
+#[derive(Debug)]
 pub struct EnumVar {
     var_type: Weak<dyn Type>,
     pub(crate) var: usize,
