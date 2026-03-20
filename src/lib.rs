@@ -33,7 +33,8 @@ pub struct Solver {
     flaws: RefCell<Vec<Rc<dyn Flaw>>>,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
     c_res: Option<Rc<dyn Resolver>>,
-    variants: RefCell<HashMap<String, i32>>,
+    variants: RefCell<HashMap<usize, usize>>,
+    instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
 }
 
 impl Solver {
@@ -51,6 +52,7 @@ impl Solver {
             resolvers: RefCell::new(vec![]),
             c_res: None,
             variants: RefCell::new(HashMap::new()),
+            instances_by_id: RefCell::new(vec![]),
         })
     }
 
@@ -68,6 +70,10 @@ impl Solver {
 
     pub fn string_val(&self, obj: &StringVar) -> String {
         obj.value.clone()
+    }
+
+    pub fn val(&self, obj: &EnumVar) -> Vec<Rc<dyn Var>> {
+        self.ac.borrow().val(obj.var).into_iter().map(|val| self.instances_by_id.borrow()[val as usize].clone()).collect()
     }
 
     pub fn read(&self, script: &str) {
@@ -370,8 +376,26 @@ impl Core for Solver {
             },
         }
     }
-    fn new_var(&self, _class: Rc<dyn Type>, _instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
-        unimplemented!()
+    fn new_var(&self, class: Rc<dyn Type>, instances: &[Rc<dyn Var>]) -> Result<Rc<dyn Var>, RiddleError> {
+        let mut vals = Vec::new();
+        let mut variants = self.variants.borrow_mut();
+        let mut instances_by_id = self.instances_by_id.borrow_mut();
+        let mut current_len = variants.len();
+        for instance in instances {
+            let val = variants.entry(Rc::as_ptr(instance) as *const () as usize).or_insert_with(|| {
+                let id = current_len;
+                current_len += 1; // Increment for the next new entry
+                instances_by_id.push(instance.clone());
+                id
+            });
+            vals.push(*val as i32);
+        }
+        let var = self.ac.borrow_mut().add_var(vals);
+        let var = Rc::new(EnumVar::new(class, var));
+        let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+        let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone());
+        self.flaws.borrow_mut().push(flaw);
+        Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {
         unimplemented!()
@@ -432,6 +456,10 @@ mod tests {
 
         solver.read("Color c1, c2;");
         let c1 = solver.get("c1").unwrap();
+        let c1_val = solver.val(c1.as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c1_val.len() == 2);
         let c2 = solver.get("c2").unwrap();
+        let c2_val = solver.val(c2.as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c2_val.len() == 2);
     }
 }
