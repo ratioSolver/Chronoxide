@@ -19,8 +19,7 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let slv = Solver::new();
-    let event_bus = slv.get_event_sender();
-    let app_state = Arc::new(AppState { event_bus });
+    let app_state = Arc::new(AppState { event_bus: slv.get_event_sender() });
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
 
