@@ -20,11 +20,19 @@ use std::{
     fmt,
     rc::{Rc, Weak},
 };
+use tokio::sync::mpsc;
 
 mod flaw;
 mod objects;
 
+#[derive(Clone, Debug)]
+pub enum SolverEvent {
+    NewFlaw(Rc<dyn Flaw>),
+    NewResolver(Rc<dyn Resolver>),
+}
+
 pub struct Solver {
+    sender: mpsc::UnboundedSender<SolverEvent>,
     core: Rc<CommonCore>,
     slv: Weak<Solver>,
     sat: RefCell<consensus::Engine>,
@@ -38,22 +46,27 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new() -> Rc<Self> {
-        Rc::new_cyclic(|core| Self {
-            core: {
-                let core: Weak<Solver> = core.clone();
-                CommonCore::new(core)
-            },
-            slv: core.clone(),
-            sat: RefCell::new(consensus::Engine::new()),
-            ac: RefCell::new(dynamic_ac::Engine::new()),
-            lin: RefCell::new(linspire::Engine::new()),
-            flaws: RefCell::new(vec![]),
-            resolvers: RefCell::new(vec![]),
-            c_res: None,
-            variants: RefCell::new(HashMap::new()),
-            instances_by_id: RefCell::new(vec![]),
-        })
+    pub fn new() -> (Rc<Self>, mpsc::UnboundedReceiver<SolverEvent>) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (
+            Rc::new_cyclic(|core| Self {
+                sender,
+                core: {
+                    let core: Weak<Solver> = core.clone();
+                    CommonCore::new(core)
+                },
+                slv: core.clone(),
+                sat: RefCell::new(consensus::Engine::new()),
+                ac: RefCell::new(dynamic_ac::Engine::new()),
+                lin: RefCell::new(linspire::Engine::new()),
+                flaws: RefCell::new(vec![]),
+                resolvers: RefCell::new(vec![]),
+                c_res: None,
+                variants: RefCell::new(HashMap::new()),
+                instances_by_id: RefCell::new(vec![]),
+            }),
+            receiver,
+        )
     }
 
     pub fn bool_val(&self, obj: &BoolVar) -> LBool {
@@ -324,6 +337,7 @@ impl Core for Solver {
                     .collect();
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
                 let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
+                self.sender.send(SolverEvent::NewFlaw(flaw.clone())).expect("Failed to send NewFlaw event");
                 self.flaws.borrow_mut().push(flaw.clone());
                 true
             }
@@ -440,6 +454,7 @@ impl Core for Solver {
         let var = Rc::new(EnumVar::new(class, var));
         let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
         let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone());
+        self.sender.send(SolverEvent::NewFlaw(flaw.clone())).expect("Failed to send NewFlaw event");
         self.flaws.borrow_mut().push(flaw);
         Ok(var)
     }
@@ -474,50 +489,50 @@ mod tests {
 
     #[test]
     fn test_solver() {
-        let solver = Solver::new();
-        let bool_obj = solver.new_bool_var();
-        let int_obj = solver.new_int_var();
-        let real_obj = solver.new_real_var();
+        let (slv, _rx) = Solver::new();
+        let bool_obj = slv.new_bool_var();
+        let int_obj = slv.new_int_var();
+        let real_obj = slv.new_real_var();
 
-        assert_eq!(solver.bool_val(bool_obj.as_any().downcast_ref::<BoolVar>().unwrap()), LBool::Undef);
-        assert_eq!(solver.int_val(int_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
-        assert_eq!(solver.real_val(real_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
+        assert_eq!(slv.bool_val(bool_obj.as_any().downcast_ref::<BoolVar>().unwrap()), LBool::Undef);
+        assert_eq!(slv.int_val(int_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
+        assert_eq!(slv.real_val(real_obj.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
     }
 
     #[test]
     fn test_int_sum() {
-        let solver = Solver::new();
-        let int_obj1 = solver.new_int_var();
-        let int_obj2 = solver.new_int_var();
-        let sum = solver.sum(&[int_obj1.clone(), int_obj2.clone()]).unwrap();
-        assert_eq!(solver.int_val(sum.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
+        let (slv, _rx) = Solver::new();
+        let int_obj1 = slv.new_int_var();
+        let int_obj2 = slv.new_int_var();
+        let sum = slv.sum(&[int_obj1.clone(), int_obj2.clone()]).unwrap();
+        assert_eq!(slv.int_val(sum.as_any().downcast_ref::<ArithVar>().unwrap()), i_i(0));
     }
 
     #[test]
     fn test_basic_enum() {
-        let solver = Solver::new();
-        solver.read("class Color {} Color red = new Color(); Color blue = new Color();");
-        let color_type = solver.get_type("Color").unwrap();
+        let (slv, _rx) = Solver::new();
+        slv.read("class Color {} Color red = new Color(); Color blue = new Color();");
+        let color_type = slv.get_type("Color").unwrap();
         assert_eq!(color_type.name(), "Color");
 
-        solver.read("Color c1, c2;");
-        let c1 = solver.get("c1").unwrap();
-        let c1_val = solver.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        slv.read("Color c1, c2;");
+        let c1 = slv.get("c1").unwrap();
+        let c1_val = slv.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c1_val.len() == 2);
-        let c2 = solver.get("c2").unwrap();
-        let c2_val = solver.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        let c2 = slv.get("c2").unwrap();
+        let c2_val = slv.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c2_val.len() == 2);
 
-        solver.read("c1 == c2;");
-        let c1_val = solver.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        slv.read("c1 == c2;");
+        let c1_val = slv.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c1_val.len() == 2);
-        let c2_val = solver.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        let c2_val = slv.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c2_val.len() == 2);
 
-        solver.read("c1 == red;");
-        let c1_val = solver.val(c1.as_any().downcast_ref::<EnumVar>().unwrap());
+        slv.read("c1 == red;");
+        let c1_val = slv.val(c1.as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c1_val.len() == 1);
-        let c2_val = solver.val(c2.as_any().downcast_ref::<EnumVar>().unwrap());
+        let c2_val = slv.val(c2.as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c2_val.len() == 1);
     }
 }

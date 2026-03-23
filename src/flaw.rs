@@ -2,17 +2,18 @@ use crate::{Solver, objects::EnumVar};
 use consensus::{Lit, neg, pos};
 use std::{
     cell::RefCell,
+    fmt::Debug,
     rc::{Rc, Weak},
 };
 
-pub trait Flaw {
+pub trait Flaw: Debug {
     fn slv(&self) -> Rc<Solver>;
     fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
     fn compute_resolvers(self: Rc<Self>);
 }
 
-pub trait Resolver {
+pub trait Resolver: Debug {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
     fn ac_constraints(&self) -> Option<Vec<usize>> {
@@ -26,6 +27,7 @@ pub trait Resolver {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct OrFlaw {
     slv: Weak<Solver>,
     phi: usize,
@@ -61,6 +63,7 @@ impl Flaw for OrFlaw {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct OrResolver {
     flaw: Weak<OrFlaw>,
     lit: Lit,
@@ -82,6 +85,7 @@ impl Resolver for OrResolver {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct EnumFlaw {
     slv: Weak<Solver>,
     phi: usize,
@@ -119,6 +123,7 @@ impl Flaw for EnumFlaw {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct EnumResolver {
     flaw: Weak<EnumFlaw>,
     rho: usize,
