@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "dynamic-ac"
 version = "0.1.0"
-source = "git+https://github.com/ratioSolver/dynamic-ac#7db82a230d4b91e7e93995aa51411a3a181ee07e"
+source = "git+https://github.com/ratioSolver/dynamic-ac#b6ca6978964456ae7ba333821cd89e1ca9df84c6"
 
 [[package]]
 name = "errno"

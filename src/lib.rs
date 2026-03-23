@@ -272,13 +272,29 @@ impl Core for Solver {
                             Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
                         }
                     } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
-                        unimplemented!()
+                        match self.ac.borrow_mut().set(left_var.var, *val as i32) {
+                            Ok(c) => {
+                                if let Some(res) = &self.c_res {
+                                    res.add_ac_constraint(c);
+                                }
+                                return true;
+                            }
+                            Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
+                        }
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
                 } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                        unimplemented!()
+                        match self.ac.borrow_mut().set(right_var.var, *val as i32) {
+                            Ok(c) => {
+                                if let Some(res) = &self.c_res {
+                                    res.add_ac_constraint(c);
+                                }
+                                return true;
+                            }
+                            Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
+                        }
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
@@ -356,6 +372,28 @@ impl Core for Solver {
                     } else if let Some(left_var) = left.clone().as_any().downcast_ref::<EnumVar>() {
                         if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                             match self.ac.borrow_mut().new_neq(left_var.var, right_var.var) {
+                                Ok(c) => {
+                                    if let Some(res) = &self.c_res {
+                                        res.add_ac_constraint(c);
+                                    }
+                                    return true;
+                                }
+                                Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
+                            }
+                        } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
+                            match self.ac.borrow_mut().forbid(left_var.var, *val as i32) {
+                                Ok(c) => {
+                                    if let Some(res) = &self.c_res {
+                                        res.add_ac_constraint(c);
+                                    }
+                                    return true;
+                                }
+                                Err(_) => return self.sat.borrow_mut().add_clause(vec![neg(rho)]),
+                            }
+                        }
+                    } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(left) as *const () as usize)) {
+                        if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                            match self.ac.borrow_mut().forbid(right_var.var, *val as i32) {
                                 Ok(c) => {
                                     if let Some(res) = &self.c_res {
                                         res.add_ac_constraint(c);
@@ -464,10 +502,22 @@ mod tests {
 
         solver.read("Color c1, c2;");
         let c1 = solver.get("c1").unwrap();
-        let c1_val = solver.val(c1.as_any().downcast_ref::<EnumVar>().unwrap());
+        let c1_val = solver.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c1_val.len() == 2);
         let c2 = solver.get("c2").unwrap();
-        let c2_val = solver.val(c2.as_any().downcast_ref::<EnumVar>().unwrap());
+        let c2_val = solver.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
         assert!(c2_val.len() == 2);
+
+        solver.read("c1 == c2;");
+        let c1_val = solver.val(c1.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c1_val.len() == 2);
+        let c2_val = solver.val(c2.clone().as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c2_val.len() == 2);
+
+        solver.read("c1 == red;");
+        let c1_val = solver.val(c1.as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c1_val.len() == 1);
+        let c2_val = solver.val(c2.as_any().downcast_ref::<EnumVar>().unwrap());
+        assert!(c2_val.len() == 1);
     }
 }
