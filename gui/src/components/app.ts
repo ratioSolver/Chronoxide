@@ -2,6 +2,7 @@ import { h, VNode } from "snabbdom";
 import { App, flick, Navbar, NavbarItem, NavbarList, OffcanvasBrand } from "@ratiosolver/flick";
 import { solver } from "../solver";
 import { causal_graph } from "./causal_graph";
+import { timelines } from "./timelines";
 
 const app_listener = {
   initialized: () => flick.redraw(),
@@ -12,19 +13,19 @@ const app_listener = {
 
 const landing_page = () => h('div.container.mt-5', [
   h('div.text-center.mb-5', [
-    h('h1.display-4', 'CoCo'),
-    h('p.lead', 'Combined Deduction and Abduction Reasoner'),
+    h('h1.display-4', 'Chronoxide'),
+    h('p.lead', 'An Integrated Logic and Constraint based solver')
   ]),
   h('div.row.justify-content-center', [
     h('div.col-lg-8', [
-      h('p', 'CoCo is a dual-process inspired cognitive architecture built in Rust. It integrates a rule-based expert system and a timeline-based planner to invoke deductive and abductive reasoning in dynamic environments.'),
+      h('p', 'Chronoxide is an Integrated Logic and Constraint based solver written in Rust which takes inspiration from both Logic Programming (LP) and Constraint Programming (CP).'),
       h('hr.my-4'),
       h('h4', 'Features'),
       h('ul.list-group.list-group-flush', [
-        h('li.list-group-item', [h('strong', 'Hybrid Reasoning'), ': Unites deductive logic with abductive inference.']),
-        h('li.list-group-item', [h('strong', 'Rust Core'), ': Designed for performance, memory safety, and concurrency.']),
-        h('li.list-group-item', [h('strong', 'CLIPS Integration'), ': Seamless binding with the C-based CLIPS expert system.']),
-        h('li.list-group-item', [h('strong', 'Web Interface'), ': Includes a web server (Axum) and visualization tools.']),
+        h('li.list-group-item', [h('strong', 'Integrated LP + CP'), ': Combines logic programming and constraint programming in a single solver.']),
+        h('li.list-group-item', [h('strong', 'Constraint Solving Engine'), ': Supports boolean, arithmetic, and symbolic reasoning over shared models.']),
+        h('li.list-group-item', [h('strong', 'Rust Core'), ': Built for performance, memory safety, and reliability.']),
+        h('li.list-group-item', [h('strong', 'Web Tooling'), ': Provides an Axum-based server and interactive visualization components.']),
       ])
     ])
   ])
@@ -48,7 +49,7 @@ export function SolverApp(slv: solver.Solver): VNode {
     (flick.ctx.current_page as () => VNode)()
   ]);
 
-  return App(Navbar(OffcanvasBrand('CoCo'), NavbarList([NavbarItem(h('i.fas.fa-home', {
+  return App(Navbar(OffcanvasBrand('Chronoxide'), NavbarList([NavbarItem(h('i.fas.fa-home', {
     on: {
       click: () => {
         flick.ctx.current_page = landing_page;
@@ -57,7 +58,16 @@ export function SolverApp(slv: solver.Solver): VNode {
       }
     }
   })),
-  NavbarItem(h('i.fas.fa-sitemap', {
+  NavbarItem(h('i.fas.fa-stream', {
+    on: {
+      click: () => {
+        flick.ctx.current_page = () => timelines(slv);
+        flick.ctx.page_title = 'Timelines';
+        flick.redraw();
+      }
+    }
+  })),
+  NavbarItem(h('i.fas.fa-project-diagram', {
     on: {
       click: () => {
         flick.ctx.current_page = () => causal_graph(slv);

@@ -6,7 +6,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 echarts.use([GraphChart, CanvasRenderer]);
 
-export function causal_graph(slv: solver.Solver): VNode {
+export function timelines(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
   const get_option = (): echarts.EChartsCoreOption => {
@@ -42,7 +42,7 @@ export function causal_graph(slv: solver.Solver): VNode {
 
   let resize_handler: () => void;
 
-  return h('div#causal_graph.flex-grow-1', {
+  return h('div#timelines.flex-grow-1', {
     hook: {
       insert: (vnode) => {
         chart = echarts.init(vnode.elm as HTMLDivElement);
