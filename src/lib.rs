@@ -43,6 +43,11 @@ impl SolverEventBus {
     }
 
     pub fn send(&self, event: SolverEvent) {
+        let mut subs = self.subscribers.lock().expect("Solver event subscriber list mutex poisoned");
+        if subs.is_empty() {
+            return;
+        }
+
         let msg = match &event {
             SolverEvent::NewFlaw(flaw) => {
                 let id = Rc::as_ptr(flaw) as *const () as usize;
@@ -55,8 +60,7 @@ impl SolverEventBus {
             }
         };
 
-        let mut subscribers = self.subscribers.lock().expect("Solver event subscriber list mutex poisoned");
-        subscribers.retain(|tx| tx.send(msg.clone()).is_ok());
+        subs.retain(|tx| tx.send(msg.clone()).is_ok());
     }
 }
 
