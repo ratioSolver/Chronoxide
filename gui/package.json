@@ -1,0 +1,44 @@
+{
+  "name": "@ratiosolver/chronoxide",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "A frontend library for facilitating interaction with the Chronoxide solver",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ratioSolver/Chronoxide.git"
+  },
+  "author": "ratioSolver",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ratioSolver/Chronoxide/issues"
+  },
+  "homepage": "https://github.com/ratioSolver/Chronoxide#readme",
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "vite playground"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "^7.2.0",
+    "@types/bootstrap": "^5.2.10",
+    "@types/node": "^25.3.3",
+    "jsdom": "^29.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.2"
+  },
+  "peerDependencies": {
+    "@ratiosolver/flick": "^0.2.9",
+    "bootstrap": "^5.3.8",
+    "snabbdom": "^3.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "echarts": "^6.0.0"
+  }
+}
