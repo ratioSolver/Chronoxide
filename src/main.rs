@@ -9,7 +9,7 @@ fn main() {
 
     let files = &args[1..];
 
-    let (slv, _rx) = Solver::new();
+    let slv = Solver::new();
     for file in files {
         slv.read(&std::fs::read_to_string(file).expect("Failed to read file"));
     }

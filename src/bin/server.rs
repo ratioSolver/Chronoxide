@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     Router,
     extract::{
@@ -9,17 +7,21 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use tokio::sync::broadcast::Sender;
+use chronoxide::{Solver, SolverEventBus};
+use std::sync::Arc;
+use tokio::sync::broadcast::error::RecvError;
 use tower_http::services::{ServeDir, ServeFile};
 
+#[derive(Clone)]
 struct AppState {
-    tx: Sender<String>,
+    event_bus: SolverEventBus,
 }
 
 #[tokio::main]
 async fn main() {
-    let (tx, _rx) = tokio::sync::broadcast::channel(100);
-    let app_state = Arc::new(AppState { tx });
+    let slv = Solver::new();
+    let event_bus = slv.get_event_sender();
+    let app_state = Arc::new(AppState { event_bus });
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
 
@@ -32,10 +34,16 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 }
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
-    let mut rx = state.tx.subscribe();
-    while let Ok(msg) = rx.recv().await {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
-            break;
+    let mut rx = state.event_bus.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(msg) => {
+                if socket.send(Message::Text(msg.into())).await.is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => break,
         }
     }
 }

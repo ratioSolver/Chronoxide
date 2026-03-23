@@ -20,10 +20,38 @@ use std::{
     fmt,
     rc::{Rc, Weak},
 };
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 mod flaw;
 mod objects;
+
+#[derive(Clone)]
+pub struct SolverEventBus {
+    tx: broadcast::Sender<String>,
+}
+
+impl SolverEventBus {
+    fn new() -> Self {
+        let (tx, _) = broadcast::channel(64);
+        Self { tx }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+        self.tx.subscribe()
+    }
+
+    pub fn send(&self, event: SolverEvent) {
+        let msg = match &event {
+            SolverEvent::NewFlaw(flaw) => {
+                format!(r#"{{"type":"NewFlaw","phi":{}}}"#, flaw.phi())
+            }
+            SolverEvent::NewResolver(resolver) => {
+                format!(r#"{{"type":"NewResolver","phi":{},"rho":{}}}"#, resolver.flaw().phi(), resolver.rho())
+            }
+        };
+        let _ = self.tx.send(msg);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum SolverEvent {
@@ -32,7 +60,7 @@ pub enum SolverEvent {
 }
 
 pub struct Solver {
-    sender: mpsc::UnboundedSender<SolverEvent>,
+    event_bus: SolverEventBus,
     core: Rc<CommonCore>,
     slv: Weak<Solver>,
     sat: RefCell<consensus::Engine>,
@@ -46,27 +74,27 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new() -> (Rc<Self>, mpsc::UnboundedReceiver<SolverEvent>) {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        (
-            Rc::new_cyclic(|core| Self {
-                sender,
-                core: {
-                    let core: Weak<Solver> = core.clone();
-                    CommonCore::new(core)
-                },
-                slv: core.clone(),
-                sat: RefCell::new(consensus::Engine::new()),
-                ac: RefCell::new(dynamic_ac::Engine::new()),
-                lin: RefCell::new(linspire::Engine::new()),
-                flaws: RefCell::new(vec![]),
-                resolvers: RefCell::new(vec![]),
-                c_res: None,
-                variants: RefCell::new(HashMap::new()),
-                instances_by_id: RefCell::new(vec![]),
-            }),
-            receiver,
-        )
+    pub fn new() -> Rc<Self> {
+        Rc::new_cyclic(|core| Self {
+            event_bus: SolverEventBus::new(),
+            core: {
+                let core: Weak<Solver> = core.clone();
+                CommonCore::new(core)
+            },
+            slv: core.clone(),
+            sat: RefCell::new(consensus::Engine::new()),
+            ac: RefCell::new(dynamic_ac::Engine::new()),
+            lin: RefCell::new(linspire::Engine::new()),
+            flaws: RefCell::new(vec![]),
+            resolvers: RefCell::new(vec![]),
+            c_res: None,
+            variants: RefCell::new(HashMap::new()),
+            instances_by_id: RefCell::new(vec![]),
+        })
+    }
+
+    pub fn get_event_sender(&self) -> SolverEventBus {
+        self.event_bus.clone()
     }
 
     pub fn bool_val(&self, obj: &BoolVar) -> LBool {
@@ -337,7 +365,7 @@ impl Core for Solver {
                     .collect();
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
                 let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
-                self.sender.send(SolverEvent::NewFlaw(flaw.clone())).expect("Failed to send NewFlaw event");
+                self.event_bus.send(SolverEvent::NewFlaw(flaw.clone()));
                 self.flaws.borrow_mut().push(flaw.clone());
                 true
             }
@@ -454,7 +482,7 @@ impl Core for Solver {
         let var = Rc::new(EnumVar::new(class, var));
         let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
         let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone());
-        self.sender.send(SolverEvent::NewFlaw(flaw.clone())).expect("Failed to send NewFlaw event");
+        self.event_bus.send(SolverEvent::NewFlaw(flaw.clone()));
         self.flaws.borrow_mut().push(flaw);
         Ok(var)
     }
@@ -489,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_solver() {
-        let (slv, _rx) = Solver::new();
+        let slv = Solver::new();
         let bool_obj = slv.new_bool_var();
         let int_obj = slv.new_int_var();
         let real_obj = slv.new_real_var();
@@ -501,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_int_sum() {
-        let (slv, _rx) = Solver::new();
+        let slv = Solver::new();
         let int_obj1 = slv.new_int_var();
         let int_obj2 = slv.new_int_var();
         let sum = slv.sum(&[int_obj1.clone(), int_obj2.clone()]).unwrap();
@@ -510,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_basic_enum() {
-        let (slv, _rx) = Solver::new();
+        let slv = Solver::new();
         slv.read("class Color {} Color red = new Color(); Color blue = new Color();");
         let color_type = slv.get_type("Color").unwrap();
         assert_eq!(color_type.name(), "Color");
