@@ -7,7 +7,7 @@ use std::{
 };
 
 pub trait Flaw: Debug {
-    fn slv(&self) -> Rc<Solver>;
+    fn solver(&self) -> Rc<Solver>;
     fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
     fn compute_resolvers(self: Rc<Self>);
@@ -42,7 +42,7 @@ impl OrFlaw {
 }
 
 impl Flaw for OrFlaw {
-    fn slv(&self) -> Rc<Solver> {
+    fn solver(&self) -> Rc<Solver> {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
@@ -56,7 +56,7 @@ impl Flaw for OrFlaw {
 
     fn compute_resolvers(self: Rc<Self>) {
         for lit in &self.lits {
-            let c = self.slv().sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
+            let c = self.solver().sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
             self.resolvers.borrow_mut().push(OrResolver::new(self.clone(), *lit));
         }
@@ -100,7 +100,7 @@ impl EnumFlaw {
 }
 
 impl Flaw for EnumFlaw {
-    fn slv(&self) -> Rc<Solver> {
+    fn solver(&self) -> Rc<Solver> {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
@@ -113,10 +113,10 @@ impl Flaw for EnumFlaw {
     }
 
     fn compute_resolvers(self: Rc<Self>) {
-        let vals = self.slv().ac.borrow().val(self.var.var);
+        let vals = self.solver().ac.borrow().val(self.var.var);
         for val in vals {
-            let rho = self.slv().sat.borrow_mut().add_var();
-            let c = self.slv().sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi)]);
+            let rho = self.solver().sat.borrow_mut().add_var();
+            let c = self.solver().sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi)]);
             assert!(c, "Failed to add clause for Enum flaw resolver");
             self.resolvers.borrow_mut().push(EnumResolver::new(self.clone(), rho, val));
         }

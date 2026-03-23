@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chronoxide::{Solver, SolverEventBus};
+use chronoxide::{Solver, solver::SolverEventBus};
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 
