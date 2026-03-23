@@ -19,37 +19,44 @@ use std::{
     collections::HashMap,
     fmt,
     rc::{Rc, Weak},
+    sync::{Arc, Mutex},
 };
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 mod flaw;
 mod objects;
 
 #[derive(Clone)]
 pub struct SolverEventBus {
-    tx: broadcast::Sender<String>,
+    subscribers: Arc<Mutex<Vec<mpsc::UnboundedSender<String>>>>,
 }
 
 impl SolverEventBus {
     fn new() -> Self {
-        let (tx, _) = broadcast::channel(64);
-        Self { tx }
+        Self { subscribers: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<String> {
-        self.tx.subscribe()
+    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.subscribers.lock().expect("Solver event subscriber list mutex poisoned").push(tx);
+        rx
     }
 
     pub fn send(&self, event: SolverEvent) {
         let msg = match &event {
             SolverEvent::NewFlaw(flaw) => {
-                format!(r#"{{"type":"NewFlaw","phi":{}}}"#, flaw.phi())
+                let id = Rc::as_ptr(flaw) as *const () as usize;
+                format!(r#"{{"type":"new-flaw","id":{},"phi":{}}}"#, id, flaw.phi())
             }
             SolverEvent::NewResolver(resolver) => {
-                format!(r#"{{"type":"NewResolver","phi":{},"rho":{}}}"#, resolver.flaw().phi(), resolver.rho())
+                let flaw = resolver.flaw();
+                let flaw_id = Rc::as_ptr(&flaw) as *const () as usize;
+                format!(r#"{{"type":"new-resolver","flaw":{},"rho":{}}}"#, flaw_id, resolver.rho())
             }
         };
-        let _ = self.tx.send(msg);
+
+        let mut subscribers = self.subscribers.lock().expect("Solver event subscriber list mutex poisoned");
+        subscribers.retain(|tx| tx.send(msg.clone()).is_ok());
     }
 }
 

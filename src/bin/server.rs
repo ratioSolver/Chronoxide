@@ -9,7 +9,6 @@ use axum::{
 };
 use chronoxide::{Solver, SolverEventBus};
 use std::sync::Arc;
-use tokio::sync::broadcast::error::RecvError;
 use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
@@ -35,15 +34,9 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.event_bus.subscribe();
-    loop {
-        match rx.recv().await {
-            Ok(msg) => {
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-            Err(RecvError::Lagged(_)) => continue,
-            Err(RecvError::Closed) => break,
+    while let Some(msg) = rx.recv().await {
+        if socket.send(Message::Text(msg.into())).await.is_err() {
+            return;
         }
     }
 }
