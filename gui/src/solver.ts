@@ -59,8 +59,14 @@ export namespace solver {
     initialized(): void;
   }
 
-  type SolverMessage = {};
+  type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
+  type PartialFlawMessage = {};
+  type FlawMessage = ({ id: string } & PartialFlawMessage);
+  type PartialResolverMessage = {};
+  type ResolverMessage = ({ id: string } & PartialResolverMessage);
 
   type ServerMessage =
-    | ({ msg_type: 'status' } & SolverMessage);
+    | ({ msg_type: 'status' } & SolverMessage)
+    | ({ msg_type: 'new-flaw' } & FlawMessage)
+    | ({ msg_type: 'new-resolver' } & ResolverMessage);
 }

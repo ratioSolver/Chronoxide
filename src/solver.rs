@@ -13,9 +13,10 @@ use riddle::{
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
+    serde_json::json,
 };
 use std::{
-    cell::{RefCell, RefMut},
+    cell::RefCell,
     collections::HashMap,
     fmt,
     rc::{Rc, Weak},
@@ -48,12 +49,17 @@ impl SolverEventBus {
         let msg = match &event {
             SolverEvent::NewFlaw(flaw) => {
                 let id = Rc::as_ptr(flaw) as *const () as usize;
-                format!(r#"{{"type":"new-flaw","id":{},"phi":{}}}"#, id, flaw.phi())
+                let mut msg = flaw.to_json();
+                msg["id"] = json!(id);
+                msg["msg_type"] = json!("new-flaw");
+                msg.to_string()
             }
             SolverEvent::NewResolver(resolver) => {
-                let flaw = resolver.flaw();
-                let flaw_id = Rc::as_ptr(&flaw) as *const () as usize;
-                format!(r#"{{"type":"new-resolver","flaw":{},"rho":{}}}"#, flaw_id, resolver.rho())
+                let id = Rc::as_ptr(resolver) as *const () as usize;
+                let mut msg = resolver.to_json();
+                msg["id"] = json!(id);
+                msg["msg_type"] = json!("new-resolver");
+                msg.to_string()
             }
         };
 
@@ -127,6 +133,38 @@ impl Solver {
 
     pub fn read(&self, script: &str) {
         self.core.read(script);
+    }
+
+    pub fn to_json(&self) -> String {
+        let flaws = self
+            .flaws
+            .borrow()
+            .iter()
+            .map(|flaw| {
+                let id = Rc::as_ptr(flaw) as *const () as usize;
+                let mut json = flaw.to_json();
+                json["id"] = json!(id);
+                (id, json)
+            })
+            .collect::<HashMap<_, _>>();
+
+        let resolvers = self
+            .resolvers
+            .borrow()
+            .iter()
+            .map(|resolver| {
+                let id = Rc::as_ptr(resolver) as *const () as usize;
+                let mut json = resolver.to_json();
+                json["id"] = json!(id);
+                (id, json)
+            })
+            .collect::<HashMap<_, _>>();
+
+        json!({
+            "flaws": flaws,
+            "resolvers": resolvers
+        })
+        .to_string()
     }
 }
 

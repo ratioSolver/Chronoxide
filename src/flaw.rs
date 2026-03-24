@@ -1,5 +1,6 @@
 use crate::{Solver, objects::EnumVar};
 use consensus::{Lit, neg, pos};
+use riddle::serde_json::{Value, json};
 use std::{
     cell::RefCell,
     fmt::Debug,
@@ -9,6 +10,11 @@ use std::{
 pub trait Flaw: Debug {
     fn solver(&self) -> Rc<Solver>;
     fn phi(&self) -> usize;
+    fn to_json(&self) -> Value {
+        json!({
+            "phi": self.phi()
+        })
+    }
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
     fn compute_resolvers(self: Rc<Self>);
 }
@@ -16,6 +22,12 @@ pub trait Flaw: Debug {
 pub trait Resolver: Debug {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
+    fn to_json(&self) -> Value {
+        json!({
+            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
+            "rho": self.rho()
+        })
+    }
     fn ac_constraints(&self) -> Option<Vec<usize>> {
         None
     }
@@ -48,6 +60,14 @@ impl Flaw for OrFlaw {
 
     fn phi(&self) -> usize {
         self.phi
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "or",
+            "phi": self.phi,
+            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>()
+        })
     }
 
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
@@ -106,6 +126,14 @@ impl Flaw for EnumFlaw {
 
     fn phi(&self) -> usize {
         self.phi
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "enum",
+            "phi": self.phi,
+            "var": format!("{:?}", self.var)
+        })
     }
 
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
