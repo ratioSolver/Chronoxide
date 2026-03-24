@@ -1,4 +1,5 @@
-use crate::Solver;
+use crate::{Solver, solver::SolverEvent};
+use riddle::serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -8,7 +9,9 @@ pub enum ExecutorCommand {
 
 #[derive(Clone, Debug)]
 pub enum ExecutorEvent {
-    ProblemSolved,
+    ProblemSolved(Value),
+    NewFlaw(Value),
+    NewResolver(Value),
 }
 
 #[derive(Clone)]
@@ -42,6 +45,7 @@ impl Executor {
     pub fn new() -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<ExecutorCommand>();
         let event_bus = ExecutorEventBus::new();
+        let event_bus_task = event_bus.clone();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("Failed to build single-thread Tokio runtime for Executor");
@@ -60,9 +64,11 @@ impl Executor {
                             None => break,
                         },
                         event = slv_rx.recv() => match event {
-                            Some(_solver_event) => {
-                                // forward solver events to the executor event bus if needed
-                                // event_bus_actor.send(ExecutorEvent::ProblemSolved);
+                            Some(SolverEvent::NewFlaw(flaw)) => {
+                                event_bus_task.send(ExecutorEvent::NewFlaw(flaw.to_json()));
+                            }
+                            Some(SolverEvent::NewResolver(resolver)) => {
+                                event_bus_task.send(ExecutorEvent::NewResolver(resolver.to_json()));
                             }
                             None => break,
                         },
@@ -78,7 +84,7 @@ impl Executor {
         self.event_bus.clone()
     }
 
-    pub async fn read_riddle(&self, script: String) -> Result<(), String> {
+    pub async fn read(&self, script: String) -> Result<(), String> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.tx.send(ExecutorCommand::ReadRiDDle { script, resp: resp_tx }).expect("Executor actor thread has stopped");
         resp_rx.await.expect("Executor actor thread has stopped")

@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 pub struct SolverEventBus {
-    subscribers: Arc<Mutex<Vec<mpsc::UnboundedSender<String>>>>,
+    subscribers: Arc<Mutex<Vec<mpsc::UnboundedSender<SolverEvent>>>>,
 }
 
 impl SolverEventBus {
@@ -34,7 +34,7 @@ impl SolverEventBus {
         Self { subscribers: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<String> {
+    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<SolverEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.subscribers.lock().expect("Solver event subscriber list mutex poisoned").push(tx);
         rx
@@ -45,25 +45,7 @@ impl SolverEventBus {
         if subs.is_empty() {
             return;
         }
-
-        let msg = match &event {
-            SolverEvent::NewFlaw(flaw) => {
-                let id = Rc::as_ptr(flaw) as *const () as usize;
-                let mut msg = flaw.to_json();
-                msg["id"] = json!(id);
-                msg["msg_type"] = json!("new-flaw");
-                msg.to_string()
-            }
-            SolverEvent::NewResolver(resolver) => {
-                let id = Rc::as_ptr(resolver) as *const () as usize;
-                let mut msg = resolver.to_json();
-                msg["id"] = json!(id);
-                msg["msg_type"] = json!("new-resolver");
-                msg.to_string()
-            }
-        };
-
-        subs.retain(|tx| tx.send(msg.clone()).is_ok());
+        subs.retain(|tx| tx.send(event.clone()).is_ok());
     }
 }
 

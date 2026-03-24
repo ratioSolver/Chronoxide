@@ -7,14 +7,18 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chronoxide::{Solver, solver::SolverEventBus};
+use chronoxide::{
+    Executor,
+    executor::{ExecutorEvent, ExecutorEventBus},
+};
+use riddle::serde_json;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
 struct AppState {
-    event_bus: SolverEventBus,
+    event_bus: ExecutorEventBus,
     first_client_connected: Arc<Notify>,
 }
 
@@ -28,8 +32,8 @@ async fn main() {
 
     let files = args[1..].to_vec();
 
-    let slv = Solver::new();
-    let app_state = Arc::new(AppState { event_bus: slv.get_event_sender(), first_client_connected: Arc::new(Notify::new()) });
+    let executor = Executor::new();
+    let app_state = Arc::new(AppState { event_bus: executor.get_event_sender(), first_client_connected: Arc::new(Notify::new()) });
     let read_state = app_state.clone();
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
@@ -42,7 +46,7 @@ async fn main() {
     // Parse only after at least one websocket client is connected.
     read_state.first_client_connected.notified().await;
     for file in &files {
-        slv.read(&std::fs::read_to_string(file).expect("Failed to read file"));
+        executor.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
     }
 
     server.await.unwrap();
@@ -56,8 +60,25 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.event_bus.subscribe();
     state.first_client_connected.notify_waiters();
     while let Some(msg) = rx.recv().await {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
-            return;
+        let send_result = match msg {
+            ExecutorEvent::ProblemSolved(solver) => {
+                let mut msg = solver;
+                msg["msg_type"] = "problem_solved".into();
+                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            }
+            ExecutorEvent::NewFlaw(flaw) => {
+                let mut msg = flaw;
+                msg["msg_type"] = "new_flaw".into();
+                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            }
+            ExecutorEvent::NewResolver(resolver) => {
+                let mut msg = resolver;
+                msg["msg_type"] = "new_resolver".into();
+                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            }
+        };
+        if send_result.is_err() {
+            break;
         }
     }
 }
