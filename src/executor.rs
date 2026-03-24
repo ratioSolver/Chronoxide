@@ -1,3 +1,4 @@
+use crate::Solver;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -39,25 +40,47 @@ pub struct Executor {
 
 impl Executor {
     pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel::<ExecutorCommand>();
         let event_bus = ExecutorEventBus::new();
 
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(cmd) = rx.recv() => {
-                        handle_command(cmd).await;
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("Failed to build single-thread Tokio runtime for Executor");
+
+            rt.block_on(async move {
+                let slv = Solver::new();
+                let mut slv_rx = slv.get_event_sender().subscribe();
+
+                loop {
+                    tokio::select! {
+                        cmd = rx.recv() => match cmd {
+                            Some(ExecutorCommand::ReadRiDDle { script, resp }) => {
+                                slv.read(&script);
+                                let _ = resp.send(Ok(()));
+                            }
+                            None => break,
+                        },
+                        event = slv_rx.recv() => match event {
+                            Some(_solver_event) => {
+                                // forward solver events to the executor event bus if needed
+                                // event_bus_actor.send(ExecutorEvent::ProblemSolved);
+                            }
+                            None => break,
+                        },
                     }
                 }
-            }
+            });
         });
 
         Self { tx, event_bus }
     }
-}
 
-async fn handle_command(cmd: ExecutorCommand) {
-    match cmd {
-        ExecutorCommand::ReadRiDDle { script, resp } => {}
+    pub fn get_event_sender(&self) -> ExecutorEventBus {
+        self.event_bus.clone()
+    }
+
+    pub async fn read_riddle(&self, script: String) -> Result<(), String> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.tx.send(ExecutorCommand::ReadRiDDle { script, resp: resp_tx }).expect("Executor actor thread has stopped");
+        resp_rx.await.expect("Executor actor thread has stopped")
     }
 }
