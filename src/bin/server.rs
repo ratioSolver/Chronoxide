@@ -61,7 +61,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.exec.get_event_sender().subscribe();
 
     let mut msg = state.exec.to_json().await;
-    msg["msg_type"] = "state".into();
+    msg["msg_type"] = "status".into();
     if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
         return;
     }
@@ -71,17 +71,17 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         let send_result = match msg {
             ExecutorEvent::ProblemSolved(solver) => {
                 let mut msg = solver;
-                msg["msg_type"] = "problem_solved".into();
+                msg["msg_type"] = "problem-solved".into();
                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
             }
             ExecutorEvent::NewFlaw(flaw) => {
                 let mut msg = flaw;
-                msg["msg_type"] = "new_flaw".into();
+                msg["msg_type"] = "new-flaw".into();
                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
             }
             ExecutorEvent::NewResolver(resolver) => {
                 let mut msg = resolver;
-                msg["msg_type"] = "new_resolver".into();
+                msg["msg_type"] = "new-resolver".into();
                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
             }
         };

@@ -18,13 +18,11 @@ export function causal_graph(slv: solver.Solver): VNode {
         id: flaw.get_id(),
         name: flaw.get_phi(),
         symbol: 'circle',
-        symbolSize: 40,
       })),
       ...resolvers.map((resolver) => ({
         id: resolver.get_id(),
         name: resolver.get_rho(),
         symbol: 'rect',
-        symbolSize: [56, 28],
       })),
     ];
 

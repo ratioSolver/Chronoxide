@@ -7,8 +7,8 @@ export namespace solver {
 
     private readonly options: SolverOptions;
     private socket: WebSocket | null = null;
-    private readonly flaws: Map<string, Flaw> = new Map();
-    private readonly resolvers: Map<string, Resolver> = new Map();
+    private readonly flaws: Map<number, Flaw> = new Map();
+    private readonly resolvers: Map<number, Resolver> = new Map();
     private readonly listeners: Set<SolverListener> = new Set();
 
     constructor(options: SolverOptions = {}) {
@@ -42,9 +42,9 @@ export namespace solver {
         switch (msg.msg_type) {
           case 'status': {
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
-              this.flaws.set(id, new Flaw(id, flaw_msg.phi));
+              this.flaws.set(Number(id), new Flaw(Number(id), flaw_msg.phi));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
-              this.resolvers.set(id, new Resolver(id, resolver_msg.rho, this.flaws.get(resolver_msg.flaw)!));
+              this.resolvers.set(Number(id), new Resolver(Number(id), resolver_msg.rho, this.flaws.get(Number(resolver_msg.flaw))!));
 
             for (const listener of this.listeners) listener.initialized();
             break;
@@ -57,7 +57,7 @@ export namespace solver {
           }
           case 'new-resolver': {
             const resolver = new Resolver(msg.id, msg.rho, this.flaws.get(msg.flaw)!);
-            this.resolvers.set(msg.id, resolver);
+            this.resolvers.set(Number(msg.id), resolver);
             for (const listener of this.listeners) listener.new_resolver(resolver);
             break;
           }
@@ -84,39 +84,39 @@ export namespace solver {
   }
 
   export class Flaw {
-    private readonly id: string;
+    private readonly id: number;
     private readonly phi: string;
 
-    constructor(id: string, phi: string) {
+    constructor(id: number, phi: string) {
       this.id = id;
       this.phi = phi;
     }
 
-    get_id(): string { return this.id; }
+    get_id(): number { return this.id; }
     get_phi(): string { return this.phi; }
   }
 
   export class Resolver {
-    private readonly id: string;
+    private readonly id: number;
     private readonly rho: string;
     private readonly flaw: Flaw;
 
-    constructor(id: string, rho: string, flaw: Flaw) {
+    constructor(id: number, rho: string, flaw: Flaw) {
       this.id = id;
       this.rho = rho;
       this.flaw = flaw;
     }
 
-    get_id(): string { return this.id; }
+    get_id(): number { return this.id; }
     get_rho(): string { return this.rho; }
     get_flaw(): Flaw { return this.flaw; }
   }
 
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
   type PartialFlawMessage = { phi: string };
-  type FlawMessage = ({ id: string } & PartialFlawMessage);
-  type PartialResolverMessage = { rho: string, flaw: string };
-  type ResolverMessage = ({ id: string } & PartialResolverMessage);
+  type FlawMessage = ({ id: number } & PartialFlawMessage);
+  type PartialResolverMessage = { rho: string, flaw: number };
+  type ResolverMessage = ({ id: number } & PartialResolverMessage);
 
   type ServerMessage =
     | ({ msg_type: 'status' } & SolverMessage)
