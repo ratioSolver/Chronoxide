@@ -13,7 +13,7 @@ use riddle::{
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
-    serde_json::json,
+    serde_json::{Value, json},
 };
 use std::{
     cell::RefCell,
@@ -117,7 +117,7 @@ impl Solver {
         self.core.read(script);
     }
 
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Value {
         let flaws = self
             .flaws
             .borrow()
@@ -146,7 +146,6 @@ impl Solver {
             "flaws": flaws,
             "resolvers": resolvers
         })
-        .to_string()
     }
 }
 

@@ -7,10 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chronoxide::{
-    Executor,
-    executor::{ExecutorEvent, ExecutorEventBus},
-};
+use chronoxide::{Executor, executor::ExecutorEvent};
 use riddle::serde_json;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -19,7 +16,7 @@ use tracing::Level;
 
 #[derive(Clone)]
 struct AppState {
-    event_bus: ExecutorEventBus,
+    exec: Arc<Executor>,
     first_client_connected: Arc<Notify>,
 }
 
@@ -36,8 +33,8 @@ async fn main() {
 
     let files = args[1..].to_vec();
 
-    let executor = Executor::new();
-    let app_state = Arc::new(AppState { event_bus: executor.get_event_sender(), first_client_connected: Arc::new(Notify::new()) });
+    let exec = Arc::new(Executor::new());
+    let app_state = Arc::new(AppState { exec: exec.clone(), first_client_connected: Arc::new(Notify::new()) });
     let read_state = app_state.clone();
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
@@ -50,7 +47,7 @@ async fn main() {
     // Parse only after at least one websocket client is connected.
     read_state.first_client_connected.notified().await;
     for file in &files {
-        executor.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
+        exec.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
     }
 
     server.await.unwrap();
@@ -61,7 +58,14 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 }
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
-    let mut rx = state.event_bus.subscribe();
+    let mut rx = state.exec.get_event_sender().subscribe();
+
+    let mut msg = state.exec.to_json().await;
+    msg["msg_type"] = "state".into();
+    if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
+        return;
+    }
+
     state.first_client_connected.notify_waiters();
     while let Some(msg) = rx.recv().await {
         let send_result = match msg {

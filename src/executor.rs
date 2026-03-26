@@ -6,6 +6,7 @@ use tracing::debug;
 
 enum ExecutorCommand {
     ReadRiDDle { script: String, resp: oneshot::Sender<Result<(), String>> },
+    Snapshot { resp: oneshot::Sender<Value> },
     StartTimer,
     StopTimer,
 }
@@ -65,6 +66,9 @@ impl Executor {
                                 slv.read(&script);
                                 let _ = resp.send(Ok(()));
                             }
+                            Some(ExecutorCommand::Snapshot { resp }) => {
+                                let _ = resp.send(slv.to_json());
+                            }
                             Some(ExecutorCommand::StartTimer) => {
                                 if timer_handle.is_none() {
                                     timer_handle = Some(tokio::spawn(async move {
@@ -116,5 +120,11 @@ impl Executor {
 
     pub fn stop_timer(&self) {
         self.tx.send(ExecutorCommand::StopTimer).expect("Executor actor thread has stopped");
+    }
+
+    pub async fn to_json(&self) -> Value {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.tx.send(ExecutorCommand::Snapshot { resp: resp_tx }).expect("Executor actor thread has stopped");
+        resp_rx.await.expect("Executor actor thread has stopped")
     }
 }
