@@ -15,6 +15,7 @@ use riddle::serde_json;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tower_http::services::{ServeDir, ServeFile};
+use tracing::Level;
 
 #[derive(Clone)]
 struct AppState {
@@ -24,6 +25,9 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
+    let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
     let args = std::env::args().collect::<Vec<_>>();
     if args.len() < 2 {
         eprintln!("Usage: {} <files>", args[0]);

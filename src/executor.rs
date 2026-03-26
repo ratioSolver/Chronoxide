@@ -2,9 +2,12 @@ use crate::{Solver, solver::SolverEvent};
 use riddle::serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
+use tracing::debug;
 
-pub enum ExecutorCommand {
+enum ExecutorCommand {
     ReadRiDDle { script: String, resp: oneshot::Sender<Result<(), String>> },
+    StartTimer,
+    StopTimer,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +56,7 @@ impl Executor {
             rt.block_on(async move {
                 let slv = Solver::new();
                 let mut slv_rx = slv.get_event_sender().subscribe();
+                let mut timer_handle: Option<tokio::task::JoinHandle<()>> = None;
 
                 loop {
                     tokio::select! {
@@ -60,6 +64,22 @@ impl Executor {
                             Some(ExecutorCommand::ReadRiDDle { script, resp }) => {
                                 slv.read(&script);
                                 let _ = resp.send(Ok(()));
+                            }
+                            Some(ExecutorCommand::StartTimer) => {
+                                if timer_handle.is_none() {
+                                    timer_handle = Some(tokio::spawn(async move {
+                                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                                        loop {
+                                            interval.tick().await;
+                                            debug!("Timer tick");
+                                        }
+                                    }));
+                                }
+                            }
+                            Some(ExecutorCommand::StopTimer) => {
+                                if let Some(handle) = timer_handle.take() {
+                                    handle.abort();
+                                }
                             }
                             None => break,
                         },
@@ -88,5 +108,13 @@ impl Executor {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.tx.send(ExecutorCommand::ReadRiDDle { script, resp: resp_tx }).expect("Executor actor thread has stopped");
         resp_rx.await.expect("Executor actor thread has stopped")
+    }
+
+    pub fn start_timer(&self) {
+        self.tx.send(ExecutorCommand::StartTimer).expect("Executor actor thread has stopped");
+    }
+
+    pub fn stop_timer(&self) {
+        self.tx.send(ExecutorCommand::StopTimer).expect("Executor actor thread has stopped");
     }
 }
