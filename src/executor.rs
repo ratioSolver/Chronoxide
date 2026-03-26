@@ -1,6 +1,9 @@
 use crate::{Solver, solver::SolverEvent};
 use riddle::serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 
@@ -89,10 +92,14 @@ impl Executor {
                         },
                         event = slv_rx.recv() => match event {
                             Some(SolverEvent::NewFlaw(flaw)) => {
-                                event_bus_task.send(ExecutorEvent::NewFlaw(flaw.to_json()));
+                                let mut msg = flaw.to_json();
+                                msg["id"] = (Rc::as_ptr(&flaw) as *const () as usize).into();
+                                event_bus_task.send(ExecutorEvent::NewFlaw(msg));
                             }
                             Some(SolverEvent::NewResolver(resolver)) => {
-                                event_bus_task.send(ExecutorEvent::NewResolver(resolver.to_json()));
+                                let mut msg = resolver.to_json();
+                                msg["id"] = (Rc::as_ptr(&resolver) as *const () as usize).into();
+                                event_bus_task.send(ExecutorEvent::NewResolver(msg));
                             }
                             None => break,
                         },

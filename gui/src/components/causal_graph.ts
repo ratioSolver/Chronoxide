@@ -10,14 +10,37 @@ export function causal_graph(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
   const get_option = (): echarts.EChartsCoreOption => {
+    const flaws = slv.get_flaws();
+    const resolvers = slv.get_resolvers();
+
+    const data = [
+      ...flaws.map((flaw) => ({
+        id: flaw.get_id(),
+        name: flaw.get_phi(),
+        symbol: 'circle',
+        symbolSize: 40,
+      })),
+      ...resolvers.map((resolver) => ({
+        id: resolver.get_id(),
+        name: resolver.get_rho(),
+        symbol: 'rect',
+        symbolSize: [56, 28],
+      })),
+    ];
+
+    const links = resolvers.map((resolver) => ({
+      source: resolver.get_id(),
+      target: resolver.get_flaw().get_id(),
+    }));
+
     return {
       series: [
         {
           type: 'graph',
           layout: 'force',
           draggable: true,
-          data: [],
-          links: [],
+          data,
+          links,
           roam: true,
           label: {
             show: true,
@@ -34,10 +57,13 @@ export function causal_graph(slv: solver.Solver): VNode {
   };
 
   const solver_listener = {
-    initialized: () => { },
-    connection_error: (error: Event) => console.error('Solver connection error', error),
+    initialized: () => { if (chart) chart.setOption(get_option()); },
+    new_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
+    new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
+
     connected: () => { },
     disconnected: () => { },
+    connection_error: (error: Event) => console.error('Solver connection error', error),
   };
 
   let resize_handler: () => void;

@@ -6,9 +6,12 @@ import { timelines } from "./timelines";
 
 const app_listener = {
   initialized: () => flick.redraw(),
-  connection_error: (error: Event) => console.error('CoCo connection error', error),
+  new_flaw: (_flaw: solver.Flaw) => { },
+  new_resolver: (_resolver: solver.Resolver) => { },
+
   connected: () => { },
   disconnected: () => { },
+  connection_error: (error: Event) => console.error('CoCo connection error', error),
 };
 
 const landing_page = () => h('div.container.mt-5', [
