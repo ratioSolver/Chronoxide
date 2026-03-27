@@ -59,50 +59,49 @@ impl Executor {
 
             rt.block_on(async move {
                 let slv = Solver::new();
-                let mut slv_rx = slv.get_event_sender().subscribe();
+                slv.set_callback({
+                    let event_bus_fwd = event_bus_task.clone();
+                    move |event| match event {
+                        SolverEvent::NewFlaw(flaw) => {
+                            let mut msg = flaw.to_json();
+                            msg["id"] = (Rc::as_ptr(&flaw) as *const () as usize).into();
+                            event_bus_fwd.send(ExecutorEvent::NewFlaw(msg));
+                        }
+                        SolverEvent::NewResolver(resolver) => {
+                            let mut msg = resolver.to_json();
+                            msg["id"] = (Rc::as_ptr(&resolver) as *const () as usize).into();
+                            event_bus_fwd.send(ExecutorEvent::NewResolver(msg));
+                        }
+                    }
+                });
                 let mut timer_handle: Option<tokio::task::JoinHandle<()>> = None;
 
                 loop {
-                    tokio::select! {
-                        cmd = rx.recv() => match cmd {
-                            Some(ExecutorCommand::ReadRiDDle { script, resp }) => {
-                                slv.read(&script);
-                                let _ = resp.send(Ok(()));
+                    match rx.recv().await {
+                        Some(ExecutorCommand::ReadRiDDle { script, resp }) => {
+                            slv.read(&script);
+                            let _ = resp.send(Ok(()));
+                        }
+                        Some(ExecutorCommand::Snapshot { resp }) => {
+                            let _ = resp.send(slv.to_json());
+                        }
+                        Some(ExecutorCommand::StartTimer) => {
+                            if timer_handle.is_none() {
+                                timer_handle = Some(tokio::spawn(async move {
+                                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                                    loop {
+                                        interval.tick().await;
+                                        debug!("Timer tick");
+                                    }
+                                }));
                             }
-                            Some(ExecutorCommand::Snapshot { resp }) => {
-                                let _ = resp.send(slv.to_json());
+                        }
+                        Some(ExecutorCommand::StopTimer) => {
+                            if let Some(handle) = timer_handle.take() {
+                                handle.abort();
                             }
-                            Some(ExecutorCommand::StartTimer) => {
-                                if timer_handle.is_none() {
-                                    timer_handle = Some(tokio::spawn(async move {
-                                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-                                        loop {
-                                            interval.tick().await;
-                                            debug!("Timer tick");
-                                        }
-                                    }));
-                                }
-                            }
-                            Some(ExecutorCommand::StopTimer) => {
-                                if let Some(handle) = timer_handle.take() {
-                                    handle.abort();
-                                }
-                            }
-                            None => break,
-                        },
-                        event = slv_rx.recv() => match event {
-                            Some(SolverEvent::NewFlaw(flaw)) => {
-                                let mut msg = flaw.to_json();
-                                msg["id"] = (Rc::as_ptr(&flaw) as *const () as usize).into();
-                                event_bus_task.send(ExecutorEvent::NewFlaw(msg));
-                            }
-                            Some(SolverEvent::NewResolver(resolver)) => {
-                                let mut msg = resolver.to_json();
-                                msg["id"] = (Rc::as_ptr(&resolver) as *const () as usize).into();
-                                event_bus_task.send(ExecutorEvent::NewResolver(msg));
-                            }
-                            None => break,
-                        },
+                        }
+                        None => break,
                     }
                 }
             });

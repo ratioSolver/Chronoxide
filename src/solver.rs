@@ -20,34 +20,7 @@ use std::{
     collections::HashMap,
     fmt,
     rc::{Rc, Weak},
-    sync::{Arc, Mutex},
 };
-use tokio::sync::mpsc;
-
-#[derive(Clone)]
-pub struct SolverEventBus {
-    subscribers: Arc<Mutex<Vec<mpsc::UnboundedSender<SolverEvent>>>>,
-}
-
-impl SolverEventBus {
-    fn new() -> Self {
-        Self { subscribers: Arc::new(Mutex::new(Vec::new())) }
-    }
-
-    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<SolverEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.subscribers.lock().expect("Solver event subscriber list mutex poisoned").push(tx);
-        rx
-    }
-
-    pub fn send(&self, event: SolverEvent) {
-        let mut subs = self.subscribers.lock().expect("Solver event subscriber list mutex poisoned");
-        if subs.is_empty() {
-            return;
-        }
-        subs.retain(|tx| tx.send(event.clone()).is_ok());
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum SolverEvent {
@@ -56,7 +29,6 @@ pub enum SolverEvent {
 }
 
 pub struct Solver {
-    event_bus: SolverEventBus,
     core: Rc<CommonCore>,
     slv: Weak<Solver>,
     pub sat: RefCell<consensus::Engine>,
@@ -67,12 +39,12 @@ pub struct Solver {
     c_res: Option<Rc<dyn Resolver>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
+    callback: RefCell<Option<Box<dyn Fn(SolverEvent)>>>,
 }
 
 impl Solver {
     pub fn new() -> Rc<Self> {
         Rc::new_cyclic(|core| Self {
-            event_bus: SolverEventBus::new(),
             core: {
                 let core: Weak<Solver> = core.clone();
                 CommonCore::new(core)
@@ -86,11 +58,12 @@ impl Solver {
             c_res: None,
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
+            callback: RefCell::new(None),
         })
     }
 
-    pub fn get_event_sender(&self) -> SolverEventBus {
-        self.event_bus.clone()
+    pub fn set_callback(&self, cb: impl Fn(SolverEvent) + 'static) {
+        self.callback.borrow_mut().replace(Box::new(cb));
     }
 
     pub fn bool_val(&self, obj: &BoolVar) -> LBool {
@@ -146,6 +119,12 @@ impl Solver {
             "flaws": flaws,
             "resolvers": resolvers
         })
+    }
+
+    fn notify(&self, event: SolverEvent) {
+        if let Some(cb) = self.callback.borrow().as_ref() {
+            cb(event);
+        }
     }
 }
 
@@ -392,7 +371,7 @@ impl Core for Solver {
                     .collect();
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
                 let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
-                self.event_bus.send(SolverEvent::NewFlaw(flaw.clone()));
+                self.notify(SolverEvent::NewFlaw(flaw.clone()));
                 self.flaws.borrow_mut().push(flaw.clone());
                 true
             }
@@ -509,7 +488,7 @@ impl Core for Solver {
         let var = Rc::new(EnumVar::new(class, var));
         let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
         let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone());
-        self.event_bus.send(SolverEvent::NewFlaw(flaw.clone()));
+        self.notify(SolverEvent::NewFlaw(flaw.clone()));
         self.flaws.borrow_mut().push(flaw);
         Ok(var)
     }
