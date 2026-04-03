@@ -1,5 +1,5 @@
 use crate::{ToJson, objects::EnumVar, solver::SolverState};
-use consensus::{Lit, neg, pos};
+use consensus::{LBool, Lit, neg, pos};
 use linspire::rational::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
@@ -9,6 +9,9 @@ use std::{
 
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
+    fn id(&self) -> usize {
+        Rc::as_ptr(&Rc::new(self)) as *const () as usize
+    }
     fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
     fn cost(&self) -> &Rational;
@@ -16,6 +19,9 @@ pub trait Flaw: ToJson {
 }
 
 pub trait Resolver: ToJson {
+    fn id(&self) -> usize {
+        Rc::as_ptr(&Rc::new(self)) as *const () as usize
+    }
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
     fn ac_constraints(&self) -> Option<Vec<usize>> {
@@ -29,7 +35,7 @@ pub trait Resolver: ToJson {
     }
 }
 
-pub(crate) struct OrFlaw {
+pub(crate) struct ClauseFlaw {
     slv: Weak<SolverState>,
     phi: usize,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
@@ -37,7 +43,7 @@ pub(crate) struct OrFlaw {
     lits: Vec<Lit>,
 }
 
-impl OrFlaw {
+impl ClauseFlaw {
     pub(crate) fn new(slv: Rc<SolverState>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self {
             slv: Rc::downgrade(&slv),
@@ -49,7 +55,7 @@ impl OrFlaw {
     }
 }
 
-impl Flaw for OrFlaw {
+impl Flaw for ClauseFlaw {
     fn solver(&self) -> Rc<SolverState> {
         self.slv.upgrade().expect("Solver has been dropped")
     }
@@ -70,34 +76,32 @@ impl Flaw for OrFlaw {
         for lit in &self.lits {
             let c = self.solver().sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
-            self.resolvers.borrow_mut().push(OrResolver::new(self.clone(), *lit));
+            self.resolvers.borrow_mut().push(ClauseResolver::new(self.clone(), *lit));
         }
     }
 }
 
-impl ToJson for OrFlaw {
+impl ToJson for ClauseFlaw {
     fn to_json(&self) -> Value {
-        json!({
-            "kind": "or",
-            "phi": self.phi,
-            "cost": self.cost.to_json(),
-            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>()
-        })
+        let mut json = flaw_to_json(self);
+        json["kind"] = "clause".into();
+        json["lits"] = self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>().into();
+        json
     }
 }
 
-pub(crate) struct OrResolver {
-    flaw: Weak<OrFlaw>,
+pub(crate) struct ClauseResolver {
+    flaw: Weak<ClauseFlaw>,
     lit: Lit,
 }
 
-impl OrResolver {
-    fn new(flaw: Rc<OrFlaw>, lit: Lit) -> Rc<Self> {
+impl ClauseResolver {
+    fn new(flaw: Rc<ClauseFlaw>, lit: Lit) -> Rc<Self> {
         Rc::new(Self { flaw: Rc::downgrade(&flaw), lit })
     }
 }
 
-impl Resolver for OrResolver {
+impl Resolver for ClauseResolver {
     fn flaw(&self) -> Rc<dyn Flaw> {
         self.flaw.upgrade().expect("Flaw has been dropped") as Rc<dyn Flaw>
     }
@@ -107,12 +111,11 @@ impl Resolver for OrResolver {
     }
 }
 
-impl ToJson for OrResolver {
+impl ToJson for ClauseResolver {
     fn to_json(&self) -> Value {
-        json!({
-            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
-            "lit": self.lit.to_string()
-        })
+        let mut json = resolver_to_json(self);
+        json["lit"] = self.lit.to_string().into();
+        json
     }
 }
 
@@ -166,12 +169,10 @@ impl Flaw for EnumFlaw {
 
 impl ToJson for EnumFlaw {
     fn to_json(&self) -> Value {
-        json!({
-            "kind": "enum",
-            "phi": self.phi,
-            "cost": self.cost.to_json(),
-            "var": format!("{:?}", self.var)
-        })
+        let mut json = flaw_to_json(self);
+        json["kind"] = "enum".into();
+        json["var"] = format!("{:?}", self.var).into();
+        json
     }
 }
 
@@ -199,11 +200,9 @@ impl Resolver for EnumResolver {
 
 impl ToJson for EnumResolver {
     fn to_json(&self) -> Value {
-        json!({
-            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
-            "rho": self.rho,
-            "val": self.val
-        })
+        let mut json = resolver_to_json(self);
+        json["val"] = self.val.into();
+        json
     }
 }
 
@@ -214,4 +213,32 @@ impl ToJson for Rational {
             "den": self.den
         })
     }
+}
+
+impl ToJson for LBool {
+    fn to_json(&self) -> Value {
+        match self {
+            LBool::True => "active".into(),
+            LBool::False => "forbidden".into(),
+            LBool::Undef => "inactive".into(),
+        }
+    }
+}
+
+fn flaw_to_json(flaw: &dyn Flaw) -> Value {
+    json!({
+        "id": flaw.id(),
+        "phi": flaw.phi(),
+        "status": flaw.solver().sat.borrow().value(flaw.phi()).to_json(),
+        "cost": flaw.cost().to_json(),
+    })
+}
+
+fn resolver_to_json(resolver: &dyn Resolver) -> Value {
+    json!({
+        "id": resolver.id(),
+        "flaw": resolver.flaw().id(),
+        "status": resolver.flaw().solver().sat.borrow().value(resolver.rho()).to_json(),
+        "rho": resolver.rho(),
+    })
 }

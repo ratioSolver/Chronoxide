@@ -19,13 +19,21 @@ export function causal_graph(slv: solver.Solver): VNode {
           id: flaw.get_id(),
           name: flaw.get_phi(),
           symbol: 'circle',
-          itemStyle: { color: node_color(flaw.get_cost()) },
+          itemStyle: {
+            color: node_color(flaw.get_cost(), flaw.get_status()),
+            borderColor: 'black',
+            borderType: node_border(flaw.get_status())
+          },
         };
       }),
       ...resolvers.map((resolver) => ({
         id: resolver.get_id(),
         name: resolver.get_rho(),
         symbol: 'rect',
+        itemStyle: {
+          borderColor: 'black',
+          borderType: node_border(resolver.get_status())
+        },
       })),
     ];
 
@@ -92,9 +100,26 @@ export function causal_graph(slv: solver.Solver): VNode {
   });
 }
 
-function node_color(cost: number): string {
+function node_color(cost: number, status: 'active' | 'forbidden' | 'inactive'): string {
+  if (!isFinite(cost))
+    return '#1f2937';
+
+  if (status === 'forbidden')
+    return '#9ca3af';
+
   // Map [0, ∞) → hue [120, 0] (green → red) using atan normalization
-  const t = isFinite(cost) ? (2 / Math.PI) * Math.atan(cost) : 1;
+  const t = (2 / Math.PI) * Math.atan(cost);
   const hue = Math.round(120 * (1 - t));
   return `hsl(${hue}, 80%, 45%)`;
+}
+
+function node_border(status: 'active' | 'forbidden' | 'inactive'): string {
+  switch (status) {
+    case 'active':
+      return 'solid';
+    case 'inactive':
+      return 'dashed';
+    case 'forbidden':
+      return 'dotted';
+  }
 }

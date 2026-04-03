@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{EnumFlaw, Flaw, OrFlaw, Resolver},
+    flaws::{ClauseFlaw, EnumFlaw, Flaw, Resolver},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
@@ -23,6 +23,7 @@ use std::{
     rc::{Rc, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
+use tracing::trace;
 
 pub(crate) struct SolverState {
     core: Rc<CommonCore>,
@@ -78,7 +79,20 @@ impl SolverState {
         self.ac.borrow().val(obj.var).into_iter().map(|val| self.instances_by_id.borrow()[val as usize].clone()).collect()
     }
 
+    fn solve(&self) -> bool {
+        trace!("Solving problem...");
+        true
+    }
+
+    fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
+        trace!("Adding flaw: {:?}", flaw.id());
+        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
+        self.flaws.borrow_mut().push(flaw);
+        trace!("Flaws count: {}", self.flaws.borrow().len());
+    }
+
     fn read(&self, script: &str) {
+        trace!("Reading RiDDle script");
         self.core.read(script);
     }
 }
@@ -156,9 +170,14 @@ impl Solver {
                         state.read(&riddle);
                         let _ = responder.send(Ok(()));
                     }
-                    SolverCommand::Solve(responder) => {
-                        let _ = responder.send(Ok(()));
-                    }
+                    SolverCommand::Solve(responder) => match state.solve() {
+                        true => {
+                            let _ = responder.send(Ok(()));
+                        }
+                        false => {
+                            let _ = responder.send(Err(SolverError::Inconsistent));
+                        }
+                    },
                     SolverCommand::ToJson(responder) => {
                         let json = state.to_json();
                         let _ = responder.send(Ok(json));
@@ -430,9 +449,7 @@ impl Core for SolverState {
                     })
                     .collect();
                 let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
-                let flaw = OrFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits);
-                let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
-                self.flaws.borrow_mut().push(flaw.clone());
+                self.add_flaw(ClauseFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -547,9 +564,7 @@ impl Core for SolverState {
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
         let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
-        let flaw = EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone());
-        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
-        self.flaws.borrow_mut().push(flaw);
+        self.add_flaw(EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone()));
         Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {
