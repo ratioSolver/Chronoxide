@@ -13,7 +13,7 @@ use riddle::{
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
-    serde_json::Value,
+    serde_json::{Value, json},
 };
 use std::{
     cell::RefCell,
@@ -37,16 +37,94 @@ pub(crate) struct SolverState {
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
+impl SolverState {
+    fn new(tx_event: broadcast::Sender<SolverEvent>) -> Rc<Self> {
+        Rc::new_cyclic(|core| SolverState {
+            core: {
+                let core: Weak<SolverState> = core.clone();
+                CommonCore::new(core)
+            },
+            slv: core.clone(),
+            sat: RefCell::new(consensus::Engine::new()),
+            ac: RefCell::new(dynamic_ac::Engine::new()),
+            lin: RefCell::new(linspire::Engine::new()),
+            flaws: RefCell::new(vec![]),
+            resolvers: RefCell::new(vec![]),
+            c_res: None,
+            variants: RefCell::new(HashMap::new()),
+            instances_by_id: RefCell::new(vec![]),
+            tx_event,
+        })
+    }
+
+    fn bool_val(&self, obj: &BoolVar) -> LBool {
+        self.sat.borrow().lit_value(&obj.lit).clone()
+    }
+
+    fn int_val(&self, obj: &ArithVar) -> InfRational {
+        self.lin.borrow().lin_val(&obj.lin)
+    }
+
+    fn real_val(&self, obj: &ArithVar) -> InfRational {
+        self.lin.borrow().lin_val(&obj.lin)
+    }
+
+    fn string_val(&self, obj: &StringVar) -> String {
+        obj.value.clone()
+    }
+
+    fn val(&self, obj: &EnumVar) -> Vec<Rc<dyn Var>> {
+        self.ac.borrow().val(obj.var).into_iter().map(|val| self.instances_by_id.borrow()[val as usize].clone()).collect()
+    }
+
+    fn read(&self, script: &str) {
+        self.core.read(script);
+    }
+
+    fn to_json(&self) -> Value {
+        let flaws = self
+            .flaws
+            .borrow()
+            .iter()
+            .map(|flaw| {
+                let id = Rc::as_ptr(flaw) as *const () as usize;
+                let mut json = flaw.to_json();
+                json["id"] = json!(id);
+                (id, json)
+            })
+            .collect::<HashMap<_, _>>();
+
+        let resolvers = self
+            .resolvers
+            .borrow()
+            .iter()
+            .map(|resolver| {
+                let id = Rc::as_ptr(resolver) as *const () as usize;
+                let mut json = resolver.to_json();
+                json["id"] = json!(id);
+                (id, json)
+            })
+            .collect::<HashMap<_, _>>();
+
+        json!({
+            "flaws": flaws,
+            "resolvers": resolvers
+        })
+    }
+}
+
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
 enum SolverCommand {
     ReadRiDDle(String, CommandResult<()>),
     Solve(CommandResult<()>),
+    ToJson(CommandResult<Value>),
 }
 
 #[derive(Debug)]
 pub enum SolverError {
     RuntimeError(String),
+    Inconsistent,
 }
 
 #[derive(Clone)]
@@ -66,38 +144,43 @@ impl Solver {
         let (tx_event, _) = broadcast::channel(100);
         let tx_event_clone = tx_event.clone();
         tokio::task::spawn_blocking(move || {
-            let state = Rc::new_cyclic(|core| SolverState {
-                core: {
-                    let core: Weak<SolverState> = core.clone();
-                    CommonCore::new(core)
-                },
-                slv: core.clone(),
-                sat: RefCell::new(consensus::Engine::new()),
-                ac: RefCell::new(dynamic_ac::Engine::new()),
-                lin: RefCell::new(linspire::Engine::new()),
-                flaws: RefCell::new(vec![]),
-                resolvers: RefCell::new(vec![]),
-                c_res: None,
-                variants: RefCell::new(HashMap::new()),
-                instances_by_id: RefCell::new(vec![]),
-                tx_event: tx_event_clone,
-            });
+            let state = SolverState::new(tx_event_clone);
 
             while let Some(cmd) = rx_cmd.blocking_recv() {
                 match cmd {
-                    SolverCommand::ReadRiDDle(content, responder) => {
-                        // Esegui la lettura...
+                    SolverCommand::ReadRiDDle(riddle, responder) => {
+                        state.read(&riddle);
                         let _ = responder.send(Ok(()));
                     }
                     SolverCommand::Solve(responder) => {
-                        // Esegui il calcolo sul thread corrente
-                        // state_clone.solve();
                         let _ = responder.send(Ok(()));
+                    }
+                    SolverCommand::ToJson(responder) => {
+                        let json = state.to_json();
+                        let _ = responder.send(Ok(json));
                     }
                 }
             }
         });
         Self { tx_cmd, tx_event }
+    }
+
+    pub fn read(&self, riddle: String) -> Result<(), SolverError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx_cmd.blocking_send(SolverCommand::ReadRiDDle(riddle, reply_tx)).expect("Failed to send command");
+        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
+    }
+
+    pub fn solve(&self) -> Result<(), SolverError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx_cmd.blocking_send(SolverCommand::Solve(reply_tx)).expect("Failed to send command");
+        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
+    }
+
+    pub fn to_json(&self) -> Result<Value, SolverError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx_cmd.blocking_send(SolverCommand::ToJson(reply_tx)).expect("Failed to send command");
+        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
     }
 }
 
