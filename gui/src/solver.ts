@@ -113,10 +113,11 @@ export namespace solver {
   }
 
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
-  type PartialFlawMessage = { phi: string };
+  type PartialFlawMessage = { phi: string, cost: Rational };
   type FlawMessage = ({ id: number } & PartialFlawMessage);
   type PartialResolverMessage = { rho: string, flaw: number };
   type ResolverMessage = ({ id: number } & PartialResolverMessage);
+  type Rational = { num: number, den: number };
 
   type ServerMessage =
     | ({ msg_type: 'status' } & SolverMessage)

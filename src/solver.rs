@@ -1,4 +1,5 @@
 use crate::{
+    ToJson,
     flaws::{EnumFlaw, Flaw, OrFlaw, Resolver},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -80,7 +81,9 @@ impl SolverState {
     fn read(&self, script: &str) {
         self.core.read(script);
     }
+}
 
+impl ToJson for SolverState {
     fn to_json(&self) -> Value {
         let flaws = self
             .flaws

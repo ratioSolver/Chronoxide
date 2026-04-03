@@ -1,32 +1,36 @@
-use crate::{objects::EnumVar, solver::SolverState};
+use crate::{ToJson, objects::EnumVar, solver::SolverState};
 use consensus::{Lit, neg, pos};
+use linspire::rational::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
 
-pub trait Flaw {
-    fn solver(&self) -> Rc<SolverState>;
-    fn phi(&self) -> usize;
+pub trait RationalJsonExt {
+    fn to_json(&self) -> Value;
+}
+
+impl RationalJsonExt for Rational {
     fn to_json(&self) -> Value {
         json!({
-            "phi": self.phi()
+            "num": self.num,
+            "den": self.den
         })
     }
+}
+
+pub trait Flaw: ToJson {
+    fn solver(&self) -> Rc<SolverState>;
+    fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
+    fn cost(&self) -> &Rational;
     fn compute_resolvers(self: Rc<Self>);
 }
 
-pub trait Resolver {
+pub trait Resolver: ToJson {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
-    fn to_json(&self) -> Value {
-        json!({
-            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
-            "rho": self.rho()
-        })
-    }
     fn ac_constraints(&self) -> Option<Vec<usize>> {
         None
     }
@@ -42,12 +46,19 @@ pub(crate) struct OrFlaw {
     slv: Weak<SolverState>,
     phi: usize,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    cost: Rational,
     lits: Vec<Lit>,
 }
 
 impl OrFlaw {
     pub(crate) fn new(slv: Rc<SolverState>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
-        Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(Vec::new()), lits })
+        Rc::new(Self {
+            slv: Rc::downgrade(&slv),
+            phi,
+            resolvers: RefCell::new(Vec::new()),
+            cost: Rational::POSITIVE_INFINITY,
+            lits,
+        })
     }
 }
 
@@ -60,16 +71,12 @@ impl Flaw for OrFlaw {
         self.phi
     }
 
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "or",
-            "phi": self.phi,
-            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>()
-        })
-    }
-
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
         self.resolvers.borrow().clone()
+    }
+
+    fn cost(&self) -> &Rational {
+        &self.cost
     }
 
     fn compute_resolvers(self: Rc<Self>) {
@@ -78,6 +85,17 @@ impl Flaw for OrFlaw {
             assert!(c, "Failed to add clause for OR flaw resolver");
             self.resolvers.borrow_mut().push(OrResolver::new(self.clone(), *lit));
         }
+    }
+}
+
+impl ToJson for OrFlaw {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "or",
+            "phi": self.phi,
+            "cost": self.cost.to_json(),
+            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>()
+        })
     }
 }
 
@@ -102,16 +120,32 @@ impl Resolver for OrResolver {
     }
 }
 
+impl ToJson for OrResolver {
+    fn to_json(&self) -> Value {
+        json!({
+            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
+            "lit": self.lit.to_string()
+        })
+    }
+}
+
 pub(crate) struct EnumFlaw {
     slv: Weak<SolverState>,
     phi: usize,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    cost: Rational,
     var: Rc<EnumVar>,
 }
 
 impl EnumFlaw {
     pub(crate) fn new(slv: Rc<SolverState>, phi: usize, var: Rc<EnumVar>) -> Rc<Self> {
-        Rc::new(Self { slv: Rc::downgrade(&slv), phi, resolvers: RefCell::new(Vec::new()), var })
+        Rc::new(Self {
+            slv: Rc::downgrade(&slv),
+            phi,
+            resolvers: RefCell::new(Vec::new()),
+            cost: Rational::POSITIVE_INFINITY,
+            var,
+        })
     }
 }
 
@@ -124,16 +158,12 @@ impl Flaw for EnumFlaw {
         self.phi
     }
 
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "enum",
-            "phi": self.phi,
-            "var": format!("{:?}", self.var)
-        })
-    }
-
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
         self.resolvers.borrow().clone()
+    }
+
+    fn cost(&self) -> &Rational {
+        &self.cost
     }
 
     fn compute_resolvers(self: Rc<Self>) {
@@ -144,6 +174,17 @@ impl Flaw for EnumFlaw {
             assert!(c, "Failed to add clause for Enum flaw resolver");
             self.resolvers.borrow_mut().push(EnumResolver::new(self.clone(), rho, val));
         }
+    }
+}
+
+impl ToJson for EnumFlaw {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "enum",
+            "phi": self.phi,
+            "cost": self.cost.to_json(),
+            "var": format!("{:?}", self.var)
+        })
     }
 }
 
@@ -166,5 +207,15 @@ impl Resolver for EnumResolver {
 
     fn rho(&self) -> usize {
         self.rho
+    }
+}
+
+impl ToJson for EnumResolver {
+    fn to_json(&self) -> Value {
+        json!({
+            "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
+            "rho": self.rho,
+            "val": self.val
+        })
     }
 }
