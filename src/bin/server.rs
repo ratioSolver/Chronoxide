@@ -21,7 +21,7 @@ struct AppState {
     first_client_connected: Arc<Notify>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
     subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
@@ -48,6 +48,7 @@ async fn main() {
     for file in &files {
         slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
     }
+    slv.solve().await.expect("Failed to solve");
 
     server.await.unwrap();
 }
