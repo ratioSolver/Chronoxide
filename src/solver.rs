@@ -133,6 +133,7 @@ pub enum SolverEvent {
     NewResolver(Value),
 }
 
+#[derive(Clone)]
 pub struct Solver {
     tx_cmd: mpsc::Sender<SolverCommand>,
     pub tx_event: broadcast::Sender<SolverEvent>,
