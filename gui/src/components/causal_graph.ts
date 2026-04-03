@@ -14,11 +14,14 @@ export function causal_graph(slv: solver.Solver): VNode {
     const resolvers = slv.get_resolvers();
 
     const data = [
-      ...flaws.map((flaw) => ({
-        id: flaw.get_id(),
-        name: flaw.get_phi(),
-        symbol: 'circle',
-      })),
+      ...flaws.map((flaw) => {
+        return {
+          id: flaw.get_id(),
+          name: flaw.get_phi(),
+          symbol: 'circle',
+          itemStyle: { color: node_color(flaw.get_cost()) },
+        };
+      }),
       ...resolvers.map((resolver) => ({
         id: resolver.get_id(),
         name: resolver.get_rho(),
@@ -87,4 +90,11 @@ export function causal_graph(slv: solver.Solver): VNode {
       }
     }
   });
+}
+
+function node_color(cost: number): string {
+  // Map [0, ∞) → hue [120, 0] (green → red) using atan normalization
+  const t = isFinite(cost) ? (2 / Math.PI) * Math.atan(cost) : 1;
+  const hue = Math.round(120 * (1 - t));
+  return `hsl(${hue}, 80%, 45%)`;
 }

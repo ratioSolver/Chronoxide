@@ -7,19 +7,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-pub trait RationalJsonExt {
-    fn to_json(&self) -> Value;
-}
-
-impl RationalJsonExt for Rational {
-    fn to_json(&self) -> Value {
-        json!({
-            "num": self.num,
-            "den": self.den
-        })
-    }
-}
-
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn phi(&self) -> usize;
@@ -216,6 +203,15 @@ impl ToJson for EnumResolver {
             "flaw": Rc::as_ptr(&self.flaw()) as *const () as usize,
             "rho": self.rho,
             "val": self.val
+        })
+    }
+}
+
+impl ToJson for Rational {
+    fn to_json(&self) -> Value {
+        json!({
+            "num": self.num,
+            "den": self.den
         })
     }
 }

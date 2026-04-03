@@ -42,7 +42,7 @@ export namespace solver {
         switch (msg.msg_type) {
           case 'status': {
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
-              this.flaws.set(Number(id), new Flaw(Number(id), flaw_msg.phi));
+              this.flaws.set(Number(id), new Flaw(Number(id), flaw_msg.phi, flaw_msg.cost));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
               this.resolvers.set(Number(id), new Resolver(Number(id), resolver_msg.rho, this.flaws.get(Number(resolver_msg.flaw))!));
 
@@ -50,7 +50,7 @@ export namespace solver {
             break;
           }
           case 'new-flaw': {
-            const flaw = new Flaw(msg.id, msg.phi);
+            const flaw = new Flaw(msg.id, msg.phi, msg.cost);
             this.flaws.set(msg.id, flaw);
             for (const listener of this.listeners) listener.new_flaw(flaw);
             break;
@@ -86,14 +86,17 @@ export namespace solver {
   export class Flaw {
     private readonly id: number;
     private readonly phi: string;
+    private readonly cost: Rational;
 
-    constructor(id: number, phi: string) {
+    constructor(id: number, phi: string, cost: Rational) {
       this.id = id;
       this.phi = phi;
+      this.cost = cost;
     }
 
     get_id(): number { return this.id; }
     get_phi(): string { return this.phi; }
+    get_cost(): number { return this.cost.den === 0 ? Infinity : this.cost.num / this.cost.den; }
   }
 
   export class Resolver {
