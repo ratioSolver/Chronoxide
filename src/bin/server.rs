@@ -46,7 +46,7 @@ async fn main() {
 
     app_state.first_client_connected.notified().await;
     for file in &files {
-        slv.read(std::fs::read_to_string(file).expect("Failed to read file")).expect("Failed to read RiDDle script");
+        slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
     }
 
     server.await.unwrap();
@@ -59,7 +59,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let mut rx = state.slv.tx_event.subscribe();
 
-    let mut msg = state.slv.to_json().expect("Failed to serialize solver state to JSON");
+    let mut msg = state.slv.to_json().await.expect("Failed to serialize solver state to JSON");
     msg["msg_type"] = "status".into();
     if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
         return;

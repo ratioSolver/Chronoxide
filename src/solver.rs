@@ -166,22 +166,22 @@ impl Solver {
         Self { tx_cmd, tx_event }
     }
 
-    pub fn read(&self, riddle: String) -> Result<(), SolverError> {
+    pub async fn read(&self, riddle: String) -> Result<(), SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.blocking_send(SolverCommand::ReadRiDDle(riddle, reply_tx)).expect("Failed to send command");
-        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::ReadRiDDle(riddle, reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
+        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
     }
 
-    pub fn solve(&self) -> Result<(), SolverError> {
+    pub async fn solve(&self) -> Result<(), SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.blocking_send(SolverCommand::Solve(reply_tx)).expect("Failed to send command");
-        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::Solve(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
+        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
     }
 
-    pub fn to_json(&self) -> Result<Value, SolverError> {
+    pub async fn to_json(&self) -> Result<Value, SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.blocking_send(SolverCommand::ToJson(reply_tx)).expect("Failed to send command");
-        reply_rx.blocking_recv().map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
+        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
     }
 }
 
