@@ -3,7 +3,7 @@ use crate::{
     flaws::{ClauseFlaw, EnumFlaw, Flaw, Resolver},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
-use consensus::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
+use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 use linspire::{
     lin::{Lin, c, v},
     rational::rat,
@@ -33,6 +33,7 @@ pub(crate) struct SolverState {
     flaws: RefCell<Vec<Rc<dyn Flaw>>>,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
     flaw_q: RefCell<VecDeque<Rc<dyn Flaw>>>,
+    top_level_flaws: RefCell<Vec<Rc<dyn Flaw>>>,
     c_res: Option<Rc<dyn Resolver>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
@@ -53,6 +54,7 @@ impl SolverState {
             flaws: RefCell::new(vec![]),
             resolvers: RefCell::new(vec![]),
             flaw_q: RefCell::new(VecDeque::new()),
+            top_level_flaws: RefCell::new(vec![]),
             c_res: None,
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
@@ -67,17 +69,36 @@ impl SolverState {
 
     fn solve(&self) -> bool {
         trace!("Solving problem...");
-        self.build_graph();
+        if !self.build_graph() {
+            trace!("Problem is inconsistent");
+            return false;
+        }
         true
     }
 
-    fn build_graph(&self) {
+    fn build_graph(&self) -> bool {
         trace!("Building graph...");
+        while self.top_level_flaws.borrow().iter().any(|flaw| flaw.cost().is_infinite()) {
+            if self.flaw_q.borrow().is_empty() {
+                trace!("No more flaws to process, but some top-level flaws are still unsolved. Problem is inconsistent.");
+                return false;
+            }
+            let flaw = self.flaw_q.borrow_mut().pop_front().expect("No flaws left");
+            trace!("Processing flaw: {:?}", flaw.id());
+            if flaw.cost().is_infinite() {
+                flaw.compute_resolvers();
+            }
+        }
+        trace!("Graph built successfully");
+        true
     }
 
     fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
         trace!("Adding flaw: {:?}", flaw.id());
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
+        if self.sat.borrow().value(flaw.phi()) == &LBool::True {
+            self.top_level_flaws.borrow_mut().push(flaw.clone());
+        }
         self.flaws.borrow_mut().push(flaw.clone());
         self.flaw_q.borrow_mut().push_back(flaw);
         trace!("Flaws count: {}", self.flaws.borrow().len());
@@ -91,7 +112,7 @@ impl ToJson for SolverState {
             .borrow()
             .iter()
             .map(|flaw| {
-                let id = Rc::as_ptr(flaw) as *const () as usize;
+                let id = flaw.id();
                 let mut json = flaw.to_json();
                 json["id"] = json!(id);
                 (id, json)
@@ -103,7 +124,7 @@ impl ToJson for SolverState {
             .borrow()
             .iter()
             .map(|resolver| {
-                let id = Rc::as_ptr(resolver) as *const () as usize;
+                let id = resolver.id();
                 let mut json = resolver.to_json();
                 json["id"] = json!(id);
                 (id, json)

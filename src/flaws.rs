@@ -10,7 +10,8 @@ use std::{
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> usize {
-        Rc::as_ptr(&Rc::new(self)) as *const () as usize
+        let ptr: *const Self = self;
+        ptr as *const () as usize
     }
     fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
@@ -20,7 +21,8 @@ pub trait Flaw: ToJson {
 
 pub trait Resolver: ToJson {
     fn id(&self) -> usize {
-        Rc::as_ptr(&Rc::new(self)) as *const () as usize
+        let ptr: *const Self = self;
+        ptr as *const () as usize
     }
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
