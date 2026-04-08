@@ -118,7 +118,7 @@ impl Resolver for ClauseResolver {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
-        unimplemented!()
+        Ok(())
     }
 }
 
@@ -209,7 +209,7 @@ impl Resolver for EnumResolver {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
-        unimplemented!()
+        Ok(())
     }
 }
 

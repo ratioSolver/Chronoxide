@@ -94,6 +94,10 @@ impl SolverState {
                     self.resolvers.borrow_mut().push(resolver.clone());
                     let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
                     self.c_res.borrow_mut().replace(resolver.clone());
+                    match resolver.apply() {
+                        Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
+                        Err(e) => trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e),
+                    }
                 }
                 self.c_res.borrow_mut().take();
                 if !self.sat.borrow_mut().add_clause(causal_constraint) {
