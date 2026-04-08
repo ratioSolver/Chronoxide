@@ -34,7 +34,7 @@ pub(crate) struct SolverState {
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
     flaw_q: RefCell<VecDeque<Rc<dyn Flaw>>>,
     top_level_flaws: RefCell<Vec<Rc<dyn Flaw>>>,
-    c_res: Option<Rc<dyn Resolver>>,
+    c_res: RefCell<Option<Rc<dyn Resolver>>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -55,16 +55,16 @@ impl SolverState {
             resolvers: RefCell::new(vec![]),
             flaw_q: RefCell::new(VecDeque::new()),
             top_level_flaws: RefCell::new(vec![]),
-            c_res: None,
+            c_res: RefCell::new(None),
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
             tx_event,
         })
     }
 
-    fn read(&self, script: &str) {
+    fn read(&self, script: &str) -> Result<(), RiddleError> {
         trace!("Reading RiDDle script");
-        self.core.read(script);
+        self.core.read(script)
     }
 
     fn solve(&self) -> bool {
@@ -93,7 +93,9 @@ impl SolverState {
                     causal_constraint.push(pos(resolver.rho()));
                     self.resolvers.borrow_mut().push(resolver.clone());
                     let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
+                    self.c_res.borrow_mut().replace(resolver.clone());
                 }
+                self.c_res.borrow_mut().take();
                 if !self.sat.borrow_mut().add_clause(causal_constraint) {
                     trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
                     return false;
@@ -185,10 +187,14 @@ impl Solver {
 
             while let Some(cmd) = rx_cmd.blocking_recv() {
                 match cmd {
-                    SolverCommand::ReadRiDDle(riddle, responder) => {
-                        state.read(&riddle);
-                        let _ = responder.send(Ok(()));
-                    }
+                    SolverCommand::ReadRiDDle(riddle, responder) => match state.read(&riddle) {
+                        Ok(_) => {
+                            let _ = responder.send(Ok(()));
+                        }
+                        Err(e) => {
+                            let _ = responder.send(Err(SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e))));
+                        }
+                    },
                     SolverCommand::Solve(responder) => match state.solve() {
                         true => {
                             let _ = responder.send(Ok(()));
@@ -363,22 +369,24 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
+        let c_res = self.c_res.borrow();
+        let c_res = c_res.as_ref();
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
-                if let Some(res) = &self.c_res {
-                    return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), lit]);
+                if let Some(res) = c_res {
+                    return self.sat.borrow_mut().add_clause(vec![neg(res.rho()), lit]);
                 } else {
                     return self.sat.borrow_mut().add_clause(vec![lit]);
                 }
             }
             BoolExpr::Eq { left, right, .. } => {
-                let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
                 if let Some(left_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                         let left_lit = left_var.lit;
                         let right_lit = right_var.lit;
-                        if self.c_res.is_some() {
+                        if c_res.is_some() {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho), left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, right_lit]);
                         } else {
                             return self.sat.borrow_mut().add_clause(vec![left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![!left_lit, right_lit]);
@@ -390,14 +398,14 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
                         let left_lin = &left_var.lin;
                         let right_lin = &right_var.lin;
-                        let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                        let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
                         return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr);
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                     }
                 } else if let Some(left_var) = left.clone().as_any().downcast_ref::<StringVar>() {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<StringVar>() {
-                        if self.c_res.is_some() {
+                        if c_res.is_some() {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                         } else {
                             left_var.value == right_var.value
@@ -409,7 +417,7 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                         match self.ac.borrow_mut().new_eq(left_var.var, right_var.var) {
                             Ok(c) => {
-                                if let Some(res) = &self.c_res {
+                                if let Some(res) = c_res {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -419,7 +427,7 @@ impl Core for SolverState {
                     } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
                         match self.ac.borrow_mut().set(left_var.var, *val as i32) {
                             Ok(c) => {
-                                if let Some(res) = &self.c_res {
+                                if let Some(res) = c_res {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -433,7 +441,7 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                         match self.ac.borrow_mut().set(right_var.var, *val as i32) {
                             Ok(c) => {
-                                if let Some(res) = &self.c_res {
+                                if let Some(res) = c_res {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -450,13 +458,13 @@ impl Core for SolverState {
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
                 return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr);
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
                 return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr);
             }
             BoolExpr::Or { terms, .. } => {
@@ -467,7 +475,7 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
                 self.add_flaw(ClauseFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits));
                 true
             }
@@ -482,19 +490,19 @@ impl Core for SolverState {
             BoolExpr::Not { term, .. } => match term.as_ref() {
                 BoolExpr::Term { term, .. } => {
                     let lit = bool_lit(term);
-                    if let Some(res) = &self.c_res {
+                    if let Some(res) = &c_res {
                         return self.sat.borrow_mut().add_clause(vec![neg(res.as_ref().rho()), !lit]);
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![!lit]);
                     }
                 }
                 BoolExpr::Eq { left, right, .. } => {
-                    let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+                    let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
                     if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                         if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                             let left_lit = left_bool_var.lit;
                             let right_lit = right_bool_var.lit;
-                            if self.c_res.is_some() {
+                            if c_res.is_some() {
                                 return self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, !right_lit]);
                             } else {
                                 return self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]) && self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]);
@@ -508,7 +516,7 @@ impl Core for SolverState {
                     } else if let Some(left_string_var) = left.clone().as_any().downcast_ref::<StringVar>()
                         && let Some(right_string_var) = right.clone().as_any().downcast_ref::<StringVar>()
                     {
-                        if self.c_res.is_some() && left_string_var.value == right_string_var.value {
+                        if c_res.is_some() && left_string_var.value == right_string_var.value {
                             return self.sat.borrow_mut().add_clause(vec![neg(rho)]);
                         } else {
                             return left_string_var.value != right_string_var.value;
@@ -517,7 +525,7 @@ impl Core for SolverState {
                         if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                             match self.ac.borrow_mut().new_neq(left_var.var, right_var.var) {
                                 Ok(c) => {
-                                    if let Some(res) = &self.c_res {
+                                    if let Some(res) = &c_res {
                                         res.add_ac_constraint(c);
                                     }
                                     return true;
@@ -527,7 +535,7 @@ impl Core for SolverState {
                         } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
                             match self.ac.borrow_mut().forbid(left_var.var, *val as i32) {
                                 Ok(c) => {
-                                    if let Some(res) = &self.c_res {
+                                    if let Some(res) = &c_res {
                                         res.add_ac_constraint(c);
                                     }
                                     return true;
@@ -539,7 +547,7 @@ impl Core for SolverState {
                         if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                             match self.ac.borrow_mut().forbid(right_var.var, *val as i32) {
                                 Ok(c) => {
-                                    if let Some(res) = &self.c_res {
+                                    if let Some(res) = &c_res {
                                         res.add_ac_constraint(c);
                                     }
                                     return true;
@@ -553,13 +561,13 @@ impl Core for SolverState {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                    let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
                     return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr);
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if self.c_res.is_some() { self.c_res.as_ref().unwrap().lin_constraints() } else { None };
+                    let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
                     return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr);
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
@@ -582,7 +590,9 @@ impl Core for SolverState {
         }
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
-        let rho = if self.c_res.is_some() { self.c_res.as_ref().unwrap().rho() } else { 0 };
+        let c_res = self.c_res.borrow();
+        let c_res = c_res.as_ref();
+        let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
         self.add_flaw(EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone()));
         Ok(var)
     }
