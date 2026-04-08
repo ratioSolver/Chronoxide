@@ -86,7 +86,18 @@ impl SolverState {
             let flaw = self.flaw_q.borrow_mut().pop_front().expect("No flaws left");
             trace!("Processing flaw: {:?}", flaw.id());
             if flaw.cost().is_infinite() {
-                flaw.compute_resolvers();
+                flaw.clone().compute_resolvers();
+                let mut causal_constraint = Vec::new();
+                causal_constraint.push(neg(flaw.phi()));
+                for resolver in flaw.resolvers() {
+                    causal_constraint.push(pos(resolver.rho()));
+                    self.resolvers.borrow_mut().push(resolver.clone());
+                    let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
+                }
+                if !self.sat.borrow_mut().add_clause(causal_constraint) {
+                    trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
+                    return false;
+                }
             }
         }
         trace!("Graph built successfully");

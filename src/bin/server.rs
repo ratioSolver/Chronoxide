@@ -13,7 +13,7 @@ use chronoxide::solver::{Solver, SolverEvent};
 use riddle::serde_json;
 use tokio::sync::Notify;
 use tower_http::services::{ServeDir, ServeFile};
-use tracing::{Level, error, subscriber};
+use tracing::{Level, error, subscriber, trace};
 
 #[derive(Clone)]
 struct AppState {
@@ -48,7 +48,10 @@ async fn main() {
     for file in &files {
         slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
     }
-    slv.solve().await.expect("Failed to solve");
+    match slv.solve().await {
+        Ok(_) => trace!("Solver finished successfully"),
+        Err(e) => error!("Solver failed with error: {:?}", e),
+    }
 
     server.await.unwrap();
 }

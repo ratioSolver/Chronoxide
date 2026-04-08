@@ -16,7 +16,7 @@ export function causal_graph(slv: solver.Solver): VNode {
     const data = [
       ...flaws.map((flaw) => {
         return {
-          id: flaw.get_id(),
+          id: String(flaw.get_id()),
           name: flaw.get_phi(),
           symbol: 'circle',
           itemStyle: {
@@ -27,7 +27,7 @@ export function causal_graph(slv: solver.Solver): VNode {
         };
       }),
       ...resolvers.map((resolver) => ({
-        id: resolver.get_id(),
+        id: String(resolver.get_id()),
         name: resolver.get_rho(),
         symbol: 'rect',
         itemStyle: {
@@ -38,8 +38,9 @@ export function causal_graph(slv: solver.Solver): VNode {
     ];
 
     const links = resolvers.map((resolver) => ({
-      source: resolver.get_id(),
-      target: resolver.get_flaw().get_id(),
+      source: String(resolver.get_id()),
+      target: String(resolver.get_flaw().get_id()),
+      lineStyle: edge_style(resolver.get_status()),
     }));
 
     return {
@@ -50,6 +51,9 @@ export function causal_graph(slv: solver.Solver): VNode {
           draggable: true,
           data,
           links,
+          edgeSymbol: ['none', 'arrow'],
+          edgeSymbolSize: 10,
+          lineStyle: edge_style('active'),
           roam: true,
           label: {
             show: true,
@@ -121,5 +125,31 @@ function node_border(status: 'active' | 'forbidden' | 'inactive'): string {
       return 'dashed';
     case 'forbidden':
       return 'dotted';
+  }
+}
+
+function edge_style(status: 'active' | 'forbidden' | 'inactive') {
+  switch (status) {
+    case 'active':
+      return {
+        width: 1.8,
+        color: '#1f2937',
+        opacity: 0.95,
+        type: 'solid'
+      };
+    case 'inactive':
+      return {
+        width: 1.5,
+        color: '#6b7280',
+        opacity: 0.75,
+        type: 'dashed'
+      };
+    case 'forbidden':
+      return {
+        width: 1.2,
+        color: '#9ca3af',
+        opacity: 0.6,
+        type: 'dotted'
+      };
   }
 }
