@@ -19,7 +19,8 @@ pub trait Flaw: ToJson {
     }
     fn phi(&self) -> usize;
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
-    fn cost(&self) -> &Rational;
+    fn cost(&self) -> Rational;
+    fn set_cost(&self, cost: Rational);
     fn compute_resolvers(self: Rc<Self>);
 }
 
@@ -31,6 +32,15 @@ pub trait Resolver: ToJson {
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
     fn apply(&self) -> Result<(), SolverError>;
+    fn requirements(&self) -> Vec<Rc<dyn Flaw>> {
+        Vec::new()
+    }
+    fn intrinsic_cost(&self) -> Rational {
+        Rational::from(1)
+    }
+    fn cost(&self) -> Rational {
+        self.requirements().iter().map(|r| r.cost()).fold(self.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+    }
     fn ac_constraints(&self) -> Option<Vec<usize>> {
         None
     }
@@ -46,7 +56,7 @@ pub(crate) struct ClauseFlaw {
     slv: Weak<SolverState>,
     phi: usize,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
-    cost: Rational,
+    cost: RefCell<Rational>,
     lits: Vec<Lit>,
 }
 
@@ -56,7 +66,7 @@ impl ClauseFlaw {
             slv: Rc::downgrade(&slv),
             phi,
             resolvers: RefCell::new(Vec::new()),
-            cost: Rational::POSITIVE_INFINITY,
+            cost: RefCell::new(Rational::POSITIVE_INFINITY),
             lits,
         })
     }
@@ -75,8 +85,12 @@ impl Flaw for ClauseFlaw {
         self.resolvers.borrow().clone()
     }
 
-    fn cost(&self) -> &Rational {
-        &self.cost
+    fn cost(&self) -> Rational {
+        self.cost.borrow().clone()
+    }
+
+    fn set_cost(&self, cost: Rational) {
+        *self.cost.borrow_mut() = cost;
     }
 
     fn compute_resolvers(self: Rc<Self>) {
@@ -134,7 +148,7 @@ pub(crate) struct EnumFlaw {
     slv: Weak<SolverState>,
     phi: usize,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
-    cost: Rational,
+    cost: RefCell<Rational>,
     var: Rc<EnumVar>,
 }
 
@@ -144,7 +158,7 @@ impl EnumFlaw {
             slv: Rc::downgrade(&slv),
             phi,
             resolvers: RefCell::new(Vec::new()),
-            cost: Rational::POSITIVE_INFINITY,
+            cost: RefCell::new(Rational::POSITIVE_INFINITY),
             var,
         })
     }
@@ -163,8 +177,12 @@ impl Flaw for EnumFlaw {
         self.resolvers.borrow().clone()
     }
 
-    fn cost(&self) -> &Rational {
-        &self.cost
+    fn cost(&self) -> Rational {
+        self.cost.borrow().clone()
+    }
+
+    fn set_cost(&self, cost: Rational) {
+        *self.cost.borrow_mut() = cost;
     }
 
     fn compute_resolvers(self: Rc<Self>) {
