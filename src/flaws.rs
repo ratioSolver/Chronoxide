@@ -1,4 +1,8 @@
-use crate::{ToJson, objects::EnumVar, solver::SolverState};
+use crate::{
+    ToJson,
+    objects::EnumVar,
+    solver::{SolverError, SolverState},
+};
 use consensus::{LBool, Lit, neg, pos};
 use linspire::rational::Rational;
 use riddle::serde_json::{Value, json};
@@ -26,6 +30,7 @@ pub trait Resolver: ToJson {
     }
     fn flaw(&self) -> Rc<dyn Flaw>;
     fn rho(&self) -> usize;
+    fn apply(&self) -> Result<(), SolverError>;
     fn ac_constraints(&self) -> Option<Vec<usize>> {
         None
     }
@@ -110,6 +115,10 @@ impl Resolver for ClauseResolver {
 
     fn rho(&self) -> usize {
         self.lit.var()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        unimplemented!()
     }
 }
 
@@ -197,6 +206,10 @@ impl Resolver for EnumResolver {
 
     fn rho(&self) -> usize {
         self.rho
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        unimplemented!()
     }
 }
 

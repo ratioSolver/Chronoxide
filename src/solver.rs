@@ -62,9 +62,9 @@ impl SolverState {
         })
     }
 
-    fn read(&self, script: &str) -> Result<(), RiddleError> {
+    fn read(&self, script: &str) -> Result<(), SolverError> {
         trace!("Reading RiDDle script");
-        self.core.read(script)
+        self.core.read(script).map_err(|e| SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e)))
     }
 
     fn solve(&self) -> bool {
@@ -168,7 +168,10 @@ pub enum SolverError {
 #[derive(Clone)]
 pub enum SolverEvent {
     NewFlaw(Value),
+    FlawCostUpdate(Value),
+    FlawStatusUpdate(Value),
     NewResolver(Value),
+    ResolverStatusUpdate(Value),
 }
 
 #[derive(Clone)]
@@ -192,7 +195,7 @@ impl Solver {
                             let _ = responder.send(Ok(()));
                         }
                         Err(e) => {
-                            let _ = responder.send(Err(SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e))));
+                            let _ = responder.send(Err(e));
                         }
                     },
                     SolverCommand::Solve(responder) => match state.solve() {
