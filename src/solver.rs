@@ -3,9 +3,8 @@ use crate::{
     flaws::{ClauseFlaw, EnumFlaw, Flaw, Resolver},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
-use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
+use consensus::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
 use linspire::{
-    inf_rational::InfRational,
     lin::{Lin, c, v},
     rational::rat,
 };
@@ -18,7 +17,7 @@ use riddle::{
 };
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     rc::{Rc, Weak},
 };
@@ -33,6 +32,7 @@ pub(crate) struct SolverState {
     pub lin: RefCell<linspire::Engine>,
     flaws: RefCell<Vec<Rc<dyn Flaw>>>,
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    flaw_q: RefCell<VecDeque<Rc<dyn Flaw>>>,
     c_res: Option<Rc<dyn Resolver>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
@@ -52,6 +52,7 @@ impl SolverState {
             lin: RefCell::new(linspire::Engine::new()),
             flaws: RefCell::new(vec![]),
             resolvers: RefCell::new(vec![]),
+            flaw_q: RefCell::new(VecDeque::new()),
             c_res: None,
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
@@ -59,41 +60,27 @@ impl SolverState {
         })
     }
 
-    fn bool_val(&self, obj: &BoolVar) -> LBool {
-        self.sat.borrow().lit_value(&obj.lit).clone()
-    }
-
-    fn int_val(&self, obj: &ArithVar) -> InfRational {
-        self.lin.borrow().lin_val(&obj.lin)
-    }
-
-    fn real_val(&self, obj: &ArithVar) -> InfRational {
-        self.lin.borrow().lin_val(&obj.lin)
-    }
-
-    fn string_val(&self, obj: &StringVar) -> String {
-        obj.value.clone()
-    }
-
-    fn val(&self, obj: &EnumVar) -> Vec<Rc<dyn Var>> {
-        self.ac.borrow().val(obj.var).into_iter().map(|val| self.instances_by_id.borrow()[val as usize].clone()).collect()
+    fn read(&self, script: &str) {
+        trace!("Reading RiDDle script");
+        self.core.read(script);
     }
 
     fn solve(&self) -> bool {
         trace!("Solving problem...");
+        self.build_graph();
         true
+    }
+
+    fn build_graph(&self) {
+        trace!("Building graph...");
     }
 
     fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
         trace!("Adding flaw: {:?}", flaw.id());
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
-        self.flaws.borrow_mut().push(flaw);
+        self.flaws.borrow_mut().push(flaw.clone());
+        self.flaw_q.borrow_mut().push_back(flaw);
         trace!("Flaws count: {}", self.flaws.borrow().len());
-    }
-
-    fn read(&self, script: &str) {
-        trace!("Reading RiDDle script");
-        self.core.read(script);
     }
 }
 
