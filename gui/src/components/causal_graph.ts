@@ -72,6 +72,7 @@ export function causal_graph(slv: solver.Solver): VNode {
   const solver_listener = {
     initialized: () => { if (chart) chart.setOption(get_option()); },
     new_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
+    flaw_cost_update: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
 
     connected: () => { },

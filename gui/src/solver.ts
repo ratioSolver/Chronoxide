@@ -55,6 +55,15 @@ export namespace solver {
             for (const listener of this.listeners) listener.new_flaw(flaw);
             break;
           }
+          case 'flaw-cost-update': {
+            const flaw = this.flaws.get(msg.id);
+            if (flaw) {
+              flaw._set_cost(msg.cost);
+              for (const listener of this.listeners) listener.flaw_cost_update(flaw);
+            } else
+              console.warn(`Received cost update for unknown flaw with id ${msg.id}`);
+            break;
+          }
           case 'new-resolver': {
             const resolver = new Resolver(msg.id, msg.rho, this.flaws.get(msg.flaw)!, msg.status);
             this.resolvers.set(Number(msg.id), resolver);
@@ -80,6 +89,7 @@ export namespace solver {
 
     initialized(): void;
     new_flaw(flaw: Flaw): void;
+    flaw_cost_update(flaw: Flaw): void;
     new_resolver(resolver: Resolver): void;
   }
 
@@ -100,6 +110,7 @@ export namespace solver {
     get_phi(): string { return this.phi; }
     get_status(): Status { return this.status; }
     get_cost(): number { return this.cost.den === 0 ? Infinity : this.cost.num / this.cost.den; }
+    _set_cost(cost: Rational) { this.cost = cost; }
   }
 
   export class Resolver {
@@ -132,5 +143,6 @@ export namespace solver {
   type ServerMessage =
     | ({ msg_type: 'status' } & SolverMessage)
     | ({ msg_type: 'new-flaw' } & FlawMessage)
+    | ({ msg_type: 'flaw-cost-update' } & { id: number, cost: Rational })
     | ({ msg_type: 'new-resolver' } & ResolverMessage);
 }

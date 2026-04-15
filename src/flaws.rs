@@ -18,6 +18,9 @@ pub trait Flaw: ToJson {
         ptr as *const () as usize
     }
     fn phi(&self) -> usize;
+    fn causes(&self) -> Vec<Rc<dyn Resolver>> {
+        Vec::new()
+    }
     fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);

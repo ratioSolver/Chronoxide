@@ -7,6 +7,7 @@ import { timelines } from "./timelines";
 const app_listener = {
   initialized: () => flick.redraw(),
   new_flaw: (_flaw: solver.Flaw) => { },
+  flaw_cost_update: (_flaw: solver.Flaw) => { },
   new_resolver: (_resolver: solver.Resolver) => { },
 
   connected: () => { },

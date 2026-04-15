@@ -6,7 +6,7 @@ use crate::{
 use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 use linspire::{
     lin::{Lin, c, v},
-    rational::rat,
+    rational::{Rational, rat},
 };
 use riddle::{
     core::{CommonCore, Core},
@@ -17,7 +17,7 @@ use riddle::{
 };
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     rc::{Rc, Weak},
 };
@@ -104,10 +104,47 @@ impl SolverState {
                     trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
                     return false;
                 }
+
+                self.compute_flaw_cost(flaw.clone());
             }
         }
         trace!("Graph built successfully");
         true
+    }
+
+    fn compute_flaw_cost(&self, flaw: Rc<dyn Flaw>) {
+        trace!("Computing cost for flaw: {:?}", flaw.id());
+        let mut stack: Vec<(Rc<dyn Flaw>, HashSet<usize>)> = vec![(flaw, HashSet::new())];
+
+        while let Some((current_flaw, mut visited)) = stack.pop() {
+            let mut current_cost = Rational::POSITIVE_INFINITY;
+
+            if self.sat.borrow().value(current_flaw.phi()) != &LBool::False && visited.insert(current_flaw.id()) {
+                for resolver in current_flaw.resolvers() {
+                    if self.sat.borrow().value(resolver.rho()) != &LBool::False {
+                        let resolver_cost = resolver.cost();
+                        if resolver_cost < current_cost {
+                            current_cost = resolver_cost;
+                        }
+                    }
+                }
+            }
+
+            if current_flaw.cost() != current_cost {
+                trace!("Updating cost for flaw {:?} from {} to {}", current_flaw.id(), current_flaw.cost(), current_cost);
+                current_flaw.set_cost(current_cost);
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
+                    let mut msg = current_flaw.to_json();
+                    msg["id"] = json!(current_flaw.id());
+                    msg["cost"] = current_cost.to_json();
+                    msg
+                }));
+
+                for support in current_flaw.causes() {
+                    stack.push((support.flaw(), visited.clone()));
+                }
+            }
+        }
     }
 
     fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
