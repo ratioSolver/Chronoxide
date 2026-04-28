@@ -107,7 +107,9 @@ impl Flaw for ClauseFlaw {
             let c = solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
 
-            solver.add_resolver(ClauseResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, *lit));
+            let resolver = ClauseResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, *lit);
+            self.resolvers.borrow_mut().push(resolver.id());
+            solver.add_resolver(resolver);
         }
     }
 }
@@ -220,13 +222,18 @@ impl Flaw for EnumFlaw {
     fn compute_resolvers(self: Rc<Self>) {
         let solver = self.solver();
         let vals = solver.ac.borrow().val(self.var.var);
-        let mut sat = solver.sat.borrow_mut();
         for val in vals {
-            let rho = sat.add_var();
-            let c = sat.add_clause(vec![neg(rho), pos(self.phi)]);
+            let (rho, c) = {
+                let mut sat = solver.sat.borrow_mut();
+                let rho = sat.add_var();
+                let c = sat.add_clause(vec![neg(rho), pos(self.phi)]);
+                (rho, c)
+            };
             assert!(c, "Failed to add clause for Enum flaw resolver");
 
-            solver.add_resolver(EnumResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, rho, val));
+            let resolver = EnumResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, rho, val);
+            self.resolvers.borrow_mut().push(resolver.id());
+            solver.add_resolver(resolver);
         }
     }
 }
@@ -305,9 +312,10 @@ impl ToJson for LBool {
 
 fn flaw_to_json(flaw: &dyn Flaw) -> Value {
     json!({
-        "id": flaw.id(),
+        "id": format!("f{}", flaw.id()),
         "phi": flaw.phi(),
-        "causes": flaw.causes(),
+        "causes": flaw.causes().into_iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
+        "supports": flaw.supports().into_iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
         "status": flaw.solver().sat.borrow().value(flaw.phi()).to_json(),
         "cost": flaw.cost().to_json(),
     })
@@ -315,9 +323,9 @@ fn flaw_to_json(flaw: &dyn Flaw) -> Value {
 
 fn resolver_to_json(resolver: &dyn Resolver) -> Value {
     json!({
-        "id": resolver.id(),
-        "flaw": resolver.flaw(),
-        "requirements": resolver.requirements(),
+        "id": format!("r{}", resolver.id()),
+        "flaw": format!("f{}", resolver.flaw()),
+        "requirements": resolver.requirements().into_iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
         "intrinsic_cost": resolver.intrinsic_cost().to_json(),
         "status": resolver.solver().sat.borrow().value(resolver.rho()).to_json(),
         "rho": resolver.rho(),

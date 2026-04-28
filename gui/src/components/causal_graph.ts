@@ -18,7 +18,7 @@ export function causal_graph(slv: solver.Solver): VNode {
     const data = [
       ...flaws.map((flaw) => {
         return {
-          id: 'f' + String(flaw.get_id()),
+          id: flaw.get_id(),
           name: flaw.get_phi(),
           symbol: 'circle',
           itemStyle: {
@@ -29,10 +29,11 @@ export function causal_graph(slv: solver.Solver): VNode {
         };
       }),
       ...resolvers.map((resolver) => ({
-        id: 'r' + String(resolver.get_id()),
+        id: resolver.get_id(),
         name: resolver.get_rho(),
         symbol: 'rect',
         itemStyle: {
+          color: resolver === current_resolver ? 'orange' : node_color(resolver.get_cost(), resolver.get_status()),
           borderColor: 'black',
           borderType: node_border(resolver.get_status())
         },
@@ -40,8 +41,8 @@ export function causal_graph(slv: solver.Solver): VNode {
     ];
 
     const links = resolvers.map((resolver) => ({
-      source: String(resolver.get_id()),
-      target: String(resolver.get_flaw().get_id()),
+      source: resolver.get_id(),
+      target: resolver.get_flaw(),
       lineStyle: edge_style(resolver.get_status()),
     }));
 
@@ -75,9 +76,9 @@ export function causal_graph(slv: solver.Solver): VNode {
     initialized: () => { if (chart) chart.setOption(get_option()); },
     new_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     flaw_cost_update: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
-    current_flaw: (_flaw_id: number) => { if (chart) chart.setOption(get_option()); },
+    current_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
-    current_resolver: (_resolver_id: number) => { if (chart) chart.setOption(get_option()); },
+    current_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
   };
 
   let resize_handler: () => void;
@@ -115,6 +116,7 @@ function node_color(cost: number, status: 'active' | 'forbidden' | 'inactive'): 
   // Map [0, ∞) → hue [120, 0] (green → red) using atan normalization
   const t = (2 / Math.PI) * Math.atan(cost);
   const hue = Math.round(120 * (1 - t));
+  console.log(`Cost: ${cost}, Hue: ${hue}`);
   return `hsl(${hue}, 80%, 45%)`;
 }
 

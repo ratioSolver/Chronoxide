@@ -82,7 +82,7 @@ impl SolverState {
             trace!("Best flaw to resolve: {:?} with cost {}", flaw.id(), flaw.cost());
             let _ = self.tx_event.send(SolverEvent::CurrentFlaw({
                 let mut msg = flaw.to_json();
-                msg["id"] = json!(flaw.id());
+                msg["id"] = format!("f{}", flaw.id()).into();
                 msg
             }));
             return false;
@@ -161,7 +161,7 @@ impl SolverState {
                 current_flaw.set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
                     let mut msg = current_flaw.to_json();
-                    msg["id"] = json!(current_flaw.id());
+                    msg["id"] = format!("f{}", current_flaw.id()).into();
                     msg["cost"] = current_cost.to_json();
                     msg
                 }));
