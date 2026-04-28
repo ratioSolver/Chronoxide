@@ -68,12 +68,13 @@ export namespace solver {
             break;
           }
           case 'current-flaw': {
-            const flaw = this.flaws.get(msg.id);
-            if (flaw) {
-              this.current_flaw = flaw;
+            if (msg.id) {
+              this.current_flaw = this.flaws.get(msg.id)!;
               for (const listener of this.listeners) listener.current_flaw(this.current_flaw);
-            } else
-              console.warn(`Received current flaw update for unknown flaw with id ${msg.id}`);
+            } else {
+              this.current_flaw = null;
+              for (const listener of this.listeners) listener.current_flaw(null);
+            }
             break;
           }
           case 'new-resolver': {
@@ -83,12 +84,13 @@ export namespace solver {
             break;
           }
           case 'current-resolver': {
-            const resolver = this.resolvers.get(msg.id);
-            if (resolver) {
-              this.current_resolver = resolver;
+            if (msg.id) {
+              this.current_resolver = this.resolvers.get(msg.id)!;
               for (const listener of this.listeners) listener.current_resolver(this.current_resolver);
-            } else
-              console.warn(`Received current resolver update for unknown resolver with id ${msg.id}`);
+            } else {
+              this.current_resolver = null;
+              for (const listener of this.listeners) listener.current_resolver(null);
+            }
             break;
           }
           default:
@@ -122,9 +124,9 @@ export namespace solver {
     initialized(): void;
     new_flaw(flaw: Flaw): void;
     flaw_cost_update(flaw: Flaw): void;
-    current_flaw(flaw: Flaw): void;
+    current_flaw(flaw: Flaw | null): void;
     new_resolver(resolver: Resolver): void;
-    current_resolver(resolver: Resolver): void;
+    current_resolver(resolver: Resolver | null): void;
   }
 
   export class Flaw {
@@ -201,7 +203,7 @@ export namespace solver {
     | ({ msg_type: 'status' } & SolverMessage)
     | ({ msg_type: 'new-flaw' } & FlawMessage)
     | ({ msg_type: 'flaw-cost-update' } & { id: string, cost: Rational })
-    | ({ msg_type: 'current-flaw' } & { id: string })
+    | ({ msg_type: 'current-flaw' } & { id: string | undefined })
     | ({ msg_type: 'new-resolver' } & ResolverMessage)
-    | ({ msg_type: 'current-resolver' } & { id: string });
+    | ({ msg_type: 'current-resolver' } & { id: string | undefined });
 }

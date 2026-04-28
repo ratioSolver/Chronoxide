@@ -242,7 +242,7 @@ impl ToJson for EnumFlaw {
     fn to_json(&self) -> Value {
         let mut json = flaw_to_json(self);
         json["kind"] = "enum".into();
-        json["var"] = format!("{:?}", self.var).into();
+        json["var"] = format!("{:?}", self.var.var).into();
         json
     }
 }

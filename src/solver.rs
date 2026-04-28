@@ -34,6 +34,7 @@ pub struct SolverState {
     resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
     flaw_q: RefCell<VecDeque<Rc<dyn Flaw>>>,
     top_level_flaws: RefCell<Vec<Rc<dyn Flaw>>>,
+    c_flaw: RefCell<Option<Rc<dyn Flaw>>>,
     c_res: RefCell<Option<Rc<dyn Resolver>>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
@@ -55,6 +56,7 @@ impl SolverState {
             resolvers: RefCell::new(vec![]),
             flaw_q: RefCell::new(VecDeque::new()),
             top_level_flaws: RefCell::new(vec![]),
+            c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
@@ -74,22 +76,32 @@ impl SolverState {
             return false;
         }
 
-        let flaw = {
-            let flaws = self.flaws.borrow();
-            flaws.iter().filter(|f| self.sat.borrow().value(f.phi()) == &LBool::True).max_by_key(|f| f.cost()).cloned()
-        };
-        if let Some(flaw) = flaw {
+        while let Some(flaw) = self
+            .flaws
+            .borrow()
+            .iter()
+            .filter(|f| {
+                let sat = self.sat.borrow();
+                let resolvers = self.resolvers.borrow();
+                sat.value(f.phi()) == &LBool::True && f.resolvers().into_iter().all(|res_id| sat.value(resolvers.get(res_id).expect("Invalid resolver ID").rho()) != &LBool::True)
+            })
+            .max_by_key(|f| f.cost())
+            .cloned()
+        {
             trace!("Best flaw to resolve: {:?} with cost {}", flaw.id(), flaw.cost());
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw({
-                let mut msg = flaw.to_json();
-                msg["id"] = format!("f{}", flaw.id()).into();
-                msg
-            }));
-            return false;
-        } else {
-            trace!("No flaws left. Problem is solved.");
-            return true;
+            self.set_current_flaw(Some(flaw.clone()));
+            let resolver = flaw.resolvers().into_iter().filter_map(|res_id| self.resolvers.borrow().get(res_id).cloned()).min_by_key(|res| self.compute_resolver_cost(res.as_ref()));
+            if let Some(resolver) = resolver {
+                trace!("Best resolver to apply: {:?} with cost {}", resolver.id(), self.compute_resolver_cost(resolver.as_ref()));
+                self.set_current_resolver(Some(resolver.clone()));
+                self.set_current_resolver(None);
+            } else {
+                trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
+                return false;
+            }
+            self.set_current_flaw(None);
         }
+        true
     }
 
     pub fn get_num_flaws(&self) -> usize {
@@ -148,7 +160,7 @@ impl SolverState {
                 for resolver_id in current_flaw.resolvers() {
                     let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
                     if self.sat.borrow().value(resolver.rho()) != &LBool::False {
-                        let resolver_cost = resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost });
+                        let resolver_cost = self.compute_resolver_cost(resolver.as_ref());
                         if resolver_cost < current_cost {
                             current_cost = resolver_cost;
                         }
@@ -191,6 +203,28 @@ impl SolverState {
         let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
         self.resolvers.borrow_mut().push(resolver);
         trace!("Resolvers count: {}", self.resolvers.borrow().len());
+    }
+
+    fn compute_resolver_cost(&self, resolver: &dyn Resolver) -> Rational {
+        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+    }
+
+    fn set_current_flaw(&self, flaw: Option<Rc<dyn Flaw>>) {
+        self.c_flaw.borrow_mut().clone_from(&flaw);
+        if let Some(flaw) = flaw {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("f{}", flaw.id())})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
+        }
+    }
+
+    fn set_current_resolver(&self, resolver: Option<Rc<dyn Resolver>>) {
+        self.c_res.borrow_mut().clone_from(&resolver);
+        if let Some(resolver) = resolver {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("r{}", resolver.id())})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
+        }
     }
 }
 
