@@ -196,29 +196,8 @@ impl SolverState {
 
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
-        let flaws = self
-            .flaws
-            .borrow()
-            .iter()
-            .map(|flaw| {
-                let id = flaw.id();
-                let mut json = flaw.to_json();
-                json["id"] = json!(id);
-                (id, json)
-            })
-            .collect::<HashMap<_, _>>();
-
-        let resolvers = self
-            .resolvers
-            .borrow()
-            .iter()
-            .map(|resolver| {
-                let id = resolver.id();
-                let mut json = resolver.to_json();
-                json["id"] = json!(id);
-                (id, json)
-            })
-            .collect::<HashMap<_, _>>();
+        let flaws = self.flaws.borrow().iter().map(|flaw| (format!("f{}", flaw.id()), flaw.to_json())).collect::<HashMap<_, _>>();
+        let resolvers = self.resolvers.borrow().iter().map(|resolver| (format!("r{}", resolver.id()), resolver.to_json())).collect::<HashMap<_, _>>();
 
         json!({
             "flaws": flaws,

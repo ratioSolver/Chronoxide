@@ -6,6 +6,10 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 echarts.use([GraphChart, CanvasRenderer]);
 
+const CURRENT_NODE_COLOR = '#f97316';
+const CURRENT_NODE_BORDER_COLOR = '#7c2d12';
+const CURRENT_NODE_SHADOW_COLOR = 'rgba(249, 115, 22, 0.7)';
+
 export function causal_graph(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
@@ -17,27 +21,39 @@ export function causal_graph(slv: solver.Solver): VNode {
 
     const data = [
       ...flaws.map((flaw) => {
+        const is_current = flaw === current_flaw;
         return {
           id: flaw.get_id(),
           name: flaw.get_phi(),
           symbol: 'circle',
+          symbolSize: is_current ? 24 : 16,
           itemStyle: {
-            color: flaw === current_flaw ? 'orange' : node_color(flaw.get_cost(), flaw.get_status()),
-            borderColor: 'black',
-            borderType: node_border(flaw.get_status())
+            color: is_current ? CURRENT_NODE_COLOR : node_color(flaw.get_cost(), flaw.get_status()),
+            borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : 'black',
+            borderWidth: is_current ? 3 : 1,
+            borderType: node_border(flaw.get_status()),
+            shadowBlur: is_current ? 16 : 0,
+            shadowColor: CURRENT_NODE_SHADOW_COLOR
           },
         };
       }),
-      ...resolvers.map((resolver) => ({
-        id: resolver.get_id(),
-        name: resolver.get_rho(),
-        symbol: 'rect',
-        itemStyle: {
-          color: resolver === current_resolver ? 'orange' : node_color(resolver.get_cost(), resolver.get_status()),
-          borderColor: 'black',
-          borderType: node_border(resolver.get_status())
-        },
-      })),
+      ...resolvers.map((resolver) => {
+        const is_current = resolver === current_resolver;
+        return {
+          id: resolver.get_id(),
+          name: resolver.get_rho(),
+          symbol: 'rect',
+          symbolSize: is_current ? 24 : 16,
+          itemStyle: {
+            color: is_current ? CURRENT_NODE_COLOR : node_color(resolver.get_cost(), resolver.get_status()),
+            borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : 'black',
+            borderWidth: is_current ? 3 : 1,
+            borderType: node_border(resolver.get_status()),
+            shadowBlur: is_current ? 16 : 0,
+            shadowColor: CURRENT_NODE_SHADOW_COLOR
+          },
+        };
+      }),
     ];
 
     const links = resolvers.map((resolver) => ({
@@ -116,7 +132,6 @@ function node_color(cost: number, status: 'active' | 'forbidden' | 'inactive'): 
   // Map [0, ∞) → hue [120, 0] (green → red) using atan normalization
   const t = (2 / Math.PI) * Math.atan(cost);
   const hue = Math.round(120 * (1 - t));
-  console.log(`Cost: ${cost}, Hue: ${hue}`);
   return `hsl(${hue}, 80%, 45%)`;
 }
 

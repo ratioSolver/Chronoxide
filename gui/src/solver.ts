@@ -183,7 +183,6 @@ export namespace solver {
     get_intrinsic_cost(): number { return this.intrinsic_cost.den === 0 ? Infinity : this.intrinsic_cost.num / this.intrinsic_cost.den; }
     get_cost(): number {
       const req_costs = this.requirements.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
-      console.log(`Resolver ${this.id} requirements:`, this.requirements, 'costs:', req_costs, `intrinsic cost: ${this.get_intrinsic_cost()}`);
       const max_req_cost = req_costs.length > 0 ? Math.max(...req_costs) : 0;
       return this.get_intrinsic_cost() + max_req_cost;
     }
