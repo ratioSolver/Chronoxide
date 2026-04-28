@@ -37,7 +37,9 @@ export function timelines(slv: solver.Solver): VNode {
     initialized: () => { },
     new_flaw: (_flaw: solver.Flaw) => { },
     flaw_cost_update: (_flaw: solver.Flaw) => { },
+    current_flaw: (_flaw_id: number) => { },
     new_resolver: (_resolver: solver.Resolver) => { },
+    current_resolver: (_resolver_id: number) => { },
   };
 
   let resize_handler: () => void;
