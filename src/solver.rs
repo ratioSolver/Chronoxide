@@ -148,7 +148,7 @@ impl SolverState {
                 for resolver_id in current_flaw.resolvers() {
                     let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
                     if self.sat.borrow().value(resolver.rho()) != &LBool::False {
-                        let resolver_cost = self.resolver_cost(resolver.as_ref());
+                        let resolver_cost = resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost });
                         if resolver_cost < current_cost {
                             current_cost = resolver_cost;
                         }
@@ -166,17 +166,13 @@ impl SolverState {
                     msg
                 }));
 
-                for support in current_flaw.causes() {
-                    let support = resolvers.get(*support).expect("Invalid flaw cause");
+                for support in current_flaw.supports() {
+                    let support = resolvers.get(support).expect("Invalid flaw cause");
                     let support_flaw = flaws.get(support.flaw()).expect("Invalid flaw cause").clone();
                     stack.push((support_flaw, visited.clone()));
                 }
             }
         }
-    }
-
-    fn resolver_cost(&self, resolver: &dyn Resolver) -> Rational {
-        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
     }
 
     pub fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
@@ -560,9 +556,9 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
-                let causes = if c_res.is_some() { vec![c_res.unwrap().id()] } else { vec![] };
-                self.add_flaw(ClauseFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, causes, lits));
+                let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
+                let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
+                self.add_flaw(ClauseFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, cause, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -678,9 +674,9 @@ impl Core for SolverState {
         let var = Rc::new(EnumVar::new(class, var));
         let c_res = self.c_res.borrow();
         let c_res = c_res.as_ref();
-        let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
-        let causes = if c_res.is_some() { vec![c_res.unwrap().id()] } else { vec![] };
-        self.add_flaw(EnumFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, causes, var.clone()));
+        let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
+        let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
+        self.add_flaw(EnumFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, cause, var.clone()));
         Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {

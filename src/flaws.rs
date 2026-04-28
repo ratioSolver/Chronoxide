@@ -15,7 +15,10 @@ pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> usize;
     fn phi(&self) -> usize;
-    fn causes(&self) -> &Vec<usize>;
+    fn causes(&self) -> Vec<usize>;
+    fn supports(&self) -> Vec<usize> {
+        Vec::new()
+    }
     fn resolvers(&self) -> Vec<usize>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
@@ -49,19 +52,19 @@ pub(crate) struct ClauseFlaw {
     slv: Weak<SolverState>,
     id: usize,
     phi: usize,
-    causes: Vec<usize>,
+    cause: Option<usize>,
     resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
     lits: Vec<Lit>,
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, causes: Vec<usize>, lits: Vec<Lit>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, cause: Option<usize>, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self {
             slv,
             id,
             phi,
-            causes,
+            cause,
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
             lits,
@@ -82,8 +85,8 @@ impl Flaw for ClauseFlaw {
         self.phi
     }
 
-    fn causes(&self) -> &Vec<usize> {
-        &self.causes
+    fn causes(&self) -> Vec<usize> {
+        if let Some(cause) = self.cause { vec![cause] } else { Vec::new() }
     }
 
     fn resolvers(&self) -> Vec<usize> {
@@ -165,19 +168,19 @@ pub(crate) struct EnumFlaw {
     slv: Weak<SolverState>,
     id: usize,
     phi: usize,
-    causes: Vec<usize>,
+    cause: Option<usize>,
     resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
     var: Rc<EnumVar>,
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, causes: Vec<usize>, var: Rc<EnumVar>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
             slv,
             id,
             phi,
-            causes,
+            cause,
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
             var,
@@ -198,8 +201,8 @@ impl Flaw for EnumFlaw {
         self.phi
     }
 
-    fn causes(&self) -> &Vec<usize> {
-        &self.causes
+    fn causes(&self) -> Vec<usize> {
+        if let Some(cause) = self.cause { vec![cause] } else { Vec::new() }
     }
 
     fn resolvers(&self) -> Vec<usize> {
