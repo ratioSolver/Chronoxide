@@ -38,10 +38,6 @@ export function timelines(slv: solver.Solver): VNode {
     new_flaw: (_flaw: solver.Flaw) => { },
     flaw_cost_update: (_flaw: solver.Flaw) => { },
     new_resolver: (_resolver: solver.Resolver) => { },
-
-    connected: () => { },
-    disconnected: () => { },
-    connection_error: (error: Event) => console.error('Solver connection error', error),
   };
 
   let resize_handler: () => void;

@@ -12,22 +12,24 @@ export function causal_graph(slv: solver.Solver): VNode {
   const get_option = (): echarts.EChartsCoreOption => {
     const flaws = slv.get_flaws();
     const resolvers = slv.get_resolvers();
+    const current_flaw = slv.get_current_flaw();
+    const current_resolver = slv.get_current_resolver();
 
     const data = [
       ...flaws.map((flaw) => {
         return {
-          id: String(flaw.get_id()),
+          id: 'f' + String(flaw.get_id()),
           name: flaw.get_phi(),
           symbol: 'circle',
           itemStyle: {
-            color: node_color(flaw.get_cost(), flaw.get_status()),
+            color: flaw === current_flaw ? 'orange' : node_color(flaw.get_cost(), flaw.get_status()),
             borderColor: 'black',
             borderType: node_border(flaw.get_status())
           },
         };
       }),
       ...resolvers.map((resolver) => ({
-        id: String(resolver.get_id()),
+        id: 'r' + String(resolver.get_id()),
         name: resolver.get_rho(),
         symbol: 'rect',
         itemStyle: {
@@ -73,11 +75,9 @@ export function causal_graph(slv: solver.Solver): VNode {
     initialized: () => { if (chart) chart.setOption(get_option()); },
     new_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     flaw_cost_update: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
+    current_flaw: (_flaw_id: number) => { if (chart) chart.setOption(get_option()); },
     new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
-
-    connected: () => { },
-    disconnected: () => { },
-    connection_error: (error: Event) => console.error('Solver connection error', error),
+    current_resolver: (_resolver_id: number) => { if (chart) chart.setOption(get_option()); },
   };
 
   let resize_handler: () => void;

@@ -87,6 +87,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 msg["msg_type"] = "flaw-status-update".into();
                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
             }
+            SolverEvent::CurrentFlaw(update) => {
+                let mut msg = update;
+                msg["msg_type"] = "current-flaw".into();
+                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            }
             SolverEvent::NewResolver(resolver) => {
                 let mut msg = resolver;
                 msg["msg_type"] = "new-resolver".into();
@@ -95,6 +100,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             SolverEvent::ResolverStatusUpdate(update) => {
                 let mut msg = update;
                 msg["msg_type"] = "resolver-status-update".into();
+                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            }
+            SolverEvent::CurrentResolver(update) => {
+                let mut msg = update;
+                msg["msg_type"] = "current-resolver".into();
                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
             }
         };

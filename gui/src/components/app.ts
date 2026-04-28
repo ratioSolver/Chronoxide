@@ -8,11 +8,9 @@ const app_listener = {
   initialized: () => flick.redraw(),
   new_flaw: (_flaw: solver.Flaw) => { },
   flaw_cost_update: (_flaw: solver.Flaw) => { },
+  current_flaw: (_flaw_id: number) => { },
   new_resolver: (_resolver: solver.Resolver) => { },
-
-  connected: () => { },
-  disconnected: () => { },
-  connection_error: (error: Event) => console.error('CoCo connection error', error),
+  current_resolver: (_resolver_id: number) => { },
 };
 
 const landing_page = () => h('div.container.mt-5', [

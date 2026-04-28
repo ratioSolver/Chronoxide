@@ -24,7 +24,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::trace;
 
-pub(crate) struct SolverState {
+pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     pub sat: RefCell<consensus::Engine>,
@@ -73,7 +73,31 @@ impl SolverState {
             trace!("Problem is inconsistent");
             return false;
         }
-        true
+
+        let flaw = {
+            let flaws = self.flaws.borrow();
+            flaws.iter().filter(|f| self.sat.borrow().value(f.phi()) == &LBool::True).max_by_key(|f| f.cost()).cloned()
+        };
+        if let Some(flaw) = flaw {
+            trace!("Best flaw to resolve: {:?} with cost {}", flaw.id(), flaw.cost());
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw({
+                let mut msg = flaw.to_json();
+                msg["id"] = json!(flaw.id());
+                msg
+            }));
+            return false;
+        } else {
+            trace!("No flaws left. Problem is solved.");
+            return true;
+        }
+    }
+
+    pub fn get_num_flaws(&self) -> usize {
+        self.flaws.borrow().len()
+    }
+
+    pub fn get_num_resolvers(&self) -> usize {
+        self.resolvers.borrow().len()
     }
 
     fn build_graph(&self) -> bool {
@@ -89,17 +113,16 @@ impl SolverState {
                 flaw.clone().compute_resolvers();
                 let mut causal_constraint = Vec::new();
                 causal_constraint.push(neg(flaw.phi()));
-                for resolver in flaw.resolvers() {
+                for resolver_id in flaw.resolvers() {
+                    let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
                     causal_constraint.push(pos(resolver.rho()));
-                    self.resolvers.borrow_mut().push(resolver.clone());
-                    let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
                     self.c_res.borrow_mut().replace(resolver.clone());
                     match resolver.apply() {
                         Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
                         Err(e) => trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e),
                     }
                 }
-                self.c_res.borrow_mut().take();
+                self.c_res.borrow_mut().take(); // Clear the current resolver after processing
                 if !self.sat.borrow_mut().add_clause(causal_constraint) {
                     trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
                     return false;
@@ -116,13 +139,16 @@ impl SolverState {
         trace!("Computing cost for flaw: {:?}", flaw.id());
         let mut stack: Vec<(Rc<dyn Flaw>, HashSet<usize>)> = vec![(flaw, HashSet::new())];
 
+        let resolvers = self.resolvers.borrow();
+        let flaws = self.flaws.borrow();
         while let Some((current_flaw, mut visited)) = stack.pop() {
             let mut current_cost = Rational::POSITIVE_INFINITY;
 
             if self.sat.borrow().value(current_flaw.phi()) != &LBool::False && visited.insert(current_flaw.id()) {
-                for resolver in current_flaw.resolvers() {
+                for resolver_id in current_flaw.resolvers() {
+                    let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
                     if self.sat.borrow().value(resolver.rho()) != &LBool::False {
-                        let resolver_cost = resolver.cost();
+                        let resolver_cost = self.resolver_cost(resolver.as_ref());
                         if resolver_cost < current_cost {
                             current_cost = resolver_cost;
                         }
@@ -141,13 +167,19 @@ impl SolverState {
                 }));
 
                 for support in current_flaw.causes() {
-                    stack.push((support.flaw(), visited.clone()));
+                    let support = resolvers.get(*support).expect("Invalid flaw cause");
+                    let support_flaw = flaws.get(support.flaw()).expect("Invalid flaw cause").clone();
+                    stack.push((support_flaw, visited.clone()));
                 }
             }
         }
     }
 
-    fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
+    fn resolver_cost(&self, resolver: &dyn Resolver) -> Rational {
+        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+    }
+
+    pub fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
         trace!("Adding flaw: {:?}", flaw.id());
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         if self.sat.borrow().value(flaw.phi()) == &LBool::True {
@@ -156,6 +188,13 @@ impl SolverState {
         self.flaws.borrow_mut().push(flaw.clone());
         self.flaw_q.borrow_mut().push_back(flaw);
         trace!("Flaws count: {}", self.flaws.borrow().len());
+    }
+
+    pub fn add_resolver(&self, resolver: Rc<dyn Resolver>) {
+        trace!("Adding resolver: {:?}", resolver.id());
+        let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
+        self.resolvers.borrow_mut().push(resolver);
+        trace!("Resolvers count: {}", self.resolvers.borrow().len());
     }
 }
 
@@ -211,8 +250,10 @@ pub enum SolverEvent {
     NewFlaw(Value),
     FlawCostUpdate(Value),
     FlawStatusUpdate(Value),
+    CurrentFlaw(Value),
     NewResolver(Value),
     ResolverStatusUpdate(Value),
+    CurrentResolver(Value),
 }
 
 #[derive(Clone)]
@@ -520,7 +561,8 @@ impl Core for SolverState {
                     })
                     .collect();
                 let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
-                self.add_flaw(ClauseFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, lits));
+                let causes = if c_res.is_some() { vec![c_res.unwrap().id()] } else { vec![] };
+                self.add_flaw(ClauseFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, causes, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -637,7 +679,8 @@ impl Core for SolverState {
         let c_res = self.c_res.borrow();
         let c_res = c_res.as_ref();
         let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
-        self.add_flaw(EnumFlaw::new(self.slv.upgrade().expect("Solver has been dropped"), rho, var.clone()));
+        let causes = if c_res.is_some() { vec![c_res.unwrap().id()] } else { vec![] };
+        self.add_flaw(EnumFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, causes, var.clone()));
         Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {

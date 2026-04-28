@@ -13,36 +13,26 @@ use std::{
 
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
-    fn id(&self) -> usize {
-        let ptr: *const Self = self;
-        ptr as *const () as usize
-    }
+    fn id(&self) -> usize;
     fn phi(&self) -> usize;
-    fn causes(&self) -> Vec<Rc<dyn Resolver>> {
-        Vec::new()
-    }
-    fn resolvers(&self) -> Vec<Rc<dyn Resolver>>;
+    fn causes(&self) -> &Vec<usize>;
+    fn resolvers(&self) -> Vec<usize>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
     fn compute_resolvers(self: Rc<Self>);
 }
 
 pub trait Resolver: ToJson {
-    fn id(&self) -> usize {
-        let ptr: *const Self = self;
-        ptr as *const () as usize
-    }
-    fn flaw(&self) -> Rc<dyn Flaw>;
+    fn solver(&self) -> Rc<SolverState>;
+    fn id(&self) -> usize;
+    fn flaw(&self) -> usize;
     fn rho(&self) -> usize;
     fn apply(&self) -> Result<(), SolverError>;
-    fn requirements(&self) -> Vec<Rc<dyn Flaw>> {
+    fn requirements(&self) -> Vec<usize> {
         Vec::new()
     }
     fn intrinsic_cost(&self) -> Rational {
         Rational::from(1)
-    }
-    fn cost(&self) -> Rational {
-        self.requirements().iter().map(|r| r.cost()).fold(self.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
     }
     fn ac_constraints(&self) -> Option<Vec<usize>> {
         None
@@ -57,17 +47,21 @@ pub trait Resolver: ToJson {
 
 pub(crate) struct ClauseFlaw {
     slv: Weak<SolverState>,
+    id: usize,
     phi: usize,
-    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    causes: Vec<usize>,
+    resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
     lits: Vec<Lit>,
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(slv: Rc<SolverState>, phi: usize, lits: Vec<Lit>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, causes: Vec<usize>, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self {
-            slv: Rc::downgrade(&slv),
+            slv,
+            id,
             phi,
+            causes,
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
             lits,
@@ -80,11 +74,19 @@ impl Flaw for ClauseFlaw {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
+    fn id(&self) -> usize {
+        self.id
+    }
+
     fn phi(&self) -> usize {
         self.phi
     }
 
-    fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
+    fn causes(&self) -> &Vec<usize> {
+        &self.causes
+    }
+
+    fn resolvers(&self) -> Vec<usize> {
         self.resolvers.borrow().clone()
     }
 
@@ -97,10 +99,12 @@ impl Flaw for ClauseFlaw {
     }
 
     fn compute_resolvers(self: Rc<Self>) {
+        let solver = self.solver();
         for lit in &self.lits {
-            let c = self.solver().sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
+            let c = solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
-            self.resolvers.borrow_mut().push(ClauseResolver::new(self.clone(), *lit));
+
+            solver.add_resolver(ClauseResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, *lit));
         }
     }
 }
@@ -115,19 +119,29 @@ impl ToJson for ClauseFlaw {
 }
 
 pub(crate) struct ClauseResolver {
-    flaw: Weak<ClauseFlaw>,
+    slv: Weak<SolverState>,
+    id: usize,
+    flaw: usize,
     lit: Lit,
 }
 
 impl ClauseResolver {
-    fn new(flaw: Rc<ClauseFlaw>, lit: Lit) -> Rc<Self> {
-        Rc::new(Self { flaw: Rc::downgrade(&flaw), lit })
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, lit: Lit) -> Rc<Self> {
+        Rc::new(Self { slv, id, flaw, lit })
     }
 }
 
 impl Resolver for ClauseResolver {
-    fn flaw(&self) -> Rc<dyn Flaw> {
-        self.flaw.upgrade().expect("Flaw has been dropped") as Rc<dyn Flaw>
+    fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    fn id(&self) -> usize {
+        self.id
+    }
+
+    fn flaw(&self) -> usize {
+        self.flaw
     }
 
     fn rho(&self) -> usize {
@@ -149,17 +163,21 @@ impl ToJson for ClauseResolver {
 
 pub(crate) struct EnumFlaw {
     slv: Weak<SolverState>,
+    id: usize,
     phi: usize,
-    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
+    causes: Vec<usize>,
+    resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
     var: Rc<EnumVar>,
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(slv: Rc<SolverState>, phi: usize, var: Rc<EnumVar>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, causes: Vec<usize>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
-            slv: Rc::downgrade(&slv),
+            slv,
+            id,
             phi,
+            causes,
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
             var,
@@ -172,11 +190,19 @@ impl Flaw for EnumFlaw {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
+    fn id(&self) -> usize {
+        self.id
+    }
+
     fn phi(&self) -> usize {
         self.phi
     }
 
-    fn resolvers(&self) -> Vec<Rc<dyn Resolver>> {
+    fn causes(&self) -> &Vec<usize> {
+        &self.causes
+    }
+
+    fn resolvers(&self) -> Vec<usize> {
         self.resolvers.borrow().clone()
     }
 
@@ -189,12 +215,15 @@ impl Flaw for EnumFlaw {
     }
 
     fn compute_resolvers(self: Rc<Self>) {
-        let vals = self.solver().ac.borrow().val(self.var.var);
+        let solver = self.solver();
+        let vals = solver.ac.borrow().val(self.var.var);
+        let mut sat = solver.sat.borrow_mut();
         for val in vals {
-            let rho = self.solver().sat.borrow_mut().add_var();
-            let c = self.solver().sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi)]);
+            let rho = sat.add_var();
+            let c = sat.add_clause(vec![neg(rho), pos(self.phi)]);
             assert!(c, "Failed to add clause for Enum flaw resolver");
-            self.resolvers.borrow_mut().push(EnumResolver::new(self.clone(), rho, val));
+
+            solver.add_resolver(EnumResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, rho, val));
         }
     }
 }
@@ -209,20 +238,30 @@ impl ToJson for EnumFlaw {
 }
 
 pub(crate) struct EnumResolver {
-    flaw: Weak<EnumFlaw>,
+    slv: Weak<SolverState>,
+    id: usize,
+    flaw: usize,
     rho: usize,
     val: i32,
 }
 
 impl EnumResolver {
-    fn new(flaw: Rc<EnumFlaw>, rho: usize, val: i32) -> Rc<Self> {
-        Rc::new(Self { flaw: Rc::downgrade(&flaw), rho, val })
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: usize, val: i32) -> Rc<Self> {
+        Rc::new(Self { slv, id, flaw, rho, val })
     }
 }
 
 impl Resolver for EnumResolver {
-    fn flaw(&self) -> Rc<dyn Flaw> {
-        self.flaw.upgrade().expect("Flaw has been dropped") as Rc<dyn Flaw>
+    fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    fn id(&self) -> usize {
+        self.id
+    }
+
+    fn flaw(&self) -> usize {
+        self.flaw
     }
 
     fn rho(&self) -> usize {
@@ -265,6 +304,7 @@ fn flaw_to_json(flaw: &dyn Flaw) -> Value {
     json!({
         "id": flaw.id(),
         "phi": flaw.phi(),
+        "causes": flaw.causes(),
         "status": flaw.solver().sat.borrow().value(flaw.phi()).to_json(),
         "cost": flaw.cost().to_json(),
     })
@@ -273,8 +313,10 @@ fn flaw_to_json(flaw: &dyn Flaw) -> Value {
 fn resolver_to_json(resolver: &dyn Resolver) -> Value {
     json!({
         "id": resolver.id(),
-        "flaw": resolver.flaw().id(),
-        "status": resolver.flaw().solver().sat.borrow().value(resolver.rho()).to_json(),
+        "flaw": resolver.flaw(),
+        "requirements": resolver.requirements(),
+        "intrinsic_cost": resolver.intrinsic_cost().to_json(),
+        "status": resolver.solver().sat.borrow().value(resolver.rho()).to_json(),
         "rho": resolver.rho(),
     })
 }

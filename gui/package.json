@@ -25,13 +25,13 @@
   "devDependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@types/bootstrap": "^5.2.10",
-    "@types/node": "^25.5.1",
-    "jsdom": "^29.0.1",
-    "typescript": "~6.0.2",
-    "vite": "^8.0.3"
+    "@types/node": "^25.6.0",
+    "jsdom": "^29.1.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.10"
   },
   "peerDependencies": {
-    "@ratiosolver/flick": "^0.2.9",
+    "@ratiosolver/flick": "^0.2.10",
     "bootstrap": "^5.3.8",
     "snabbdom": "^3.6.3"
   },
