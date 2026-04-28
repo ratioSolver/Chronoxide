@@ -11,7 +11,7 @@ use axum::{
 };
 use chronoxide::solver::{Solver, SolverEvent};
 use riddle::serde_json;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{Level, error, subscriber, trace};
 
@@ -70,46 +70,71 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     }
 
     state.first_client_connected.notify_waiters();
-    while let Ok(event) = rx.recv().await {
-        let send_result = match event {
-            SolverEvent::NewFlaw(flaw) => {
-                let mut msg = flaw;
-                msg["msg_type"] = "new-flaw".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
             }
-            SolverEvent::FlawCostUpdate(update) => {
-                let mut msg = update;
-                msg["msg_type"] = "flaw-cost-update".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+            recv = rx.recv() => {
+                let event = match recv {
+                    Ok(event) => event,
+                    Err(RecvError::Lagged(skipped)) => {
+                        trace!("WebSocket client lagging behind, skipped {} events", skipped);
+                        continue;
+                    }
+                    Err(RecvError::Closed) => break,
+                };
+
+                let send_result = match event {
+                    SolverEvent::NewFlaw(flaw) => {
+                        let mut msg = flaw;
+                        msg["msg_type"] = "new-flaw".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::FlawCostUpdate(update) => {
+                        let mut msg = update;
+                        msg["msg_type"] = "flaw-cost-update".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::FlawStatusUpdate(update) => {
+                        let mut msg = update;
+                        msg["msg_type"] = "flaw-status-update".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::CurrentFlaw(update) => {
+                        let mut msg = update;
+                        msg["msg_type"] = "current-flaw".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::NewResolver(resolver) => {
+                        let mut msg = resolver;
+                        msg["msg_type"] = "new-resolver".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::ResolverStatusUpdate(update) => {
+                        let mut msg = update;
+                        msg["msg_type"] = "resolver-status-update".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                    SolverEvent::CurrentResolver(update) => {
+                        let mut msg = update;
+                        msg["msg_type"] = "current-resolver".into();
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
+                };
+                if send_result.is_err() {
+                    break;
+                }
             }
-            SolverEvent::FlawStatusUpdate(update) => {
-                let mut msg = update;
-                msg["msg_type"] = "flaw-status-update".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-            }
-            SolverEvent::CurrentFlaw(update) => {
-                let mut msg = update;
-                msg["msg_type"] = "current-flaw".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-            }
-            SolverEvent::NewResolver(resolver) => {
-                let mut msg = resolver;
-                msg["msg_type"] = "new-resolver".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-            }
-            SolverEvent::ResolverStatusUpdate(update) => {
-                let mut msg = update;
-                msg["msg_type"] = "resolver-status-update".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-            }
-            SolverEvent::CurrentResolver(update) => {
-                let mut msg = update;
-                msg["msg_type"] = "current-resolver".into();
-                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-            }
-        };
-        if send_result.is_err() {
-            break;
         }
     }
 }
