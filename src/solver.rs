@@ -1,23 +1,24 @@
 use crate::{
     ToJson,
-    flaws::{ClauseFlaw, EnumFlaw, Flaw, Resolver},
+    flaws::{ClauseFlaw, EnumFlaw},
+    graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
-use consensus::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
+use consensus::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
 use linspire::{
     lin::{Lin, c, v},
-    rational::{Rational, rat},
+    rational::rat,
 };
 use riddle::{
     core::{CommonCore, Core},
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
-    serde_json::{Value, json},
+    serde_json::Value,
 };
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::HashMap,
     fmt,
     rc::{Rc, Weak},
 };
@@ -30,12 +31,7 @@ pub struct SolverState {
     pub sat: RefCell<consensus::Engine>,
     pub ac: RefCell<dynamic_ac::Engine>,
     pub lin: RefCell<linspire::Engine>,
-    flaws: RefCell<Vec<Rc<dyn Flaw>>>,
-    resolvers: RefCell<Vec<Rc<dyn Resolver>>>,
-    flaw_q: RefCell<VecDeque<Rc<dyn Flaw>>>,
-    top_level_flaws: RefCell<Vec<Rc<dyn Flaw>>>,
-    c_flaw: RefCell<Option<Rc<dyn Flaw>>>,
-    c_res: RefCell<Option<Rc<dyn Resolver>>>,
+    pub graph: RefCell<Graph>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -52,12 +48,7 @@ impl SolverState {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
-            flaws: RefCell::new(vec![]),
-            resolvers: RefCell::new(vec![]),
-            flaw_q: RefCell::new(VecDeque::new()),
-            top_level_flaws: RefCell::new(vec![]),
-            c_flaw: RefCell::new(None),
-            c_res: RefCell::new(None),
+            graph: RefCell::new(Graph::new(core.clone(), tx_event.clone())),
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
             tx_event,
@@ -71,172 +62,31 @@ impl SolverState {
 
     fn solve(&self) -> bool {
         trace!("Solving problem...");
-        if !self.build_graph() {
+        if !self.graph.borrow_mut().build_graph() {
             trace!("Problem is inconsistent");
             return false;
         }
 
-        while let Some(flaw) = self
-            .flaws
-            .borrow()
-            .iter()
-            .filter(|f| {
-                let sat = self.sat.borrow();
-                let resolvers = self.resolvers.borrow();
-                sat.value(f.phi()) == &LBool::True && f.resolvers().into_iter().all(|res_id| sat.value(resolvers.get(res_id).expect("Invalid resolver ID").rho()) != &LBool::True)
-            })
-            .max_by_key(|f| f.cost())
-            .cloned()
-        {
-            trace!("Best flaw to resolve: {:?} with cost {}", flaw.id(), flaw.cost());
-            self.set_current_flaw(Some(flaw.clone()));
-            let resolver = flaw.resolvers().into_iter().filter_map(|res_id| self.resolvers.borrow().get(res_id).cloned()).min_by_key(|res| self.compute_resolver_cost(res.as_ref()));
-            if let Some(resolver) = resolver {
-                trace!("Best resolver to apply: {:?} with cost {}", resolver.id(), self.compute_resolver_cost(resolver.as_ref()));
-                self.set_current_resolver(Some(resolver.clone()));
-                self.set_current_resolver(None);
+        while let Some(flaw) = self.graph.borrow().get_most_expensive_flaw() {
+            trace!("Best flaw to resolve: {:?}", flaw.id());
+            self.graph.borrow_mut().set_current_flaw(Some(flaw.clone()));
+            if let Some(resolver) = self.graph.borrow().get_least_expensive_resolver(flaw.as_ref()) {
+                trace!("Best resolver to apply: {:?}", resolver.id());
+                self.graph.borrow_mut().set_current_resolver(Some(resolver.clone()));
+                self.graph.borrow_mut().set_current_resolver(None);
             } else {
                 trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
                 return false;
             }
-            self.set_current_flaw(None);
+            self.graph.borrow_mut().set_current_flaw(None);
         }
         true
-    }
-
-    pub fn get_num_flaws(&self) -> usize {
-        self.flaws.borrow().len()
-    }
-
-    pub fn get_num_resolvers(&self) -> usize {
-        self.resolvers.borrow().len()
-    }
-
-    fn build_graph(&self) -> bool {
-        trace!("Building graph...");
-        while self.top_level_flaws.borrow().iter().any(|flaw| flaw.cost().is_infinite()) {
-            if self.flaw_q.borrow().is_empty() {
-                trace!("No more flaws to process, but some top-level flaws are still unsolved. Problem is inconsistent.");
-                return false;
-            }
-            let flaw = self.flaw_q.borrow_mut().pop_front().expect("No flaws left");
-            trace!("Processing flaw: {:?}", flaw.id());
-            if flaw.cost().is_infinite() {
-                flaw.clone().compute_resolvers();
-                let mut causal_constraint = Vec::new();
-                causal_constraint.push(neg(flaw.phi()));
-                for resolver_id in flaw.resolvers() {
-                    let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
-                    causal_constraint.push(pos(resolver.rho()));
-                    self.c_res.borrow_mut().replace(resolver.clone());
-                    match resolver.apply() {
-                        Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
-                        Err(e) => trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e),
-                    }
-                }
-                self.c_res.borrow_mut().take(); // Clear the current resolver after processing
-                if !self.sat.borrow_mut().add_clause(causal_constraint) {
-                    trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
-                    return false;
-                }
-
-                self.compute_flaw_cost(flaw.clone());
-            }
-        }
-        trace!("Graph built successfully");
-        true
-    }
-
-    fn compute_flaw_cost(&self, flaw: Rc<dyn Flaw>) {
-        trace!("Computing cost for flaw: {:?}", flaw.id());
-        let mut stack: Vec<(Rc<dyn Flaw>, HashSet<usize>)> = vec![(flaw, HashSet::new())];
-
-        let resolvers = self.resolvers.borrow();
-        let flaws = self.flaws.borrow();
-        while let Some((current_flaw, mut visited)) = stack.pop() {
-            let mut current_cost = Rational::POSITIVE_INFINITY;
-
-            if self.sat.borrow().value(current_flaw.phi()) != &LBool::False && visited.insert(current_flaw.id()) {
-                for resolver_id in current_flaw.resolvers() {
-                    let resolver = self.resolvers.borrow().get(resolver_id).expect("Invalid resolver ID").clone();
-                    if self.sat.borrow().value(resolver.rho()) != &LBool::False {
-                        let resolver_cost = self.compute_resolver_cost(resolver.as_ref());
-                        if resolver_cost < current_cost {
-                            current_cost = resolver_cost;
-                        }
-                    }
-                }
-            }
-
-            if current_flaw.cost() != current_cost {
-                trace!("Updating cost for flaw {:?} from {} to {}", current_flaw.id(), current_flaw.cost(), current_cost);
-                current_flaw.set_cost(current_cost);
-                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
-                    let mut msg = current_flaw.to_json();
-                    msg["id"] = format!("f{}", current_flaw.id()).into();
-                    msg["cost"] = current_cost.to_json();
-                    msg
-                }));
-
-                for support in current_flaw.supports() {
-                    let support = resolvers.get(support).expect("Invalid flaw cause");
-                    let support_flaw = flaws.get(support.flaw()).expect("Invalid flaw cause").clone();
-                    stack.push((support_flaw, visited.clone()));
-                }
-            }
-        }
-    }
-
-    pub fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
-        trace!("Adding flaw: {:?}", flaw.id());
-        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
-        if self.sat.borrow().value(flaw.phi()) == &LBool::True {
-            self.top_level_flaws.borrow_mut().push(flaw.clone());
-        }
-        self.flaws.borrow_mut().push(flaw.clone());
-        self.flaw_q.borrow_mut().push_back(flaw);
-        trace!("Flaws count: {}", self.flaws.borrow().len());
-    }
-
-    pub fn add_resolver(&self, resolver: Rc<dyn Resolver>) {
-        trace!("Adding resolver: {:?}", resolver.id());
-        let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
-        self.resolvers.borrow_mut().push(resolver);
-        trace!("Resolvers count: {}", self.resolvers.borrow().len());
-    }
-
-    fn compute_resolver_cost(&self, resolver: &dyn Resolver) -> Rational {
-        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(*flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
-    }
-
-    fn set_current_flaw(&self, flaw: Option<Rc<dyn Flaw>>) {
-        self.c_flaw.borrow_mut().clone_from(&flaw);
-        if let Some(flaw) = flaw {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("f{}", flaw.id())})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
-        }
-    }
-
-    fn set_current_resolver(&self, resolver: Option<Rc<dyn Resolver>>) {
-        self.c_res.borrow_mut().clone_from(&resolver);
-        if let Some(resolver) = resolver {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("r{}", resolver.id())})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
-        }
     }
 }
 
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
-        let flaws = self.flaws.borrow().iter().map(|flaw| (format!("f{}", flaw.id()), flaw.to_json())).collect::<HashMap<_, _>>();
-        let resolvers = self.resolvers.borrow().iter().map(|resolver| (format!("r{}", resolver.id()), resolver.to_json())).collect::<HashMap<_, _>>();
-
-        json!({
-            "flaws": flaws,
-            "resolvers": resolvers
-        })
+        self.graph.borrow().to_json()
     }
 }
 
@@ -463,8 +313,7 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let c_res = self.c_res.borrow();
-        let c_res = c_res.as_ref();
+        let c_res = self.graph.borrow().get_current_resolver();
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
@@ -475,7 +324,7 @@ impl Core for SolverState {
                 }
             }
             BoolExpr::Eq { left, right, .. } => {
-                let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
+                let rho = if c_res.is_some() { c_res.as_ref().unwrap().rho() } else { 0 };
                 if let Some(left_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                         let left_lit = left_var.lit;
@@ -511,7 +360,7 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                         match self.ac.borrow_mut().new_eq(left_var.var, right_var.var) {
                             Ok(c) => {
-                                if let Some(res) = c_res {
+                                if let Some(res) = c_res.as_ref() {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -521,7 +370,7 @@ impl Core for SolverState {
                     } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(right) as *const () as usize)) {
                         match self.ac.borrow_mut().set(left_var.var, *val as i32) {
                             Ok(c) => {
-                                if let Some(res) = c_res {
+                                if let Some(res) = c_res.as_ref() {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -535,7 +384,7 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
                         match self.ac.borrow_mut().set(right_var.var, *val as i32) {
                             Ok(c) => {
-                                if let Some(res) = c_res {
+                                if let Some(res) = c_res.as_ref() {
                                     res.add_ac_constraint(c);
                                 }
                                 return true;
@@ -571,7 +420,7 @@ impl Core for SolverState {
                     .collect();
                 let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
                 let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
-                self.add_flaw(ClauseFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, cause, lits));
+                self.graph.borrow_mut().add_flaw(ClauseFlaw::new(self.slv.clone(), self.graph.borrow().get_num_flaws(), rho, cause, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -592,7 +441,7 @@ impl Core for SolverState {
                     }
                 }
                 BoolExpr::Eq { left, right, .. } => {
-                    let rho = if c_res.is_some() { c_res.unwrap().rho() } else { 0 };
+                    let rho = if c_res.is_some() { c_res.as_ref().unwrap().rho() } else { 0 };
                     if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                         if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                             let left_lit = left_bool_var.lit;
@@ -685,11 +534,10 @@ impl Core for SolverState {
         }
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
-        let c_res = self.c_res.borrow();
-        let c_res = c_res.as_ref();
+        let c_res = self.graph.borrow().get_current_resolver();
         let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
         let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
-        self.add_flaw(EnumFlaw::new(self.slv.clone(), self.get_num_flaws(), rho, cause, var.clone()));
+        self.graph.borrow_mut().add_flaw(EnumFlaw::new(self.slv.clone(), self.graph.borrow().get_num_flaws(), rho, cause, var.clone()));
         Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {

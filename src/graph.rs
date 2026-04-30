@@ -195,6 +195,10 @@ impl Graph {
         }
     }
 
+    pub(crate) fn get_current_resolver(&self) -> Option<Rc<dyn Resolver>> {
+        self.c_res.clone()
+    }
+
     pub fn get_num_flaws(&self) -> usize {
         self.flaws.len()
     }
@@ -219,5 +223,21 @@ impl ToJson for LBool {
             LBool::False => false.into(),
             LBool::Undef => Value::Null,
         }
+    }
+}
+
+impl ToJson for Graph {
+    fn to_json(&self) -> Value {
+        let mut obj = json!({
+            "flaws": self.flaws.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+            "resolvers": self.resolvers.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
+        });
+        if let Some(current_flaw) = self.c_flaw.as_ref() {
+            obj["current_flaw"] = current_flaw.id().into();
+        }
+        if let Some(current_resolver) = self.c_res.as_ref() {
+            obj["current_resolver"] = current_resolver.id().into();
+        }
+        obj
     }
 }

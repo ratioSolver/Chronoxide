@@ -3,7 +3,7 @@ use crate::{
     objects::EnumVar,
     solver::{SolverError, SolverState},
 };
-use consensus::{LBool, Lit, neg, pos};
+use consensus::{Lit, neg, pos};
 use linspire::rational::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
@@ -107,9 +107,9 @@ impl Flaw for ClauseFlaw {
             let c = solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
 
-            let resolver = ClauseResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, *lit);
+            let resolver = ClauseResolver::new(self.slv.clone(), solver.graph.borrow().get_num_resolvers(), self.id, *lit);
             self.resolvers.borrow_mut().push(resolver.id());
-            solver.add_resolver(resolver);
+            solver.graph.borrow_mut().add_resolver(resolver);
         }
     }
 }
@@ -231,9 +231,9 @@ impl Flaw for EnumFlaw {
             };
             assert!(c, "Failed to add clause for Enum flaw resolver");
 
-            let resolver = EnumResolver::new(self.slv.clone(), solver.get_num_resolvers(), self.id, rho, val);
+            let resolver = EnumResolver::new(self.slv.clone(), solver.graph.borrow().get_num_resolvers(), self.id, rho, val);
             self.resolvers.borrow_mut().push(resolver.id());
-            solver.add_resolver(resolver);
+            solver.graph.borrow_mut().add_resolver(resolver);
         }
     }
 }
