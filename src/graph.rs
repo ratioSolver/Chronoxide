@@ -14,7 +14,7 @@ use std::{
 use tokio::sync::broadcast;
 use tracing::trace;
 
-pub(crate) struct Graph {
+pub struct Graph {
     slv: Weak<SolverState>,
     flaws: Vec<Rc<dyn Flaw>>,
     resolvers: Vec<Rc<dyn Resolver>>,
@@ -47,11 +47,10 @@ impl Graph {
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.get(*flaw).expect("Invalid flaw ID").cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.pop_front() {
                 trace!("Processing flaw: {:?}", flaw.id());
-                flaw.clone().compute_resolvers();
                 let mut causal_constraint = Vec::new();
                 causal_constraint.push(neg(flaw.phi()));
-                for resolver_id in flaw.resolvers() {
-                    let resolver = self.resolvers.get(resolver_id).expect("Invalid resolver ID").clone();
+                for resolver in flaw.clone().compute_resolvers(self.resolvers.len()) {
+                    self.add_resolver(resolver.clone());
                     causal_constraint.push(pos(resolver.rho()));
                     self.c_res.replace(resolver.clone());
                     match resolver.apply() {

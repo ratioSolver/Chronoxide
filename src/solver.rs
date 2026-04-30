@@ -34,7 +34,6 @@ pub struct SolverState {
     pub graph: RefCell<Graph>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
-    tx_event: broadcast::Sender<SolverEvent>,
 }
 
 impl SolverState {
@@ -48,10 +47,9 @@ impl SolverState {
             sat: RefCell::new(consensus::Engine::new()),
             ac: RefCell::new(dynamic_ac::Engine::new()),
             lin: RefCell::new(linspire::Engine::new()),
-            graph: RefCell::new(Graph::new(core.clone(), tx_event.clone())),
+            graph: RefCell::new(Graph::new(core.clone(), tx_event)),
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
-            tx_event,
         })
     }
 
@@ -67,18 +65,24 @@ impl SolverState {
             return false;
         }
 
-        while let Some(flaw) = self.graph.borrow().get_most_expensive_flaw() {
-            trace!("Best flaw to resolve: {:?}", flaw.id());
-            self.graph.borrow_mut().set_current_flaw(Some(flaw.clone()));
-            if let Some(resolver) = self.graph.borrow().get_least_expensive_resolver(flaw.as_ref()) {
-                trace!("Best resolver to apply: {:?}", resolver.id());
-                self.graph.borrow_mut().set_current_resolver(Some(resolver.clone()));
-                self.graph.borrow_mut().set_current_resolver(None);
+        loop {
+            let flaw = self.graph.borrow().get_most_expensive_flaw();
+            if let Some(flaw) = flaw {
+                trace!("Best flaw to resolve: {:?}", flaw.id());
+                self.graph.borrow_mut().set_current_flaw(Some(flaw.clone()));
+                let resolver = self.graph.borrow().get_least_expensive_resolver(flaw.as_ref());
+                if let Some(resolver) = resolver {
+                    trace!("Best resolver to apply: {:?}", resolver.id());
+                    self.graph.borrow_mut().set_current_resolver(Some(resolver.clone()));
+                    self.graph.borrow_mut().set_current_resolver(None);
+                } else {
+                    trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
+                    return false;
+                }
+                self.graph.borrow_mut().set_current_flaw(None);
             } else {
-                trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
-                return false;
-            }
-            self.graph.borrow_mut().set_current_flaw(None);
+                break;
+            };
         }
         true
     }
@@ -420,7 +424,9 @@ impl Core for SolverState {
                     .collect();
                 let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
                 let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
-                self.graph.borrow_mut().add_flaw(ClauseFlaw::new(self.slv.clone(), self.graph.borrow().get_num_flaws(), rho, cause, lits));
+                let mut graph = self.graph.borrow_mut();
+                let flaw_id = graph.get_num_flaws();
+                graph.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho, cause, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -537,7 +543,9 @@ impl Core for SolverState {
         let c_res = self.graph.borrow().get_current_resolver();
         let rho = c_res.as_ref().map(|res| res.rho()).unwrap_or(0);
         let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
-        self.graph.borrow_mut().add_flaw(EnumFlaw::new(self.slv.clone(), self.graph.borrow().get_num_flaws(), rho, cause, var.clone()));
+        let mut graph = self.graph.borrow_mut();
+        let flaw_id = graph.get_num_flaws();
+        graph.add_flaw(EnumFlaw::new(self.slv.clone(), flaw_id, rho, cause, var.clone()));
         Ok(var)
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {

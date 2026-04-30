@@ -22,7 +22,7 @@ pub trait Flaw: ToJson {
     fn resolvers(&self) -> Vec<usize>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
-    fn compute_resolvers(self: Rc<Self>);
+    fn compute_resolvers(self: Rc<Self>, start_id: usize) -> Vec<Rc<dyn Resolver>>;
 }
 
 pub trait Resolver: ToJson {
@@ -101,16 +101,19 @@ impl Flaw for ClauseFlaw {
         *self.cost.borrow_mut() = cost;
     }
 
-    fn compute_resolvers(self: Rc<Self>) {
+    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
         let solver = self.solver();
+        let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for lit in &self.lits {
             let c = solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
             assert!(c, "Failed to add clause for OR flaw resolver");
 
-            let resolver = ClauseResolver::new(self.slv.clone(), solver.graph.borrow().get_num_resolvers(), self.id, *lit);
+            let resolver = ClauseResolver::new(self.slv.clone(), start_id, self.id, *lit);
+            start_id += 1;
             self.resolvers.borrow_mut().push(resolver.id());
-            solver.graph.borrow_mut().add_resolver(resolver);
+            result.push(resolver);
         }
+        result
     }
 }
 
@@ -219,9 +222,10 @@ impl Flaw for EnumFlaw {
         *self.cost.borrow_mut() = cost;
     }
 
-    fn compute_resolvers(self: Rc<Self>) {
+    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
         let solver = self.solver();
         let vals = solver.ac.borrow().val(self.var.var);
+        let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for val in vals {
             let (rho, c) = {
                 let mut sat = solver.sat.borrow_mut();
@@ -231,10 +235,12 @@ impl Flaw for EnumFlaw {
             };
             assert!(c, "Failed to add clause for Enum flaw resolver");
 
-            let resolver = EnumResolver::new(self.slv.clone(), solver.graph.borrow().get_num_resolvers(), self.id, rho, val);
+            let resolver = EnumResolver::new(self.slv.clone(), start_id, self.id, rho, val);
+            start_id += 1;
             self.resolvers.borrow_mut().push(resolver.id());
-            solver.graph.borrow_mut().add_resolver(resolver);
+            result.push(resolver);
         }
+        result
     }
 }
 
