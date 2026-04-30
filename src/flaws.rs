@@ -240,6 +240,7 @@ impl Flaw for EnumFlaw {
             self.resolvers.borrow_mut().push(resolver.id());
             result.push(resolver);
         }
+        print!("SAT solver {:}", solver.sat.borrow());
         result
     }
 }

@@ -72,7 +72,6 @@ export function causal_graph(slv: solver.Solver): VNode {
           links,
           edgeSymbol: ['none', 'arrow'],
           edgeSymbolSize: 10,
-          lineStyle: edge_style('active'),
           roam: true,
           label: {
             show: true,
@@ -122,11 +121,11 @@ export function causal_graph(slv: solver.Solver): VNode {
   });
 }
 
-function node_color(cost: number, status: 'active' | 'forbidden' | 'inactive'): string {
+function node_color(cost: number, status: solver.Status): string {
   if (!isFinite(cost))
     return '#1f2937';
 
-  if (status === 'forbidden')
+  if (status === false)
     return '#9ca3af';
 
   // Map [0, ∞) → hue [120, 0] (green → red) using atan normalization
@@ -135,34 +134,34 @@ function node_color(cost: number, status: 'active' | 'forbidden' | 'inactive'): 
   return `hsl(${hue}, 80%, 45%)`;
 }
 
-function node_border(status: 'active' | 'forbidden' | 'inactive'): string {
+function node_border(status: solver.Status): string {
   switch (status) {
-    case 'active':
+    case true:
       return 'solid';
-    case 'inactive':
+    case null:
       return 'dashed';
-    case 'forbidden':
+    case false:
       return 'dotted';
   }
 }
 
-function edge_style(status: 'active' | 'forbidden' | 'inactive') {
+function edge_style(status: solver.Status) {
   switch (status) {
-    case 'active':
+    case true:
       return {
         width: 1.8,
         color: '#1f2937',
         opacity: 0.95,
         type: 'solid'
       };
-    case 'inactive':
+    case null:
       return {
         width: 1.5,
         color: '#6b7280',
         opacity: 0.75,
         type: 'dashed'
       };
-    case 'forbidden':
+    case false:
       return {
         width: 1.2,
         color: '#9ca3af',

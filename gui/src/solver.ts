@@ -197,13 +197,15 @@ export namespace solver {
   type PartialResolverMessage = { rho: number, flaw: string, requirements: string[], intrinsic_cost: Rational, status: Status };
   type ResolverMessage = ({ id: string } & PartialResolverMessage);
   type Rational = { num: number, den: number };
-  type Status = 'active' | 'forbidden' | 'inactive';
+  export type Status = true | false | null;
 
   type ServerMessage =
     | ({ msg_type: 'status' } & SolverMessage)
     | ({ msg_type: 'new-flaw' } & FlawMessage)
+    | ({ msg_type: 'flaw-status-update' } & { id: string, status: Status })
     | ({ msg_type: 'flaw-cost-update' } & { id: string, cost: Rational })
     | ({ msg_type: 'current-flaw' } & { id: string | undefined })
     | ({ msg_type: 'new-resolver' } & ResolverMessage)
+    | ({ msg_type: 'resolver-status-update' } & { id: string, status: Status })
     | ({ msg_type: 'current-resolver' } & { id: string | undefined });
 }
