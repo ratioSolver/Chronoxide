@@ -300,16 +300,6 @@ impl ToJson for Rational {
     }
 }
 
-impl ToJson for LBool {
-    fn to_json(&self) -> Value {
-        match self {
-            LBool::True => "active".into(),
-            LBool::False => "forbidden".into(),
-            LBool::Undef => "inactive".into(),
-        }
-    }
-}
-
 fn flaw_to_json(flaw: &dyn Flaw) -> Value {
     json!({
         "id": format!("f{}", flaw.id()),
