@@ -81,10 +81,10 @@ impl SolverState {
                 }
                 self.graph.borrow_mut().set_current_flaw(None);
             } else {
-                break;
+                trace!("Hurray! No more flaws to resolve. Problem is consistent.");
+                return true;
             };
         }
-        true
     }
 }
 
