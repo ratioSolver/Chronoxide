@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{ClauseFlaw, EnumFlaw},
+    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -579,8 +579,13 @@ impl Core for SolverState {
         unimplemented!()
     }
 
-    fn new_atom(&self, _atom: Rc<Atom>) {
-        unimplemented!()
+    fn new_atom(&self, atom: Rc<Atom>) {
+        let c_res = self.graph.borrow().get_current_resolver();
+        let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
+        let cause = c_res.as_ref().map(|res| res.id());
+        let mut graph = self.graph.borrow_mut();
+        let flaw_id = graph.get_num_flaws();
+        graph.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atom));
     }
 }
 

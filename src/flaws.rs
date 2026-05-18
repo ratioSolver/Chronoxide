@@ -4,7 +4,11 @@ use crate::{
     solver::{SolverError, SolverState},
 };
 use linarith::Rational;
-use riddle::serde_json::{Value, json};
+use riddle::{
+    env::Atom,
+    scope::{Scope, Type},
+    serde_json::{Value, json},
+};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -438,5 +442,63 @@ impl ToJson for Rational {
             "num": self.num,
             "den": self.den
         })
+    }
+}
+
+pub(crate) struct AtomFlaw {
+    flw: FlawData,
+    atom: Rc<Atom>,
+}
+
+impl AtomFlaw {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, atom: Rc<Atom>) -> Rc<Self> {
+        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom })
+    }
+}
+
+impl Flaw for AtomFlaw {
+    fn solver(&self) -> Rc<SolverState> {
+        self.flw.solver()
+    }
+
+    fn id(&self) -> usize {
+        self.flw.id()
+    }
+
+    fn phi(&self) -> VarId {
+        self.flw.phi()
+    }
+
+    fn causes(&self) -> Vec<usize> {
+        self.flw.causes()
+    }
+
+    fn supports(&self) -> Vec<usize> {
+        self.flw.supports()
+    }
+
+    fn resolvers(&self) -> Vec<usize> {
+        self.flw.resolvers()
+    }
+
+    fn cost(&self) -> Rational {
+        self.flw.cost()
+    }
+
+    fn set_cost(&self, cost: Rational) {
+        self.flw.set_cost(cost);
+    }
+
+    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
+        unimplemented!()
+    }
+}
+
+impl ToJson for AtomFlaw {
+    fn to_json(&self) -> Value {
+        let mut json = self.flw.to_json();
+        json["fact"] = self.atom.is_fact().into();
+        json["predicate"] = self.atom.predicate().name().into();
+        json
     }
 }
