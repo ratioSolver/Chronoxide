@@ -1,5 +1,4 @@
-use consensus::Lit;
-use linspire::lin::Lin;
+use linarith::Lin;
 use riddle::{
     env::Var,
     scope::{BoolType, StringType, Type},
@@ -8,6 +7,7 @@ use std::{
     any::Any,
     rc::{Rc, Weak},
 };
+use watchsat::Lit;
 
 #[derive(Debug)]
 pub struct BoolVar {
@@ -78,11 +78,11 @@ impl Var for StringVar {
 #[derive(Debug)]
 pub struct EnumVar {
     var_type: Weak<dyn Type>,
-    pub(crate) var: usize,
+    pub(crate) var: ac3rm::VarId,
 }
 
 impl EnumVar {
-    pub(crate) fn new(var_type: Rc<dyn Type>, var: usize) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, var: ac3rm::VarId) -> Self {
         Self { var_type: Rc::downgrade(&var_type), var }
     }
 }

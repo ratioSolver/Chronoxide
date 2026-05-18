@@ -3,18 +3,18 @@ use crate::{
     objects::EnumVar,
     solver::{SolverError, SolverState},
 };
-use consensus::{Lit, neg, pos};
-use linspire::rational::Rational;
+use linarith::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
+use watchsat::{Lit, VarId, neg, pos};
 
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> usize;
-    fn phi(&self) -> usize;
+    fn phi(&self) -> VarId;
     fn causes(&self) -> Vec<usize>;
     fn supports(&self) -> Vec<usize> {
         Vec::new()
@@ -29,7 +29,7 @@ pub trait Resolver: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> usize;
     fn flaw(&self) -> usize;
-    fn rho(&self) -> usize;
+    fn rho(&self) -> VarId;
     fn apply(&self) -> Result<(), SolverError>;
     fn requirements(&self) -> Vec<usize> {
         Vec::new()
@@ -37,13 +37,13 @@ pub trait Resolver: ToJson {
     fn intrinsic_cost(&self) -> Rational {
         Rational::from(1)
     }
-    fn ac_constraints(&self) -> Option<Vec<usize>> {
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         None
     }
-    fn add_ac_constraint(&self, _constraint: usize) {
+    fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
         unimplemented!()
     }
-    fn lin_constraints(&self) -> Option<usize> {
+    fn lin_constraints(&self) -> Option<linarith::GuardId> {
         None
     }
 }
@@ -51,7 +51,7 @@ pub trait Resolver: ToJson {
 pub(crate) struct ClauseFlaw {
     slv: Weak<SolverState>,
     id: usize,
-    phi: usize,
+    phi: VarId,
     cause: Option<usize>,
     resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
@@ -59,7 +59,7 @@ pub(crate) struct ClauseFlaw {
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, cause: Option<usize>, lits: Vec<Lit>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self {
             slv,
             id,
@@ -81,7 +81,7 @@ impl Flaw for ClauseFlaw {
         self.id
     }
 
-    fn phi(&self) -> usize {
+    fn phi(&self) -> VarId {
         self.phi
     }
 
@@ -105,8 +105,7 @@ impl Flaw for ClauseFlaw {
         let solver = self.solver();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for lit in &self.lits {
-            let c = solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]);
-            assert!(c, "Failed to add clause for OR flaw resolver");
+            solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi)]).expect("Failed to add clause for OR flaw resolver");
 
             let resolver = ClauseResolver::new(self.slv.clone(), start_id, self.id, *lit);
             start_id += 1;
@@ -152,7 +151,7 @@ impl Resolver for ClauseResolver {
         self.flaw
     }
 
-    fn rho(&self) -> usize {
+    fn rho(&self) -> VarId {
         self.lit.var()
     }
 
@@ -172,7 +171,7 @@ impl ToJson for ClauseResolver {
 pub(crate) struct EnumFlaw {
     slv: Weak<SolverState>,
     id: usize,
-    phi: usize,
+    phi: VarId,
     cause: Option<usize>,
     resolvers: RefCell<Vec<usize>>,
     cost: RefCell<Rational>,
@@ -180,7 +179,7 @@ pub(crate) struct EnumFlaw {
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: usize, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
             slv,
             id,
@@ -202,7 +201,7 @@ impl Flaw for EnumFlaw {
         self.id
     }
 
-    fn phi(&self) -> usize {
+    fn phi(&self) -> VarId {
         self.phi
     }
 
@@ -227,13 +226,12 @@ impl Flaw for EnumFlaw {
         let vals = solver.ac.borrow().val(self.var.var);
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for val in vals {
-            let (rho, c) = {
+            let rho = {
                 let mut sat = solver.sat.borrow_mut();
                 let rho = sat.add_var();
-                let c = sat.add_clause(vec![neg(rho), pos(self.phi)]);
-                (rho, c)
+                sat.add_clause(vec![neg(rho), pos(self.phi)]).expect("Failed to add clause for Enum flaw resolver");
+                rho
             };
-            assert!(c, "Failed to add clause for Enum flaw resolver");
 
             let resolver = EnumResolver::new(self.slv.clone(), start_id, self.id, rho, val);
             start_id += 1;
@@ -258,12 +256,12 @@ pub(crate) struct EnumResolver {
     slv: Weak<SolverState>,
     id: usize,
     flaw: usize,
-    rho: usize,
+    rho: VarId,
     val: i32,
 }
 
 impl EnumResolver {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: usize, val: i32) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, val: i32) -> Rc<Self> {
         Rc::new(Self { slv, id, flaw, rho, val })
     }
 }
@@ -281,7 +279,7 @@ impl Resolver for EnumResolver {
         self.flaw
     }
 
-    fn rho(&self) -> usize {
+    fn rho(&self) -> VarId {
         self.rho
     }
 
@@ -310,7 +308,7 @@ impl ToJson for Rational {
 fn flaw_to_json(flaw: &dyn Flaw) -> Value {
     json!({
         "id": format!("f{}", flaw.id()),
-        "phi": flaw.phi(),
+        "phi": *flaw.phi(),
         "causes": flaw.causes().into_iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
         "supports": flaw.supports().into_iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
         "status": flaw.solver().sat.borrow().value(flaw.phi()).to_json(),
@@ -325,6 +323,6 @@ fn resolver_to_json(resolver: &dyn Resolver) -> Value {
         "requirements": resolver.requirements().into_iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
         "intrinsic_cost": resolver.intrinsic_cost().to_json(),
         "status": resolver.solver().sat.borrow().value(resolver.rho()).to_json(),
-        "rho": resolver.rho(),
+        "rho": *resolver.rho(),
     })
 }

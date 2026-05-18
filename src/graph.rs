@@ -3,8 +3,7 @@ use crate::{
     flaws::{Flaw, Resolver},
     solver::{SolverEvent, SolverState},
 };
-use consensus::{LBool, neg, pos};
-use linspire::rational::Rational;
+use linarith::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -13,6 +12,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tracing::trace;
+use watchsat::{LBool, neg, pos};
 
 pub struct Graph {
     slv: Weak<SolverState>,
@@ -59,9 +59,12 @@ impl Graph {
                     }
                 }
                 self.c_res.take(); // Clear the current resolver after processing
-                if !solver.sat.borrow_mut().add_clause(causal_constraint) {
-                    trace!("Failed to add causal constraint for flaw {:?}. Problem is inconsistent.", flaw.id());
-                    return false;
+                match solver.sat.borrow_mut().add_clause(causal_constraint) {
+                    Ok(_) => trace!("Added causal constraint for flaw {:?} successfully.", flaw.id()),
+                    Err(e) => {
+                        trace!("Failed to add causal constraint for flaw {:?} with error: {:?}. Problem is inconsistent.", flaw.id(), e);
+                        return false;
+                    }
                 }
 
                 self.compute_flaw_cost(flaw.clone());
@@ -82,10 +85,10 @@ impl Graph {
         while let Some((flaw, mut visited)) = stack.pop() {
             let mut current_cost = Rational::POSITIVE_INFINITY;
 
-            if solver.sat.borrow().value(flaw.phi()) != &LBool::False && visited.insert(flaw.id()) {
+            if solver.sat.borrow().value(flaw.phi()) != LBool::False && visited.insert(flaw.id()) {
                 for resolver_id in flaw.resolvers() {
                     let resolver = self.resolvers.get(resolver_id).expect("Invalid resolver ID").clone();
-                    if solver.sat.borrow().value(resolver.rho()) != &LBool::False {
+                    if solver.sat.borrow().value(resolver.rho()) != LBool::False {
                         let resolver_cost = self.compute_resolver_cost(resolver.as_ref());
                         if resolver_cost < current_cost {
                             current_cost = resolver_cost;
@@ -121,7 +124,7 @@ impl Graph {
         trace!("Adding flaw: {:?}", flaw.id());
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
-        if solver.sat.borrow().value(flaw.phi()) == &LBool::True {
+        if solver.sat.borrow().value(flaw.phi()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             active_flaws.insert(flaw.id());
             trace!("Active flaws count: {}", active_flaws.len());
@@ -131,8 +134,8 @@ impl Graph {
             let flaw_id = flaw.id();
             let tx_event = self.tx_event.clone();
             let active_flaws = self.active_flaws.clone();
-            move |sat, var| {
-                if sat.value(var) == &LBool::True {
+            move |_var, val| {
+                if val == LBool::True {
                     let mut active_flaws = active_flaws.borrow_mut();
                     if active_flaws.insert(flaw_id) {
                         trace!("Flaw {:?} became active.", flaw_id);
@@ -141,7 +144,7 @@ impl Graph {
                 }
                 let _ = tx_event.send(SolverEvent::FlawStatusUpdate(json!({
                     "id": format!("f{}", flaw_id),
-                    "status": sat.value(var).to_json()
+                    "status": val.to_json()
                 })));
             }
         });
@@ -152,7 +155,7 @@ impl Graph {
         trace!("Adding resolver: {:?}", resolver.id());
         let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
-        if solver.sat.borrow().value(resolver.rho()) == &LBool::True {
+        if solver.sat.borrow().value(resolver.rho()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             if active_flaws.remove(&resolver.flaw()) {
                 trace!("Flaw {:?} resolved by resolver {:?}.", resolver.flaw(), resolver.id());
@@ -160,17 +163,27 @@ impl Graph {
             }
         }
         self.resolvers.push(resolver.clone());
+        let solver_for_listener = solver.clone();
         solver.sat.borrow_mut().add_listener(resolver.rho(), {
             let resolver_id = resolver.id();
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
-            move |sat, var| {
-                if sat.value(var) == &LBool::False {
-                    to_recompute.borrow_mut().insert(resolver.flaw());
+            move |_var, val| {
+                match val {
+                    LBool::True => {
+                        if let Some(constrs) = resolver.ac_constraints() {
+                            let _ = solver_for_listener.ac.borrow_mut().assert_batch(&constrs);
+                        }
+                        to_recompute.borrow_mut().remove(&resolver.flaw());
+                    }
+                    LBool::False => {
+                        to_recompute.borrow_mut().insert(resolver.flaw());
+                    }
+                    LBool::Undef => {}
                 }
                 let _ = tx_event.send(SolverEvent::ResolverStatusUpdate(json!({
                     "id": format!("r{}", resolver_id),
-                    "status": sat.value(var).to_json()
+                    "status": val.to_json()
                 })));
             }
         });
