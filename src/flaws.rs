@@ -233,7 +233,7 @@ impl Flaw for EnumFlaw {
                 rho
             };
 
-            let resolver = EnumResolver::new(self.slv.clone(), start_id, self.id, rho, val);
+            let resolver = EnumResolver::new(self.slv.clone(), start_id, self.id, rho, self.var.clone(), val);
             start_id += 1;
             self.resolvers.borrow_mut().push(resolver.id());
             result.push(resolver);
@@ -257,12 +257,14 @@ pub(crate) struct EnumResolver {
     id: usize,
     flaw: usize,
     rho: VarId,
+    var: Rc<EnumVar>,
     val: i32,
+    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
 }
 
 impl EnumResolver {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, val: i32) -> Rc<Self> {
-        Rc::new(Self { slv, id, flaw, rho, val })
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, var: Rc<EnumVar>, val: i32) -> Rc<Self> {
+        Rc::new(Self { slv, id, flaw, rho, var, val, ac_constraints: RefCell::new(Vec::new()) })
     }
 }
 
@@ -284,7 +286,13 @@ impl Resolver for EnumResolver {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
+        let c_id = self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val));
+        self.ac_constraints.borrow_mut().push(c_id);
         Ok(())
+    }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        Some(self.ac_constraints.borrow().clone())
     }
 }
 

@@ -58,6 +58,15 @@ export namespace solver {
             for (const listener of this.listeners) listener.new_flaw(flaw);
             break;
           }
+          case 'flaw-status-update': {
+            const flaw = this.flaws.get(msg.id);
+            if (flaw) {
+              flaw._set_status(msg.status);
+              for (const listener of this.listeners) listener.flaw_cost_update(flaw);
+            } else
+              console.warn(`Received status update for unknown flaw with id ${msg.id}`);
+            break;
+          }
           case 'flaw-cost-update': {
             const flaw = this.flaws.get(msg.id);
             if (flaw) {
@@ -81,6 +90,15 @@ export namespace solver {
             const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw, msg.intrinsic_cost, msg.requirements, msg.status);
             this.resolvers.set(msg.id, resolver);
             for (const listener of this.listeners) listener.new_resolver(resolver);
+            break;
+          }
+          case 'resolver-status-update': {
+            const resolver = this.resolvers.get(msg.id);
+            if (resolver) {
+              resolver._set_status(msg.status);
+              for (const listener of this.listeners) listener.resolver_status_update(resolver);
+            } else
+              console.warn(`Received status update for unknown resolver with id ${msg.id}`);
             break;
           }
           case 'current-resolver': {
@@ -123,9 +141,11 @@ export namespace solver {
   export interface SolverListener {
     initialized(): void;
     new_flaw(flaw: Flaw): void;
+    flaw_status_update(flaw: Flaw): void;
     flaw_cost_update(flaw: Flaw): void;
     current_flaw(flaw: Flaw | null): void;
     new_resolver(resolver: Resolver): void;
+    resolver_status_update(resolver: Resolver): void;
     current_resolver(resolver: Resolver | null): void;
   }
 
@@ -154,6 +174,7 @@ export namespace solver {
     get_causes(): string[] { return this.causes; }
     get_supports(): string[] { return this.supports; }
     get_status(): Status { return this.status; }
+    _set_status(status: Status) { this.status = status; }
     get_cost(): number { return this.cost.den === 0 ? Infinity : this.cost.num / this.cost.den; }
     _set_cost(cost: Rational) { this.cost = cost; }
   }
@@ -189,6 +210,7 @@ export namespace solver {
       return this.get_intrinsic_cost() + max_req_cost;
     }
     get_status(): Status { return this.status; }
+    _set_status(status: Status) { this.status = status; }
   }
 
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };

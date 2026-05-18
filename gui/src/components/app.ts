@@ -4,13 +4,15 @@ import { solver } from "../solver";
 import { causal_graph } from "./causal_graph";
 import { timelines } from "./timelines";
 
-const app_listener = {
+const app_listener: solver.SolverListener = {
   initialized: () => flick.redraw(),
   new_flaw: (_flaw: solver.Flaw) => { },
+  flaw_status_update: (_flaw: solver.Flaw) => { },
   flaw_cost_update: (_flaw: solver.Flaw) => { },
-  current_flaw: (_flaw_id: number) => { },
+  current_flaw: (_flaw: solver.Flaw | null) => { },
   new_resolver: (_resolver: solver.Resolver) => { },
-  current_resolver: (_resolver_id: number) => { },
+  resolver_status_update: (_resolver: solver.Resolver) => { },
+  current_resolver: (_resolver: solver.Resolver | null) => { },
 };
 
 const landing_page = () => h('div.container.mt-5', [

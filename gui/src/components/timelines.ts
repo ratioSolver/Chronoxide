@@ -33,12 +33,14 @@ export function timelines(slv: solver.Solver): VNode {
     };
   };
 
-  const solver_listener = {
+  const solver_listener: solver.SolverListener = {
     initialized: () => { },
     new_flaw: (_flaw: solver.Flaw) => { },
+    flaw_status_update: (_flaw: solver.Flaw) => { },
     flaw_cost_update: (_flaw: solver.Flaw) => { },
     current_flaw: (_flaw: solver.Flaw | null) => { },
     new_resolver: (_resolver: solver.Resolver) => { },
+    resolver_status_update: (_resolver: solver.Resolver) => { },
     current_resolver: (_resolver: solver.Resolver | null) => { },
   };
 

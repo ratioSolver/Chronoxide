@@ -211,6 +211,10 @@ impl Graph {
         self.c_res.clone()
     }
 
+    pub fn get_flaw(&self, id: usize) -> Option<Rc<dyn Flaw>> {
+        self.flaws.get(id).cloned()
+    }
+
     pub fn get_num_flaws(&self) -> usize {
         self.flaws.len()
     }
