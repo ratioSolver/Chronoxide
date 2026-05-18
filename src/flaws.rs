@@ -127,6 +127,64 @@ pub trait Resolver: ToJson {
     }
 }
 
+pub struct ResolverData {
+    slv: Weak<SolverState>,
+    id: usize,
+    flaw: usize,
+    rho: VarId,
+    requirements: Vec<usize>,
+    intrinsic_cost: Rational,
+}
+
+impl ResolverData {
+    pub fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, requirements: Vec<usize>, intrinsic_cost: Rational) -> Self {
+        Self { slv, id, flaw, rho, requirements, intrinsic_cost }
+    }
+}
+
+impl Resolver for ResolverData {
+    fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    fn id(&self) -> usize {
+        self.id
+    }
+
+    fn flaw(&self) -> usize {
+        self.flaw
+    }
+
+    fn rho(&self) -> VarId {
+        self.rho
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        Ok(())
+    }
+
+    fn requirements(&self) -> Vec<usize> {
+        self.requirements.clone()
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.intrinsic_cost
+    }
+}
+
+impl ToJson for ResolverData {
+    fn to_json(&self) -> Value {
+        json!({
+            "id": format!("r{}", self.id),
+            "flaw": format!("f{}", self.flaw),
+            "requirements": self.requirements.iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
+            "intrinsic_cost": self.intrinsic_cost.to_json(),
+            "status": self.solver().sat.borrow().value(self.rho()).to_json(),
+            "rho": *self.rho(),
+        })
+    }
+}
+
 pub(crate) struct ClauseFlaw {
     flw: FlawData,
     lits: Vec<Lit>,
@@ -192,33 +250,31 @@ impl ToJson for ClauseFlaw {
 }
 
 pub(crate) struct ClauseResolver {
-    slv: Weak<SolverState>,
-    id: usize,
-    flaw: usize,
+    res: ResolverData,
     lit: Lit,
 }
 
 impl ClauseResolver {
     fn new(slv: Weak<SolverState>, id: usize, flaw: usize, lit: Lit) -> Rc<Self> {
-        Rc::new(Self { slv, id, flaw, lit })
+        Rc::new(Self { res: ResolverData::new(slv, id, flaw, lit.var(), Vec::new(), Rational::from(1)), lit })
     }
 }
 
 impl Resolver for ClauseResolver {
     fn solver(&self) -> Rc<SolverState> {
-        self.slv.upgrade().expect("Solver has been dropped")
+        self.res.solver()
     }
 
     fn id(&self) -> usize {
-        self.id
+        self.res.id()
     }
 
     fn flaw(&self) -> usize {
-        self.flaw
+        self.res.flaw()
     }
 
     fn rho(&self) -> VarId {
-        self.lit.var()
+        self.res.rho()
     }
 
     fn apply(&self) -> Result<(), SolverError> {
@@ -228,7 +284,7 @@ impl Resolver for ClauseResolver {
 
 impl ToJson for ClauseResolver {
     fn to_json(&self) -> Value {
-        let mut json = resolver_to_json(self);
+        let mut json = self.res.to_json();
         json["lit"] = self.lit.to_string().into();
         json
     }
@@ -306,10 +362,7 @@ impl ToJson for EnumFlaw {
 }
 
 pub(crate) struct EnumResolver {
-    slv: Weak<SolverState>,
-    id: usize,
-    flaw: usize,
-    rho: VarId,
+    res: ResolverData,
     var: Rc<EnumVar>,
     val: i32,
     ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
@@ -317,25 +370,30 @@ pub(crate) struct EnumResolver {
 
 impl EnumResolver {
     fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, var: Rc<EnumVar>, val: i32) -> Rc<Self> {
-        Rc::new(Self { slv, id, flaw, rho, var, val, ac_constraints: RefCell::new(Vec::new()) })
+        Rc::new(Self {
+            res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
+            var,
+            val,
+            ac_constraints: RefCell::new(Vec::new()),
+        })
     }
 }
 
 impl Resolver for EnumResolver {
     fn solver(&self) -> Rc<SolverState> {
-        self.slv.upgrade().expect("Solver has been dropped")
+        self.res.solver()
     }
 
     fn id(&self) -> usize {
-        self.id
+        self.res.id()
     }
 
     fn flaw(&self) -> usize {
-        self.flaw
+        self.res.flaw()
     }
 
     fn rho(&self) -> VarId {
-        self.rho
+        self.res.rho()
     }
 
     fn apply(&self) -> Result<(), SolverError> {
@@ -351,7 +409,7 @@ impl Resolver for EnumResolver {
 
 impl ToJson for EnumResolver {
     fn to_json(&self) -> Value {
-        let mut json = resolver_to_json(self);
+        let mut json = self.res.to_json();
         json["val"] = self.val.into();
         json
     }
@@ -364,15 +422,4 @@ impl ToJson for Rational {
             "den": self.den
         })
     }
-}
-
-fn resolver_to_json(resolver: &dyn Resolver) -> Value {
-    json!({
-        "id": format!("r{}", resolver.id()),
-        "flaw": format!("f{}", resolver.flaw()),
-        "requirements": resolver.requirements().into_iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
-        "intrinsic_cost": resolver.intrinsic_cost().to_json(),
-        "status": resolver.solver().sat.borrow().value(resolver.rho()).to_json(),
-        "rho": *resolver.rho(),
-    })
 }
