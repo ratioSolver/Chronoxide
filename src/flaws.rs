@@ -94,7 +94,7 @@ impl Flaw for ClauseFlaw {
     }
 
     fn cost(&self) -> Rational {
-        self.cost.borrow().clone()
+        *self.cost.borrow()
     }
 
     fn set_cost(&self, cost: Rational) {
@@ -214,7 +214,7 @@ impl Flaw for EnumFlaw {
     }
 
     fn cost(&self) -> Rational {
-        self.cost.borrow().clone()
+        *self.cost.borrow()
     }
 
     fn set_cost(&self, cost: Rational) {

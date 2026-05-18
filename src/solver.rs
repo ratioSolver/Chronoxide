@@ -332,7 +332,7 @@ impl Core for SolverState {
                 }
             }
             BoolExpr::Eq { left, right, .. } => {
-                let rho = if c_res.is_some() { pos(c_res.as_ref().unwrap().rho()) } else { watchsat::TRUE_LIT };
+                let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
                 if let Some(left_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                         let left_lit = left_var.lit;
@@ -349,7 +349,7 @@ impl Core for SolverState {
                     if let Some(right_var) = right.clone().as_any().downcast_ref::<ArithVar>() {
                         let left_lin = &left_var.lin;
                         let right_lin = &right_var.lin;
-                        let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
+                        let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
                         return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok();
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
@@ -405,13 +405,13 @@ impl Core for SolverState {
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
+                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
                 return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
+                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
                 return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr).is_ok();
             }
             BoolExpr::Or { terms, .. } => {
@@ -422,8 +422,8 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let rho = if c_res.is_some() { pos(c_res.as_ref().unwrap().rho()) } else { watchsat::TRUE_LIT };
-                let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
+                let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
+                let cause = c_res.as_ref().map(|res| res.id());
                 let mut graph = self.graph.borrow_mut();
                 let flaw_id = graph.get_num_flaws();
                 graph.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, lits));
@@ -447,7 +447,7 @@ impl Core for SolverState {
                     }
                 }
                 BoolExpr::Eq { left, right, .. } => {
-                    let rho = if c_res.is_some() { pos(c_res.as_ref().unwrap().rho()) } else { watchsat::TRUE_LIT };
+                    let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
                     if let Some(left_bool_var) = left.clone().as_any().downcast_ref::<BoolVar>() {
                         if let Some(right_bool_var) = right.clone().as_any().downcast_ref::<BoolVar>() {
                             let left_lit = left_bool_var.lit;
@@ -505,13 +505,13 @@ impl Core for SolverState {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
+                    let lin_cnstr = c_res.and_then(|res| res.lin_constraints());
                     return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr).is_ok();
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = if c_res.is_some() { c_res.unwrap().lin_constraints() } else { None };
+                    let lin_cnstr = c_res.and_then(|res| res.lin_constraints());
                     return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
@@ -536,8 +536,8 @@ impl Core for SolverState {
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
         let c_res = self.graph.borrow().get_current_resolver();
-        let rho = if c_res.is_some() { pos(c_res.as_ref().unwrap().rho()) } else { watchsat::TRUE_LIT };
-        let cause = c_res.as_ref().map(|res| Some(res.id())).unwrap_or(None);
+        let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
+        let cause = c_res.as_ref().map(|res| res.id());
         let mut graph = self.graph.borrow_mut();
         let flaw_id = graph.get_num_flaws();
         graph.add_flaw(EnumFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, var.clone()));
