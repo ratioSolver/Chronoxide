@@ -164,20 +164,31 @@ impl Graph {
         }
         self.resolvers.push(resolver.clone());
         let solver_for_listener = solver.clone();
+        let active_flaws = self.active_flaws.clone();
         solver.sat.borrow_mut().add_listener(resolver.rho(), {
             let resolver_id = resolver.id();
+            let resolver_flaw = resolver.flaw();
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
             move |_var, val| {
                 match val {
                     LBool::True => {
                         if let Some(constrs) = resolver.ac_constraints() {
-                            let _ = solver_for_listener.ac.borrow_mut().assert_batch(&constrs);
+                            match solver_for_listener.ac.borrow_mut().assert_batch(&constrs) {
+                                Ok(_) => {
+                                    trace!("Applied AC constraints for resolver {:?} successfully.", resolver_id);
+                                    if active_flaws.borrow_mut().remove(&resolver.flaw()) {
+                                        trace!("Flaw {:?} resolved by resolver {:?}.", resolver_flaw, resolver_id);
+                                        trace!("Active flaws count: {}", active_flaws.borrow().len());
+                                    }
+                                }
+                                Err(e) => trace!("Failed to apply AC constraints for resolver {:?} with error: {:?}. Problem might be inconsistent.", resolver_id, e),
+                            }
                         }
-                        to_recompute.borrow_mut().remove(&resolver.flaw());
+                        to_recompute.borrow_mut().remove(&resolver_flaw);
                     }
                     LBool::False => {
-                        to_recompute.borrow_mut().insert(resolver.flaw());
+                        to_recompute.borrow_mut().insert(resolver_flaw);
                     }
                     LBool::Undef => {}
                 }

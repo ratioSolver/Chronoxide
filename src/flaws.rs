@@ -48,51 +48,47 @@ impl FlawData {
         }
     }
 
+    pub fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn phi(&self) -> VarId {
+        self.phi
+    }
+
+    pub fn causes(&self) -> Vec<usize> {
+        self.causes.clone()
+    }
+
+    pub fn supports(&self) -> Vec<usize> {
+        self.supports.borrow().clone()
+    }
+
     pub fn add_support(&self, support_id: usize) {
         self.supports.borrow_mut().push(support_id);
+    }
+
+    pub fn resolvers(&self) -> Vec<usize> {
+        self.resolvers.borrow().clone()
     }
 
     pub fn add_resolver(&self, resolver_id: usize) {
         self.resolvers.borrow_mut().push(resolver_id);
     }
-}
 
-impl Flaw for FlawData {
-    fn solver(&self) -> Rc<SolverState> {
-        self.slv.upgrade().expect("Solver has been dropped")
-    }
-
-    fn id(&self) -> usize {
-        self.id
-    }
-
-    fn phi(&self) -> VarId {
-        self.phi
-    }
-
-    fn causes(&self) -> Vec<usize> {
-        self.causes.clone()
-    }
-
-    fn resolvers(&self) -> Vec<usize> {
-        self.resolvers.borrow().clone()
-    }
-
-    fn cost(&self) -> Rational {
+    pub fn cost(&self) -> Rational {
         *self.cost.borrow()
     }
 
-    fn set_cost(&self, cost: Rational) {
+    pub fn set_cost(&self, cost: Rational) {
         *self.cost.borrow_mut() = cost;
     }
 
-    fn compute_resolvers(self: Rc<Self>, mut _start_id: usize) -> Vec<Rc<dyn Resolver>> {
-        vec![]
-    }
-}
-
-impl ToJson for FlawData {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         json!({
             "id": format!("f{}", self.id),
             "phi": *self.phi(),
@@ -140,40 +136,32 @@ impl ResolverData {
     pub fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, requirements: Vec<usize>, intrinsic_cost: Rational) -> Self {
         Self { slv, id, flaw, rho, requirements, intrinsic_cost }
     }
-}
 
-impl Resolver for ResolverData {
-    fn solver(&self) -> Rc<SolverState> {
+    pub fn solver(&self) -> Rc<SolverState> {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
-    fn id(&self) -> usize {
+    pub fn id(&self) -> usize {
         self.id
     }
 
-    fn flaw(&self) -> usize {
+    pub fn flaw(&self) -> usize {
         self.flaw
     }
 
-    fn rho(&self) -> VarId {
+    pub fn rho(&self) -> VarId {
         self.rho
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
-        Ok(())
-    }
-
-    fn requirements(&self) -> Vec<usize> {
+    pub fn requirements(&self) -> Vec<usize> {
         self.requirements.clone()
     }
 
-    fn intrinsic_cost(&self) -> Rational {
+    pub fn intrinsic_cost(&self) -> Rational {
         self.intrinsic_cost
     }
-}
 
-impl ToJson for ResolverData {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         json!({
             "id": format!("r{}", self.id),
             "flaw": format!("f{}", self.flaw),
@@ -397,8 +385,7 @@ impl Resolver for EnumResolver {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
-        let c_id = self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val));
-        self.ac_constraints.borrow_mut().push(c_id);
+        self.ac_constraints.borrow_mut().push(self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val)));
         Ok(())
     }
 
