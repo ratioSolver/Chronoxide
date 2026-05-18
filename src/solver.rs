@@ -129,6 +129,12 @@ pub struct Solver {
     pub tx_event: broadcast::Sender<SolverEvent>,
 }
 
+impl Default for Solver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Solver {
     pub fn new() -> Self {
         let (tx_cmd, mut rx_cmd) = mpsc::channel(100);
@@ -369,7 +375,7 @@ impl Core for SolverState {
                         let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Equality(left_var.var, right_var.var));
                         if let Some(res) = c_res.as_ref() {
                             res.add_ac_constraint(constraint_id);
-                            return true;
+                            true
                         } else {
                             return self.ac.borrow_mut().assert(constraint_id).is_ok();
                         }
@@ -377,7 +383,7 @@ impl Core for SolverState {
                         let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(left_var.var, *val as i32));
                         if let Some(res) = c_res.as_ref() {
                             res.add_ac_constraint(constraint_id);
-                            return true;
+                            true
                         } else {
                             return self.ac.borrow_mut().assert(constraint_id).is_ok();
                         }
@@ -391,7 +397,7 @@ impl Core for SolverState {
                                 if let Some(res) = c_res.as_ref() {
                                     res.add_ac_constraint(c);
                                 }
-                                return true;
+                                true
                             }
                             Err(_) => return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok(),
                         }
@@ -489,15 +495,15 @@ impl Core for SolverState {
                                 return self.ac.borrow_mut().assert(constraint_id).is_ok();
                             }
                         }
-                    } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(left) as *const () as usize)) {
-                        if let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(right_var.var, *val as i32));
-                            if let Some(res) = c_res.as_ref() {
-                                res.add_ac_constraint(constraint_id);
-                                return true;
-                            } else {
-                                return self.ac.borrow_mut().assert(constraint_id).is_ok();
-                            }
+                    } else if let Some(val) = self.variants.borrow().get(&(Rc::as_ptr(left) as *const () as usize))
+                        && let Some(right_var) = right.clone().as_any().downcast_ref::<EnumVar>()
+                    {
+                        let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(right_var.var, *val as i32));
+                        if let Some(res) = c_res.as_ref() {
+                            res.add_ac_constraint(constraint_id);
+                            return true;
+                        } else {
+                            return self.ac.borrow_mut().assert(constraint_id).is_ok();
                         }
                     }
                     true
