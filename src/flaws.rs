@@ -3,10 +3,12 @@ use crate::{
     objects::EnumVar,
     solver::{SolverError, SolverState},
 };
+use core::num;
 use linarith::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
     cell::RefCell,
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 use watchsat::{Lit, VarId, neg, pos};
@@ -109,9 +111,7 @@ pub trait Resolver: ToJson {
     fn requirements(&self) -> Vec<usize> {
         Vec::new()
     }
-    fn intrinsic_cost(&self) -> Rational {
-        Rational::from(1)
-    }
+    fn intrinsic_cost(&self) -> Rational;
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         None
     }
@@ -268,6 +268,10 @@ impl Resolver for ClauseResolver {
     fn apply(&self) -> Result<(), SolverError> {
         Ok(())
     }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
 }
 
 impl ToJson for ClauseResolver {
@@ -281,11 +285,16 @@ impl ToJson for ClauseResolver {
 pub(crate) struct EnumFlaw {
     flw: FlawData,
     var: Rc<EnumVar>,
+    rhos: RefCell<HashMap<i32, VarId>>,
 }
 
 impl EnumFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
-        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), var })
+        Rc::new(Self {
+            flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
+            var,
+            rhos: RefCell::new(HashMap::new()),
+        })
     }
 }
 
@@ -321,6 +330,7 @@ impl Flaw for EnumFlaw {
     fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
         let solver = self.solver();
         let vals = solver.ac.borrow().val(self.var.var);
+        let num_vals = vals.len();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for val in vals {
             let rho = {
@@ -330,12 +340,23 @@ impl Flaw for EnumFlaw {
                 rho
             };
 
-            let resolver = EnumResolver::new(self.flw.slv.clone(), start_id, self.id(), rho, self.var.clone(), val);
+            let resolver = EnumResolver::new(self.flw.slv.clone(), start_id, self.id(), rho, self.var.clone(), val, Rational::new(1, num_vals as i64));
             start_id += 1;
             self.flw.add_resolver(resolver.id());
+            self.rhos.borrow_mut().insert(val, rho);
             result.push(resolver);
         }
-        print!("SAT solver {:}", solver.sat.borrow());
+        let c_solver = self.solver().clone();
+        solver.ac.borrow_mut().set_listener(self.var.var, {
+            let rhos = self.rhos.clone();
+            move |_var, c_vals| {
+                for (val, rho) in rhos.borrow().iter() {
+                    if !c_vals.contains(val) {
+                        c_solver.enqueue(neg(*rho));
+                    }
+                }
+            }
+        });
         result
     }
 }
@@ -357,9 +378,9 @@ pub(crate) struct EnumResolver {
 }
 
 impl EnumResolver {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, var: Rc<EnumVar>, val: i32) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, var: Rc<EnumVar>, val: i32, intrinsic_cost: Rational) -> Rc<Self> {
         Rc::new(Self {
-            res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
+            res: ResolverData::new(slv, id, flaw, rho, Vec::new(), intrinsic_cost),
             var,
             val,
             ac_constraints: RefCell::new(Vec::new()),
@@ -387,6 +408,10 @@ impl Resolver for EnumResolver {
     fn apply(&self) -> Result<(), SolverError> {
         self.ac_constraints.borrow_mut().push(self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val)));
         Ok(())
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
     }
 
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {

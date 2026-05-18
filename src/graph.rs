@@ -239,7 +239,19 @@ impl Graph {
     }
 
     pub fn get_least_expensive_resolver(&self, flaw: &dyn Flaw) -> Option<Rc<dyn Resolver>> {
-        flaw.resolvers().iter().filter_map(|id| self.resolvers.get(*id).cloned()).min_by_key(|resolver| self.compute_resolver_cost(resolver.as_ref()))
+        flaw.resolvers()
+            .iter()
+            .filter_map(|id| {
+                let res = self.resolvers.get(*id).cloned();
+                if let Some(resolver) = &res {
+                    let solver = self.slv.upgrade().expect("SolverState has been dropped");
+                    if solver.sat.borrow().value(resolver.rho()) == LBool::False {
+                        return None;
+                    }
+                }
+                res
+            })
+            .min_by_key(|resolver| self.compute_resolver_cost(resolver.as_ref()))
     }
 }
 

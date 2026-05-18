@@ -14,13 +14,13 @@ use riddle::{
 };
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     rc::{Rc, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::trace;
-use watchsat::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
+use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 
 pub struct SolverState {
     core: Rc<CommonCore>,
@@ -29,6 +29,7 @@ pub struct SolverState {
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
     pub graph: RefCell<Graph>,
+    prop_q: RefCell<VecDeque<Lit>>,
     variants: RefCell<HashMap<usize, usize>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
 }
@@ -45,6 +46,7 @@ impl SolverState {
             ac: RefCell::new(ac3rm::Engine::new()),
             lin: RefCell::new(linarith::Engine::new()),
             graph: RefCell::new(Graph::new(core.clone(), tx_event)),
+            prop_q: RefCell::new(VecDeque::new()),
             variants: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
         })
@@ -78,6 +80,24 @@ impl SolverState {
                             return false;
                         }
                     }
+                    while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
+                        let solver = self.slv.upgrade().unwrap();
+                        let mut sat = solver.sat.borrow_mut();
+                        match sat.lit_value(&lit) {
+                            LBool::Undef => match sat.assert(lit) {
+                                Ok(_) => trace!("Applied propagated literal {:?} successfully.", lit),
+                                Err(e) => {
+                                    trace!("Failed to apply propagated literal {:?} with error: {:?}. Problem is inconsistent.", lit, e);
+                                    return false;
+                                }
+                            },
+                            LBool::True => trace!("Skipping propagated literal {:?}: already true.", lit),
+                            LBool::False => {
+                                trace!("Conflicting propagated literal {:?}: already false. Problem is inconsistent.", lit);
+                                return false;
+                            }
+                        }
+                    }
                     self.graph.borrow_mut().set_current_resolver(None);
                 } else {
                     trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
@@ -89,6 +109,10 @@ impl SolverState {
                 return true;
             };
         }
+    }
+
+    pub fn enqueue(&self, lit: Lit) {
+        self.prop_q.borrow_mut().push_back(lit);
     }
 }
 

@@ -4,8 +4,8 @@ version = 4
 
 [[package]]
 name = "ac3rm"
-version = "0.1.0"
-source = "git+https://github.com/pstlab/AC-3rm#9538867e0bfac9d1753e763da5065b9596b39c0c"
+version = "0.1.1"
+source = "git+https://github.com/pstlab/AC-3rm#7a9c6848493a2ec257b09ee346cd4c81890a671d"
 dependencies = [
  "tracing",
 ]
