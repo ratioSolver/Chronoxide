@@ -3,7 +3,6 @@ use crate::{
     objects::EnumVar,
     solver::{SolverError, SolverState},
 };
-use core::num;
 use linarith::Rational;
 use riddle::serde_json::{Value, json};
 use std::{
@@ -18,9 +17,7 @@ pub trait Flaw: ToJson {
     fn id(&self) -> usize;
     fn phi(&self) -> VarId;
     fn causes(&self) -> Vec<usize>;
-    fn supports(&self) -> Vec<usize> {
-        Vec::new()
-    }
+    fn supports(&self) -> Vec<usize>;
     fn resolvers(&self) -> Vec<usize>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
@@ -43,8 +40,8 @@ impl FlawData {
             slv,
             id,
             phi,
-            causes,
-            supports: RefCell::new(Vec::new()),
+            causes: causes.clone(),
+            supports: RefCell::new(causes),
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
         }
@@ -201,6 +198,10 @@ impl Flaw for ClauseFlaw {
         self.flw.causes()
     }
 
+    fn supports(&self) -> Vec<usize> {
+        self.flw.supports()
+    }
+
     fn resolvers(&self) -> Vec<usize> {
         self.flw.resolvers()
     }
@@ -313,6 +314,10 @@ impl Flaw for EnumFlaw {
 
     fn causes(&self) -> Vec<usize> {
         self.flw.causes()
+    }
+
+    fn supports(&self) -> Vec<usize> {
+        self.flw.supports()
     }
 
     fn resolvers(&self) -> Vec<usize> {

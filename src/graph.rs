@@ -77,6 +77,17 @@ impl Graph {
         true
     }
 
+    pub(crate) fn update_costs(&mut self) {
+        trace!("Recomputing costs for flaws: {:?}", self.to_recompute.borrow());
+        let to_recompute = self.to_recompute.borrow().clone();
+        for flaw_id in to_recompute {
+            if let Some(flaw) = self.flaws.get(flaw_id).cloned() {
+                self.compute_flaw_cost(flaw);
+            }
+        }
+        self.to_recompute.borrow_mut().clear();
+    }
+
     fn compute_flaw_cost(&mut self, flaw: Rc<dyn Flaw>) {
         trace!("Computing cost for flaw: {:?}", flaw.id());
         let mut stack: Vec<(Rc<dyn Flaw>, HashSet<usize>)> = vec![(flaw, HashSet::new())];

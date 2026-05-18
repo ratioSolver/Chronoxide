@@ -104,6 +104,7 @@ impl SolverState {
                     return false;
                 }
                 self.graph.borrow_mut().set_current_flaw(None);
+                self.graph.borrow_mut().update_costs();
             } else {
                 trace!("Hurray! No more flaws to resolve. Problem is consistent.");
                 return true;
