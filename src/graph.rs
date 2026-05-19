@@ -19,8 +19,6 @@ pub struct Graph {
     flaws: Vec<Rc<dyn Flaw>>,
     resolvers: Vec<Rc<dyn Resolver>>,
     flaw_q: VecDeque<Rc<dyn Flaw>>,
-    c_flaw: Option<Rc<dyn Flaw>>,
-    c_res: Option<Rc<dyn Resolver>>,
     active_flaws: Rc<RefCell<HashSet<usize>>>,
     to_recompute: Rc<RefCell<HashSet<usize>>>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -33,8 +31,6 @@ impl Graph {
             flaws: Vec::new(),
             resolvers: Vec::new(),
             flaw_q: VecDeque::new(),
-            c_flaw: None,
-            c_res: None,
             active_flaws: Rc::new(RefCell::new(HashSet::new())),
             to_recompute: Rc::new(RefCell::new(HashSet::new())),
             tx_event,
@@ -52,15 +48,16 @@ impl Graph {
                 for resolver in flaw.clone().compute_resolvers(self.resolvers.len()) {
                     self.add_resolver(resolver.clone());
                     causal_constraint.push(pos(resolver.rho()));
-                    solver.set_ctx(Some(resolver.clone()));
-                    self.c_res.replace(resolver.clone());
+                    solver.set_current_resolver(Some(resolver.clone()));
                     match resolver.apply() {
                         Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
-                        Err(e) => trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e),
+                        Err(e) => {
+                            trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e);
+                            return false;
+                        }
                     }
                 }
-                solver.set_ctx(None);
-                self.c_res.take(); // Clear the current resolver after processing
+                solver.set_current_resolver(None);
                 match solver.sat.borrow_mut().add_clause(causal_constraint) {
                     Ok(_) => trace!("Added causal constraint for flaw {:?} successfully.", flaw.id()),
                     Err(e) => {
@@ -213,29 +210,6 @@ impl Graph {
         });
     }
 
-    pub(crate) fn set_current_flaw(&mut self, flaw: Option<Rc<dyn Flaw>>) {
-        self.c_flaw.clone_from(&flaw);
-        if let Some(flaw) = flaw {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("f{}", flaw.id())})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
-        }
-    }
-
-    pub(crate) fn set_current_resolver(&mut self, resolver: Option<Rc<dyn Resolver>>) {
-        self.c_res.clone_from(&resolver);
-        self.slv.upgrade().expect("SolverState has been dropped").set_ctx(resolver.clone());
-        if let Some(resolver) = resolver {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("r{}", resolver.id())})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
-        }
-    }
-
-    pub(crate) fn get_current_resolver(&self) -> Option<Rc<dyn Resolver>> {
-        self.c_res.clone()
-    }
-
     pub fn get_flaw(&self, id: usize) -> Option<Rc<dyn Flaw>> {
         self.flaws.get(id).cloned()
     }
@@ -281,16 +255,9 @@ impl ToJson for LBool {
 
 impl ToJson for Graph {
     fn to_json(&self) -> Value {
-        let mut obj = json!({
+        json!({
             "flaws": self.flaws.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
             "resolvers": self.resolvers.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
-        });
-        if let Some(current_flaw) = self.c_flaw.as_ref() {
-            obj["current_flaw"] = current_flaw.id().into();
-        }
-        if let Some(current_resolver) = self.c_res.as_ref() {
-            obj["current_resolver"] = current_resolver.id().into();
-        }
-        obj
+        })
     }
 }

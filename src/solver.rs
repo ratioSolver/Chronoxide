@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw, Resolver},
+    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw, Flaw, Resolver},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -10,7 +10,7 @@ use riddle::{
     env::{Atom, BoolExpr, Env, Var},
     language::{Disjunction, RiddleError},
     scope::{Field, Method, Predicate, Scope, Type, arith_class},
-    serde_json::Value,
+    serde_json::{Value, json},
 };
 use std::{
     cell::RefCell,
@@ -29,11 +29,13 @@ pub struct SolverState {
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
     pub graph: RefCell<Graph>,
+    c_flaw: RefCell<Option<Rc<dyn Flaw>>>,
+    c_res: RefCell<Option<Rc<dyn Resolver>>>,
     prop_q: RefCell<VecDeque<Lit>>,
-    current_resolver: RefCell<Option<Rc<dyn Resolver>>>,
     variants: RefCell<HashMap<usize, usize>>,
     atom_to_flaw: RefCell<HashMap<usize, Weak<AtomFlaw>>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
+    tx_event: broadcast::Sender<SolverEvent>,
 }
 
 impl SolverState {
@@ -47,21 +49,33 @@ impl SolverState {
             sat: RefCell::new(watchsat::Engine::new()),
             ac: RefCell::new(ac3rm::Engine::new()),
             lin: RefCell::new(linarith::Engine::new()),
-            graph: RefCell::new(Graph::new(core.clone(), tx_event)),
+            graph: RefCell::new(Graph::new(core.clone(), tx_event.clone())),
+            c_flaw: RefCell::new(None),
+            c_res: RefCell::new(None),
             prop_q: RefCell::new(VecDeque::new()),
-            current_resolver: RefCell::new(None),
             variants: RefCell::new(HashMap::new()),
             atom_to_flaw: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
+            tx_event,
         })
     }
 
-    pub(crate) fn set_ctx(&self, resolver: Option<Rc<dyn Resolver>>) {
-        self.current_resolver.replace(resolver);
+    pub(crate) fn set_current_flaw(&self, flaw: Option<Rc<dyn Flaw>>) {
+        if let Some(flaw) = &flaw {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("f{}", flaw.id())})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
+        }
+        self.c_flaw.replace(flaw);
     }
 
-    fn ctx(&self) -> Option<Rc<dyn Resolver>> {
-        self.current_resolver.borrow().clone()
+    pub(crate) fn set_current_resolver(&self, resolver: Option<Rc<dyn Resolver>>) {
+        if let Some(resolver) = &resolver {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("r{}", resolver.id())})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
+        }
+        self.c_res.replace(resolver);
     }
 
     pub(crate) fn atom_key(atom: &Rc<Atom>) -> usize {
@@ -88,11 +102,11 @@ impl SolverState {
             let flaw = self.graph.borrow().get_most_expensive_flaw();
             if let Some(flaw) = flaw {
                 trace!("Best flaw to resolve: {:?}", flaw.id());
-                self.graph.borrow_mut().set_current_flaw(Some(flaw.clone()));
+                self.set_current_flaw(Some(flaw.clone()));
                 let resolver = self.graph.borrow().get_least_expensive_resolver(flaw.as_ref());
                 if let Some(resolver) = resolver {
                     trace!("Best resolver to apply: {:?}", resolver.id());
-                    self.graph.borrow_mut().set_current_resolver(Some(resolver.clone()));
+                    self.set_current_resolver(Some(resolver.clone()));
                     match self.slv.upgrade().unwrap().sat.borrow_mut().assert(pos(resolver.rho())) {
                         Ok(_) => trace!("Applied resolver {:?} successfully.", resolver.id()),
                         Err(e) => {
@@ -118,12 +132,12 @@ impl SolverState {
                             }
                         }
                     }
-                    self.graph.borrow_mut().set_current_resolver(None);
+                    self.set_current_resolver(None);
                 } else {
                     trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
                     return false;
                 }
-                self.graph.borrow_mut().set_current_flaw(None);
+                self.set_current_flaw(None);
                 self.graph.borrow_mut().update_costs();
             } else {
                 trace!("Hurray! No more flaws to resolve. Problem is consistent.");
@@ -139,7 +153,14 @@ impl SolverState {
 
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
-        self.graph.borrow().to_json()
+        let mut slv = self.graph.borrow().to_json();
+        if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
+            slv["current_flaw"] = current_flaw.id().into();
+        }
+        if let Some(current_resolver) = self.c_res.borrow().as_ref() {
+            slv["current_resolver"] = current_resolver.id().into();
+        }
+        slv
     }
 }
 
@@ -372,7 +393,7 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let c_res = self.ctx();
+        let c_res = self.c_res.borrow().clone();
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
@@ -586,7 +607,7 @@ impl Core for SolverState {
         }
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
-        let c_res = self.ctx();
+        let c_res = self.c_res.borrow().clone();
         let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.as_ref().map(|res| res.id());
         let mut graph = self.graph.borrow_mut();
@@ -600,7 +621,7 @@ impl Core for SolverState {
     }
 
     fn new_atom(&self, atom: Rc<Atom>) {
-        let c_res = self.ctx();
+        let c_res = self.c_res.borrow().clone();
         let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.as_ref().map(|res| res.id());
         let sigma = self.sat.borrow_mut().add_var();
