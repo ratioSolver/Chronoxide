@@ -52,12 +52,14 @@ impl Graph {
                 for resolver in flaw.clone().compute_resolvers(self.resolvers.len()) {
                     self.add_resolver(resolver.clone());
                     causal_constraint.push(pos(resolver.rho()));
+                    solver.set_ctx(Some(resolver.clone()));
                     self.c_res.replace(resolver.clone());
                     match resolver.apply() {
                         Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
                         Err(e) => trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e),
                     }
                 }
+                solver.set_ctx(None);
                 self.c_res.take(); // Clear the current resolver after processing
                 match solver.sat.borrow_mut().add_clause(causal_constraint) {
                     Ok(_) => trace!("Added causal constraint for flaw {:?} successfully.", flaw.id()),
@@ -222,6 +224,7 @@ impl Graph {
 
     pub(crate) fn set_current_resolver(&mut self, resolver: Option<Rc<dyn Resolver>>) {
         self.c_res.clone_from(&resolver);
+        self.slv.upgrade().expect("SolverState has been dropped").set_ctx(resolver.clone());
         if let Some(resolver) = resolver {
             let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("r{}", resolver.id())})));
         } else {

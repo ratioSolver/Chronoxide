@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw},
+    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw, Resolver},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -30,7 +30,9 @@ pub struct SolverState {
     pub lin: RefCell<linarith::Engine>,
     pub graph: RefCell<Graph>,
     prop_q: RefCell<VecDeque<Lit>>,
+    current_resolver: RefCell<Option<Rc<dyn Resolver>>>,
     variants: RefCell<HashMap<usize, usize>>,
+    atom_to_flaw: RefCell<HashMap<usize, Weak<AtomFlaw>>>,
     instances_by_id: RefCell<Vec<Rc<dyn Var>>>,
 }
 
@@ -47,9 +49,27 @@ impl SolverState {
             lin: RefCell::new(linarith::Engine::new()),
             graph: RefCell::new(Graph::new(core.clone(), tx_event)),
             prop_q: RefCell::new(VecDeque::new()),
+            current_resolver: RefCell::new(None),
             variants: RefCell::new(HashMap::new()),
+            atom_to_flaw: RefCell::new(HashMap::new()),
             instances_by_id: RefCell::new(vec![]),
         })
+    }
+
+    pub(crate) fn set_ctx(&self, resolver: Option<Rc<dyn Resolver>>) {
+        self.current_resolver.replace(resolver);
+    }
+
+    fn ctx(&self) -> Option<Rc<dyn Resolver>> {
+        self.current_resolver.borrow().clone()
+    }
+
+    pub(crate) fn atom_key(atom: &Rc<Atom>) -> usize {
+        Rc::as_ptr(atom) as *const () as usize
+    }
+
+    pub(crate) fn flaw_of_atom(&self, atom: &Rc<Atom>) -> Option<Rc<AtomFlaw>> {
+        self.atom_to_flaw.borrow().get(&Self::atom_key(atom)).and_then(|flaw| flaw.upgrade())
     }
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
@@ -352,7 +372,7 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let c_res = self.graph.borrow().get_current_resolver();
+        let c_res = self.ctx();
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
@@ -566,7 +586,7 @@ impl Core for SolverState {
         }
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
-        let c_res = self.graph.borrow().get_current_resolver();
+        let c_res = self.ctx();
         let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.as_ref().map(|res| res.id());
         let mut graph = self.graph.borrow_mut();
@@ -580,12 +600,15 @@ impl Core for SolverState {
     }
 
     fn new_atom(&self, atom: Rc<Atom>) {
-        let c_res = self.graph.borrow().get_current_resolver();
+        let c_res = self.ctx();
         let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.as_ref().map(|res| res.id());
+        let sigma = self.sat.borrow_mut().add_var();
         let mut graph = self.graph.borrow_mut();
         let flaw_id = graph.get_num_flaws();
-        graph.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atom));
+        let flaw = AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atom.clone(), sigma);
+        self.atom_to_flaw.borrow_mut().insert(Self::atom_key(&atom), Rc::downgrade(&flaw));
+        graph.add_flaw(flaw);
     }
 }
 

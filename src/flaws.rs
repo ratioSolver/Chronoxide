@@ -6,15 +6,16 @@ use crate::{
 use linarith::Rational;
 use riddle::{
     env::Atom,
-    scope::{Scope, Type},
+    scope::Type,
     serde_json::{Value, json},
 };
 use std::{
+    any::Any,
     cell::RefCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
-use watchsat::{Lit, VarId, neg, pos};
+use watchsat::{LBool, Lit, VarId, neg, pos};
 
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
@@ -26,6 +27,8 @@ pub trait Flaw: ToJson {
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
     fn compute_resolvers(self: Rc<Self>, start_id: usize) -> Vec<Rc<dyn Resolver>>;
+    fn is_expanded(&self) -> bool;
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
 }
 
 pub struct FlawData {
@@ -176,12 +179,17 @@ impl ResolverData {
 
 pub(crate) struct ClauseFlaw {
     flw: FlawData,
+    expanded: RefCell<bool>,
     lits: Vec<Lit>,
 }
 
 impl ClauseFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, lits: Vec<Lit>) -> Rc<Self> {
-        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), lits })
+        Rc::new(Self {
+            flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
+            expanded: RefCell::new(false),
+            lits,
+        })
     }
 }
 
@@ -229,7 +237,16 @@ impl Flaw for ClauseFlaw {
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
+        *self.expanded.borrow_mut() = true;
         result
+    }
+
+    fn is_expanded(&self) -> bool {
+        *self.expanded.borrow()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
     }
 }
 
@@ -242,7 +259,7 @@ impl ToJson for ClauseFlaw {
     }
 }
 
-pub(crate) struct ClauseResolver {
+struct ClauseResolver {
     res: ResolverData,
     lit: Lit,
 }
@@ -289,6 +306,7 @@ impl ToJson for ClauseResolver {
 
 pub(crate) struct EnumFlaw {
     flw: FlawData,
+    expanded: RefCell<bool>,
     var: Rc<EnumVar>,
     rhos: RefCell<HashMap<i32, VarId>>,
 }
@@ -297,6 +315,7 @@ impl EnumFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
             flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
+            expanded: RefCell::new(false),
             var,
             rhos: RefCell::new(HashMap::new()),
         })
@@ -366,7 +385,16 @@ impl Flaw for EnumFlaw {
                 }
             }
         });
+        *self.expanded.borrow_mut() = true;
         result
+    }
+
+    fn is_expanded(&self) -> bool {
+        *self.expanded.borrow()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
     }
 }
 
@@ -379,7 +407,7 @@ impl ToJson for EnumFlaw {
     }
 }
 
-pub(crate) struct EnumResolver {
+struct EnumResolver {
     res: ResolverData,
     var: Rc<EnumVar>,
     val: i32,
@@ -436,23 +464,21 @@ impl ToJson for EnumResolver {
     }
 }
 
-impl ToJson for Rational {
-    fn to_json(&self) -> Value {
-        json!({
-            "num": self.num,
-            "den": self.den
-        })
-    }
-}
-
 pub(crate) struct AtomFlaw {
     flw: FlawData,
+    expanded: RefCell<bool>,
     atom: Rc<Atom>,
+    sigma: VarId,
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, atom: Rc<Atom>) -> Rc<Self> {
-        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom })
+    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, atom: Rc<Atom>, sigma: VarId) -> Rc<Self> {
+        Rc::new(Self {
+            flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
+            expanded: RefCell::new(false),
+            atom,
+            sigma,
+        })
     }
 }
 
@@ -490,7 +516,53 @@ impl Flaw for AtomFlaw {
     }
 
     fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
-        unimplemented!()
+        let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
+        let solver = self.solver();
+        for atom in self.atom.predicate().atoms() {
+            if Rc::ptr_eq(&self.atom, &atom) {
+                continue; // No need to unify an atom with itself
+            }
+            let trgt_flw = solver.flaw_of_atom(&atom).expect("Target atom does not have a corresponding flaw");
+            if !trgt_flw.is_expanded() {
+                continue; // Can't unify with an atom whose flaw hasn't been expanded yet
+            }
+            let mut sat = solver.sat.borrow_mut();
+            if sat.value(trgt_flw.sigma) == LBool::False {
+                continue; // Can't unify with an atom that is already unified with another atom
+            }
+
+            let rho = {
+                let rho = sat.add_var();
+                sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
+                rho
+            };
+            let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone(), atom.clone());
+            start_id += 1;
+            self.flw.add_resolver(resolver.id());
+            result.push(resolver);
+        }
+        let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
+        if self.atom.is_fact() {
+            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
+            let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone());
+            self.flw.add_resolver(resolver.id());
+            result.push(resolver);
+        } else {
+            solver.sat.borrow_mut().add_clause(vec![pos(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
+            let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone());
+            self.flw.add_resolver(resolver.id());
+            result.push(resolver);
+        }
+
+        result
+    }
+
+    fn is_expanded(&self) -> bool {
+        *self.expanded.borrow()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
     }
 }
 
@@ -499,6 +571,161 @@ impl ToJson for AtomFlaw {
         let mut json = self.flw.to_json();
         json["fact"] = self.atom.is_fact().into();
         json["predicate"] = self.atom.predicate().name().into();
+        json["sigma"] = (*self.sigma).into();
         json
+    }
+}
+
+struct UnifyAtom {
+    res: ResolverData,
+    atom: Rc<Atom>,
+    target: Rc<Atom>,
+}
+
+impl UnifyAtom {
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: Rc<Atom>, target: Rc<Atom>) -> Rc<Self> {
+        Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom, target })
+    }
+}
+
+impl Resolver for UnifyAtom {
+    fn solver(&self) -> Rc<SolverState> {
+        self.res.solver()
+    }
+
+    fn id(&self) -> usize {
+        self.res.id()
+    }
+
+    fn flaw(&self) -> usize {
+        self.res.flaw()
+    }
+
+    fn rho(&self) -> VarId {
+        self.res.rho()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        unimplemented!()
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+}
+
+impl ToJson for UnifyAtom {
+    fn to_json(&self) -> Value {
+        let mut json = self.res.to_json();
+        json["atom"] = SolverState::atom_key(&self.atom).into();
+        json["target"] = SolverState::atom_key(&self.target).into();
+        json
+    }
+}
+
+struct ActivateFact {
+    res: ResolverData,
+    atom: Rc<Atom>,
+}
+
+impl ActivateFact {
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: Rc<Atom>) -> Rc<Self> {
+        Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom })
+    }
+}
+
+impl Resolver for ActivateFact {
+    fn solver(&self) -> Rc<SolverState> {
+        self.res.solver()
+    }
+
+    fn id(&self) -> usize {
+        self.res.id()
+    }
+
+    fn flaw(&self) -> usize {
+        self.res.flaw()
+    }
+
+    fn rho(&self) -> VarId {
+        self.res.rho()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        let solver = self.solver();
+        let flaw = solver.flaw_of_atom(&self.atom).expect("Atom does not have a corresponding flaw");
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateFact resolver");
+        Ok(())
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+}
+
+impl ToJson for ActivateFact {
+    fn to_json(&self) -> Value {
+        let mut json = self.res.to_json();
+        json["atom"] = SolverState::atom_key(&self.atom).into();
+        json
+    }
+}
+
+struct ActivateGoal {
+    res: ResolverData,
+    atom: Rc<Atom>,
+}
+
+impl ActivateGoal {
+    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: Rc<Atom>) -> Rc<Self> {
+        Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom })
+    }
+}
+
+impl Resolver for ActivateGoal {
+    fn solver(&self) -> Rc<SolverState> {
+        self.res.solver()
+    }
+
+    fn id(&self) -> usize {
+        self.res.id()
+    }
+
+    fn flaw(&self) -> usize {
+        self.res.flaw()
+    }
+
+    fn rho(&self) -> VarId {
+        self.res.rho()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        let solver = self.solver();
+        let flaw = solver.flaw_of_atom(&self.atom).expect("Atom does not have a corresponding flaw");
+        self.atom.predicate().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Failed to execute goal atom: {}", e)))?;
+
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateGoal resolver");
+        Ok(())
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+}
+
+impl ToJson for ActivateGoal {
+    fn to_json(&self) -> Value {
+        let mut json = self.res.to_json();
+        json["atom"] = SolverState::atom_key(&self.atom).into();
+        json
+    }
+}
+
+impl ToJson for Rational {
+    fn to_json(&self) -> Value {
+        json!({
+            "num": self.num,
+            "den": self.den
+        })
     }
 }

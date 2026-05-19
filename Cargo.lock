@@ -525,7 +525,7 @@ dependencies = [
 [[package]]
 name = "riddle"
 version = "0.1.0"
-source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#071a74d6eba5c69fe18d7447467b95d978d9e36e"
+source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#adb571a66b023d92de2cceca6d89dd21c28f5e89"
 dependencies = [
  "serde_json",
 ]
