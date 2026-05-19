@@ -157,10 +157,6 @@ impl ResolverData {
         self.rho
     }
 
-    pub fn requirements(&self) -> Vec<usize> {
-        self.requirements.clone()
-    }
-
     pub fn intrinsic_cost(&self) -> Rational {
         self.intrinsic_cost
     }
@@ -539,6 +535,7 @@ impl Flaw for AtomFlaw {
             let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone(), atom.clone());
             start_id += 1;
             self.flw.add_resolver(resolver.id());
+            trgt_flw.flw.add_support(resolver.id());
             result.push(resolver);
         }
         let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
