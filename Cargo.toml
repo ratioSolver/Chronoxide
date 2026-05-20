@@ -24,7 +24,7 @@ required-features = ["server"]
 ac3rm = { git = "https://github.com/pstlab/AC-3rm" }
 watchsat = { git = "https://github.com/pstlab/WatchSAT" }
 linarith = { git = "https://github.com/pstlab/LinArith" }
-riddle = { git = "https://github.com/ratioSolver/RiDDLe", branch = "rust" }
+riddle-lang = { git = "https://github.com/pstlab/RiDDLe" }
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.6.10", features = ["fs"], optional = true }
 tokio = { version = "1.52.3", features = ["full"] }

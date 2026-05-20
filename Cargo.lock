@@ -111,7 +111,7 @@ dependencies = [
  "ac3rm",
  "axum",
  "linarith",
- "riddle",
+ "riddle-lang",
  "tokio",
  "tower-http",
  "tracing",
@@ -523,9 +523,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "riddle"
+name = "riddle-lang"
 version = "0.1.0"
-source = "git+https://github.com/ratioSolver/RiDDLe?branch=rust#adb571a66b023d92de2cceca6d89dd21c28f5e89"
+source = "git+https://github.com/pstlab/RiDDLe#5a09259e040b3d186f98800f141dbe5e5d55932c"
 dependencies = [
  "serde_json",
 ]
