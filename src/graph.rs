@@ -4,7 +4,7 @@ use crate::{
     solver::{SolverEvent, SolverState},
 };
 use linarith::Rational;
-use riddle::serde_json::{Value, json};
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::{HashSet, VecDeque},

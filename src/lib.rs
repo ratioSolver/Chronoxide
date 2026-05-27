@@ -1,4 +1,4 @@
-use riddle::serde_json::Value;
+use serde_json::Value;
 
 pub mod solver;
 

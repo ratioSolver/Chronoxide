@@ -10,7 +10,6 @@ use axum::{
     routing::get,
 };
 use chronoxide::solver::{Solver, SolverEvent};
-use riddle::serde_json;
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{Level, error, subscriber, trace};
