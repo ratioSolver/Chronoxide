@@ -423,13 +423,13 @@ impl Core for SolverState {
                             if c_res.is_some() {
                                 return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
                             } else {
-                                return left.value == right.value;
+                                left.value == right.value
                             }
                         } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Equality(left.var, right.var));
                             if let Some(res) = c_res.as_ref() {
                                 res.add_ac_constraint(constraint_id);
-                                return true;
+                                true
                             } else {
                                 return self.ac.borrow_mut().assert(constraint_id).is_ok();
                             }
@@ -442,7 +442,7 @@ impl Core for SolverState {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(left.var, **right as i32));
                             if let Some(res) = c_res.as_ref() {
                                 res.add_ac_constraint(constraint_id);
-                                return true;
+                                true
                             } else {
                                 return self.ac.borrow_mut().assert(constraint_id).is_ok();
                             }
@@ -455,7 +455,7 @@ impl Core for SolverState {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(right.var, **left as i32));
                             if let Some(res) = c_res.as_ref() {
                                 res.add_ac_constraint(constraint_id);
-                                return true;
+                                true
                             } else {
                                 return self.ac.borrow_mut().assert(constraint_id).is_ok();
                             }
@@ -528,10 +528,10 @@ impl Core for SolverState {
                                 let right_lit = right.lit;
                                 if c_res.is_some() { self.sat.borrow_mut().add_clause(vec![!rho, !left_lit, !right_lit]).is_ok() } else { self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]).is_ok() }
                             } else if let (Some(_left), Some(_right)) = (left_v.clone().as_any().downcast_ref::<ArithVar>(), right_v.clone().as_any().downcast_ref::<ArithVar>()) {
-                                return self.assert(Rc::new(BoolExpr::Or {
+                                self.assert(Rc::new(BoolExpr::Or {
                                     var_type: Rc::downgrade(&self.bool_type()),
                                     terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() })],
-                                }));
+                                }))
                             } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<StringVar>(), right_v.clone().as_any().downcast_ref::<StringVar>()) {
                                 if c_res.is_some() && left.value == right.value { self.sat.borrow_mut().add_clause(vec![!rho]).is_ok() } else { true }
                             } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<EnumVar>(), right_v.clone().as_any().downcast_ref::<EnumVar>()) {

@@ -530,7 +530,7 @@ impl Flaw for AtomFlaw {
                 sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
                 rho
             };
-            let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone(), atom.clone());
+            let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom, atom);
             start_id += 1;
             self.flw.add_resolver(resolver.id());
             trgt_flw.flw.add_support(resolver.id());
@@ -539,12 +539,12 @@ impl Flaw for AtomFlaw {
         let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
         if atom.is_fact() {
             solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
-            let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone());
+            let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         } else {
             solver.sat.borrow_mut().add_clause(vec![pos(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
-            let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom.clone());
+            let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
