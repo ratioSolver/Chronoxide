@@ -1,0 +1,13 @@
+/*
+* This problem is intended to introduce some basic concepts about the constraint network and the available constraints on the object variables.
+*/
+
+class Speed {}
+Speed high = new Speed();
+Speed medium = new Speed();
+Speed low = new Speed();
+
+Speed x0, x1, x2;
+x0 != x1;
+x1 != x2;
+x0 != x2;

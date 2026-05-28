@@ -187,13 +187,14 @@ impl Graph {
                             match solver_for_listener.ac.borrow_mut().assert_batch(&constrs) {
                                 Ok(_) => {
                                     trace!("Applied AC constraints for resolver {:?} successfully.", resolver_id);
-                                    if active_flaws.borrow_mut().remove(&resolver.flaw()) {
-                                        trace!("Flaw {:?} resolved by resolver {:?}.", resolver_flaw, resolver_id);
-                                        trace!("Active flaws count: {}", active_flaws.borrow().len());
-                                    }
                                 }
                                 Err(e) => trace!("Failed to apply AC constraints for resolver {:?} with error: {:?}. Problem might be inconsistent.", resolver_id, e),
                             }
+                        }
+                        let mut active_flaws = active_flaws.borrow_mut();
+                        if active_flaws.remove(&resolver.flaw()) {
+                            trace!("Flaw {:?} resolved by resolver {:?}.", resolver_flaw, resolver_id);
+                            trace!("Active flaws count: {}", active_flaws.len());
                         }
                         to_recompute.borrow_mut().remove(&resolver_flaw);
                     }
