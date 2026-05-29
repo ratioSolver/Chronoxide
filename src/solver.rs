@@ -417,7 +417,7 @@ impl Core for SolverState {
                         } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
                             let left_lin = &left.lin;
                             let right_lin = &right.lin;
-                            let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
+                            let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_guard());
                             return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok();
                         } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
                             if c_res.is_some() {
@@ -469,13 +469,13 @@ impl Core for SolverState {
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
+                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_guard());
                 return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_constraints());
+                let lin_cnstr = c_res.as_ref().and_then(|res| res.lin_guard());
                 return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr).is_ok();
             }
             BoolExpr::Or { terms, .. } => {
@@ -578,13 +578,13 @@ impl Core for SolverState {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| res.lin_constraints());
+                    let lin_cnstr = c_res.and_then(|res| res.lin_guard());
                     return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr).is_ok();
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| res.lin_constraints());
+                    let lin_cnstr = c_res.and_then(|res| res.lin_guard());
                     return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),

@@ -119,7 +119,7 @@ pub trait Resolver: ToJson {
     fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
         unimplemented!()
     }
-    fn lin_constraints(&self) -> Option<linarith::GuardId> {
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
         None
     }
 }
@@ -577,11 +577,20 @@ struct UnifyAtom {
     res: ResolverData,
     atom: AtomId,
     target: AtomId,
+    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
+    lin_guard: linarith::GuardId,
 }
 
 impl UnifyAtom {
     fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: AtomId, target: AtomId) -> Rc<Self> {
-        Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom, target })
+        let solver = slv.upgrade().expect("Solver has been dropped");
+        Rc::new(Self {
+            res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
+            atom,
+            target,
+            ac_constraints: RefCell::new(Vec::new()),
+            lin_guard: solver.lin.borrow_mut().add_guard(),
+        })
     }
 }
 
@@ -608,6 +617,14 @@ impl Resolver for UnifyAtom {
 
     fn intrinsic_cost(&self) -> Rational {
         self.res.intrinsic_cost()
+    }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        Some(self.ac_constraints.borrow().clone())
+    }
+
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        Some(self.lin_guard)
     }
 }
 
@@ -671,11 +688,19 @@ impl ToJson for ActivateFact {
 struct ActivateGoal {
     res: ResolverData,
     atom: AtomId,
+    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
+    lin_guard: linarith::GuardId,
 }
 
 impl ActivateGoal {
     fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: AtomId) -> Rc<Self> {
-        Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom })
+        let solver = slv.upgrade().expect("Solver has been dropped");
+        Rc::new(Self {
+            res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
+            atom,
+            ac_constraints: RefCell::new(Vec::new()),
+            lin_guard: solver.lin.borrow_mut().add_guard(),
+        })
     }
 }
 
@@ -708,6 +733,14 @@ impl Resolver for ActivateGoal {
 
     fn intrinsic_cost(&self) -> Rational {
         self.res.intrinsic_cost()
+    }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        Some(self.ac_constraints.borrow().clone())
+    }
+
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        Some(self.lin_guard)
     }
 }
 
