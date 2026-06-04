@@ -18,7 +18,7 @@ pub struct Graph {
     slv: Weak<SolverState>,
     flaws: Vec<Rc<dyn Flaw>>,
     resolvers: Vec<Rc<dyn Resolver>>,
-    flaw_q: VecDeque<Rc<dyn Flaw>>,
+    flaw_q: VecDeque<FlawId>,
     active_flaws: Rc<RefCell<HashSet<FlawId>>>,
     to_recompute: Rc<RefCell<HashSet<FlawId>>>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -42,6 +42,7 @@ impl Graph {
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.pop_front() {
+                let flaw = self.flaws.get(*flaw).expect("Invalid flaw ID").clone();
                 trace!("Processing flaw: {}", flaw);
                 let mut causal_constraint = Vec::new();
                 causal_constraint.push(neg(flaw.phi()));
@@ -140,7 +141,6 @@ impl Graph {
             active_flaws.insert(flaw.id());
             trace!("Active flaws count: {}", active_flaws.len());
         }
-        self.flaws.push(flaw.clone());
         solver.sat.borrow_mut().add_listener(flaw.phi(), {
             let flaw_id = flaw.id();
             let tx_event = self.tx_event.clone();
@@ -159,7 +159,8 @@ impl Graph {
                 })));
             }
         });
-        self.flaw_q.push_back(flaw);
+        self.flaw_q.push_back(flaw.id());
+        self.flaws.push(flaw.clone());
     }
 
     pub fn add_resolver(&mut self, resolver: Rc<dyn Resolver>) {
@@ -173,18 +174,18 @@ impl Graph {
                 trace!("Active flaws count: {}", active_flaws.len());
             }
         }
-        self.resolvers.push(resolver.clone());
         let solver_for_listener = solver.clone();
         let active_flaws = self.active_flaws.clone();
         solver.sat.borrow_mut().add_listener(resolver.rho(), {
             let resolver_id = resolver.id();
             let resolver_flaw = resolver.flaw();
+            let resolver_ac_constraints = resolver.ac_constraints();
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
             move |_var, val| {
                 match val {
                     LBool::True => {
-                        if let Some(constrs) = resolver.ac_constraints() {
+                        if let Some(constrs) = &resolver_ac_constraints {
                             match solver_for_listener.ac.borrow_mut().assert_batch(&constrs) {
                                 Ok(_) => {
                                     trace!("Applied AC constraints for resolver {} successfully.", resolver_id);
@@ -193,7 +194,7 @@ impl Graph {
                             }
                         }
                         let mut active_flaws = active_flaws.borrow_mut();
-                        if active_flaws.remove(&resolver.flaw()) {
+                        if active_flaws.remove(&resolver_flaw) {
                             trace!("Flaw {} resolved by resolver {}.", resolver_flaw, resolver_id);
                             trace!("Active flaws count: {}", active_flaws.len());
                         }
@@ -210,6 +211,7 @@ impl Graph {
                 })));
             }
         });
+        self.resolvers.push(resolver);
     }
 
     pub fn get_flaw(&self, id: usize) -> Option<Rc<dyn Flaw>> {
