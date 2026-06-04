@@ -81,6 +81,7 @@ pub struct FlawData {
     supports: RefCell<Vec<ResolverId>>,
     resolvers: RefCell<Vec<ResolverId>>,
     cost: RefCell<Rational>,
+    expanded: RefCell<bool>,
 }
 
 impl FlawData {
@@ -93,6 +94,7 @@ impl FlawData {
             supports: RefCell::new(causes),
             resolvers: RefCell::new(Vec::new()),
             cost: RefCell::new(Rational::POSITIVE_INFINITY),
+            expanded: RefCell::new(false),
         }
     }
 
@@ -134,6 +136,14 @@ impl FlawData {
 
     pub fn set_cost(&self, cost: Rational) {
         *self.cost.borrow_mut() = cost;
+    }
+
+    pub fn is_expanded(&self) -> bool {
+        *self.expanded.borrow()
+    }
+
+    pub fn set_expanded(&self, expanded: bool) {
+        *self.expanded.borrow_mut() = expanded;
     }
 
     pub fn to_json(&self) -> Value {
@@ -217,17 +227,12 @@ impl ResolverData {
 
 pub(crate) struct ClauseFlaw {
     flw: FlawData,
-    expanded: RefCell<bool>,
     lits: Vec<Lit>,
 }
 
 impl ClauseFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, lits: Vec<Lit>) -> Rc<Self> {
-        Rc::new(Self {
-            flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
-            expanded: RefCell::new(false),
-            lits,
-        })
+        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), lits })
     }
 }
 
@@ -275,12 +280,12 @@ impl Flaw for ClauseFlaw {
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
-        *self.expanded.borrow_mut() = true;
+        self.flw.set_expanded(true);
         result
     }
 
     fn is_expanded(&self) -> bool {
-        *self.expanded.borrow()
+        self.flw.is_expanded()
     }
 }
 
@@ -352,7 +357,6 @@ impl fmt::Display for ClauseResolver {
 
 pub(crate) struct EnumFlaw {
     flw: FlawData,
-    expanded: RefCell<bool>,
     var: Rc<EnumVar>,
     rhos: RefCell<HashMap<i32, VarId>>,
 }
@@ -361,7 +365,6 @@ impl EnumFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
             flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
-            expanded: RefCell::new(false),
             var,
             rhos: RefCell::new(HashMap::new()),
         })
@@ -430,12 +433,12 @@ impl Flaw for EnumFlaw {
                 }
             }
         });
-        *self.expanded.borrow_mut() = true;
+        self.flw.set_expanded(true);
         result
     }
 
     fn is_expanded(&self) -> bool {
-        *self.expanded.borrow()
+        self.flw.is_expanded()
     }
 }
 
@@ -519,19 +522,13 @@ impl fmt::Display for EnumResolver {
 
 pub(crate) struct AtomFlaw {
     flw: FlawData,
-    expanded: RefCell<bool>,
     atom: AtomId,
     sigma: VarId,
 }
 
 impl AtomFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, atom: AtomId, sigma: VarId) -> Rc<Self> {
-        Rc::new(Self {
-            flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
-            expanded: RefCell::new(false),
-            atom,
-            sigma,
-        })
+        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom, sigma })
     }
 }
 
@@ -609,12 +606,12 @@ impl Flaw for AtomFlaw {
             result.push(resolver);
         }
 
-        *self.expanded.borrow_mut() = true;
+        self.flw.set_expanded(true);
         result
     }
 
     fn is_expanded(&self) -> bool {
-        *self.expanded.borrow()
+        self.flw.is_expanded()
     }
 }
 
