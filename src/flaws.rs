@@ -4,14 +4,19 @@ use crate::{
     solver::{SolverError, SolverState},
 };
 use linarith::Rational;
-use riddle::{core::Core, env::AtomId, scope::Type};
+use riddle::{
+    core::Core,
+    env::{AtomId, BoolExpr, Env},
+    scope::{Predicate, Type, get_predicate_by_path},
+};
 use serde_json::{Value, json};
 use std::{
     any::Any,
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     rc::{Rc, Weak},
 };
+use tracing::trace;
 use watchsat::{LBool, Lit, VarId, neg, pos};
 
 pub trait Flaw: ToJson {
@@ -223,6 +228,7 @@ impl Flaw for ClauseFlaw {
         let solver = self.solver();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for lit in &self.lits {
+            trace!("Adding resolver ρ{} to satisfy literal {} and solving flaw ϕ{}", start_id, lit, self.id());
             solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi())]).expect("Failed to add clause for OR flaw resolver");
 
             let resolver = ClauseResolver::new(self.flw.slv.clone(), start_id, self.id(), *lit);
@@ -357,6 +363,7 @@ impl Flaw for EnumFlaw {
             let rho = {
                 let mut sat = solver.sat.borrow_mut();
                 let rho = sat.add_var();
+                trace!("Adding resolver ρ{} to assign value {} to variable {:?} and solving flaw ϕ{}", *rho, val, self.var.var, self.id());
                 sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Enum flaw resolver");
                 rho
             };
@@ -527,6 +534,7 @@ impl Flaw for AtomFlaw {
 
             let rho = {
                 let rho = sat.add_var();
+                trace!("Adding resolver ρ{} to unify atom {} with atom {} and solving flaw ϕ{}", *rho, self.atom, atom, self.id());
                 sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
                 rho
             };
@@ -538,17 +546,20 @@ impl Flaw for AtomFlaw {
         }
         let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
         if atom.is_fact() {
+            trace!("Adding resolver ρ{} to activate fact {} and solving flaw ϕ{}", *rho, self.atom, self.id());
             solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         } else {
-            solver.sat.borrow_mut().add_clause(vec![pos(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
+            trace!("Adding resolver ρ{} to activate goal {} and solving flaw ϕ{}", *rho, self.atom, self.id());
+            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
 
+        *self.expanded.borrow_mut() = true;
         result
     }
 
@@ -612,7 +623,30 @@ impl Resolver for UnifyAtom {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
-        unimplemented!()
+        let solver = self.solver();
+        let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
+        let target = solver.get_atom(self.target).expect("Target atom should exist");
+
+        let mut terms: Vec<Rc<BoolExpr>> = Vec::new();
+        let mut pred_q: VecDeque<Rc<Predicate>> = VecDeque::new();
+        pred_q.push_back(atom.predicate());
+        while let Some(pred) = pred_q.pop_front() {
+            for (_, name) in pred.args() {
+                terms.push(Rc::new(BoolExpr::Eq {
+                    var_type: Rc::downgrade(&solver.bool_type()),
+                    left: atom.get(name).expect("Atom should have the argument").into(),
+                    right: target.get(name).expect("Target atom should have the argument").into(),
+                }));
+            }
+            for super_pred in pred.parents() {
+                pred_q.push_back(get_predicate_by_path(pred.as_ref(), super_pred).expect("Predicate should exist"));
+            }
+        }
+
+        if !solver.assert(Rc::new(BoolExpr::And { var_type: Rc::downgrade(&solver.bool_type()), terms })) {
+            return Err(SolverError::RuntimeError("Failed to unify atoms due to a contradiction".into()));
+        }
+        Ok(())
     }
 
     fn intrinsic_cost(&self) -> Rational {

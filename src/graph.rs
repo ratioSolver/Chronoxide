@@ -50,18 +50,18 @@ impl Graph {
                     causal_constraint.push(pos(resolver.rho()));
                     solver.set_current_resolver(Some(resolver.clone()));
                     match resolver.apply() {
-                        Ok(_) => trace!("Applied resolver {:?} for flaw {:?} successfully", resolver.id(), flaw.id()),
+                        Ok(_) => trace!("Applied resolver ρ{:?} for flaw ϕ{:?} successfully", resolver.id(), flaw.id()),
                         Err(e) => {
-                            trace!("Failed to apply resolver {:?} for flaw {:?} with error: {:?}", resolver.id(), flaw.id(), e);
+                            trace!("Failed to apply resolver ρ{:?} for flaw ϕ{:?} with error: {:?}", resolver.id(), flaw.id(), e);
                             return false;
                         }
                     }
                 }
                 solver.set_current_resolver(None);
                 match solver.sat.borrow_mut().add_clause(causal_constraint) {
-                    Ok(_) => trace!("Added causal constraint for flaw {:?} successfully.", flaw.id()),
+                    Ok(_) => trace!("Added causal constraint for flaw ϕ{:?} successfully.", flaw.id()),
                     Err(e) => {
-                        trace!("Failed to add causal constraint for flaw {:?} with error: {:?}. Problem is inconsistent.", flaw.id(), e);
+                        trace!("Failed to add causal constraint for flaw ϕ{:?} with error: {:?}. Problem is inconsistent.", flaw.id(), e);
                         return false;
                     }
                 }
@@ -88,7 +88,7 @@ impl Graph {
     }
 
     fn compute_flaw_cost(&mut self, flaw: Rc<dyn Flaw>) {
-        trace!("Computing cost for flaw: {:?}", flaw.id());
+        trace!("Computing cost for flaw: ϕ{:?}", flaw.id());
         let mut stack: Vec<(Rc<dyn Flaw>, HashSet<usize>)> = vec![(flaw, HashSet::new())];
 
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
@@ -131,7 +131,7 @@ impl Graph {
     }
 
     pub fn add_flaw(&mut self, flaw: Rc<dyn Flaw>) {
-        trace!("Adding flaw: {:?}", flaw.id());
+        trace!("Adding flaw: ϕ{:?}", flaw.id());
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         if solver.sat.borrow().value(flaw.phi()) == LBool::True {
@@ -148,7 +148,7 @@ impl Graph {
                 if val == LBool::True {
                     let mut active_flaws = active_flaws.borrow_mut();
                     if active_flaws.insert(flaw_id) {
-                        trace!("Flaw {:?} became active.", flaw_id);
+                        trace!("Flaw ϕ{:?} became active.", flaw_id);
                         trace!("Active flaws count: {}", active_flaws.len());
                     }
                 }
@@ -162,13 +162,13 @@ impl Graph {
     }
 
     pub fn add_resolver(&mut self, resolver: Rc<dyn Resolver>) {
-        trace!("Adding resolver: {:?}", resolver.id());
+        trace!("Adding resolver: ρ{:?}", resolver.id());
         let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         if solver.sat.borrow().value(resolver.rho()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             if active_flaws.remove(&resolver.flaw()) {
-                trace!("Flaw {:?} resolved by resolver {:?}.", resolver.flaw(), resolver.id());
+                trace!("Flaw ϕ{:?} resolved by resolver ρ{:?}.", resolver.flaw(), resolver.id());
                 trace!("Active flaws count: {}", active_flaws.len());
             }
         }
@@ -193,7 +193,7 @@ impl Graph {
                         }
                         let mut active_flaws = active_flaws.borrow_mut();
                         if active_flaws.remove(&resolver.flaw()) {
-                            trace!("Flaw {:?} resolved by resolver {:?}.", resolver_flaw, resolver_id);
+                            trace!("Flaw ϕ{:?} resolved by resolver ρ{:?}.", resolver_flaw, resolver_id);
                             trace!("Active flaws count: {}", active_flaws.len());
                         }
                         to_recompute.borrow_mut().remove(&resolver_flaw);
