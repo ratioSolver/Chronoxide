@@ -61,7 +61,7 @@ impl fmt::Display for ResolverId {
     }
 }
 
-pub trait Flaw: ToJson {
+pub trait Flaw: ToJson + fmt::Display {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
@@ -150,7 +150,7 @@ impl FlawData {
     }
 }
 
-pub trait Resolver: ToJson {
+pub trait Resolver: ToJson + fmt::Display {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> ResolverId;
     fn flaw(&self) -> FlawId;
@@ -270,10 +270,9 @@ impl Flaw for ClauseFlaw {
         let solver = self.solver();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for lit in &self.lits {
-            trace!("Adding resolver {} to satisfy literal {} and solving flaw {}", start_id, lit, self.id());
-            solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi())]).expect("Failed to add clause for OR flaw resolver");
-
             let resolver = ClauseResolver::new(self.flw.slv.clone(), start_id, self.id(), *lit);
+            trace!("Created resolver {}", resolver);
+            solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi())]).expect("Failed to add clause for OR flaw resolver");
             *start_id += 1;
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
@@ -297,6 +296,12 @@ impl ToJson for ClauseFlaw {
         json["kind"] = "clause".into();
         json["lits"] = self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>().into();
         json
+    }
+}
+
+impl fmt::Display for ClauseFlaw {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}, {}) ClauseFlaw: [{}]", self.id(), self.phi(), self.cost(), self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>().join(" ∨ "))
     }
 }
 
@@ -342,6 +347,12 @@ impl ToJson for ClauseResolver {
         let mut json = self.res.to_json();
         json["lit"] = self.lit.to_string().into();
         json
+    }
+}
+
+impl fmt::Display for ClauseResolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}) ClauseResolver: {}", self.id(), self.rho(), self.lit)
     }
 }
 
@@ -402,15 +413,13 @@ impl Flaw for EnumFlaw {
         let num_vals = vals.len();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for val in vals {
-            let rho = {
-                let mut sat = solver.sat.borrow_mut();
-                let rho = sat.add_var();
-                trace!("Adding resolver {} to assign value {} to variable {:?} and solving flaw {}", start_id, val, self.var.var, self.id());
-                sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Enum flaw resolver");
-                rho
-            };
+            let mut sat = solver.sat.borrow_mut();
+            let rho = sat.add_var();
 
             let resolver = EnumResolver::new(self.flw.slv.clone(), start_id, self.id(), rho, self.var.clone(), val, Rational::new(1, num_vals as i64));
+            trace!("Created resolver {}", resolver);
+            sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Enum flaw resolver");
+
             *start_id += 1;
             self.flw.add_resolver(resolver.id());
             self.rhos.borrow_mut().insert(val, rho);
@@ -446,6 +455,12 @@ impl ToJson for EnumFlaw {
         json["kind"] = "enum".into();
         json["var"] = format!("{:?}", self.var.var).into();
         json
+    }
+}
+
+impl fmt::Display for EnumFlaw {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}, {}) EnumFlaw: {:?} ∈ {{{}}}", self.id(), self.phi(), self.cost(), self.var.var, self.solver().ac.borrow().val(self.var.var).iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "))
     }
 }
 
@@ -503,6 +518,12 @@ impl ToJson for EnumResolver {
         let mut json = self.res.to_json();
         json["val"] = self.val.into();
         json
+    }
+}
+
+impl fmt::Display for EnumResolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}) EnumResolver: {:?} = {}", self.id(), self.rho(), self.var.var, self.val)
     }
 }
 
@@ -574,13 +595,10 @@ impl Flaw for AtomFlaw {
                 continue; // Can't unify with an atom that is already unified with another atom
             }
 
-            let rho = {
-                let rho = sat.add_var();
-                trace!("Adding resolver {} to unify atom {} with atom {} and solving flaw {}", start_id, self.atom, atom, self.id());
-                sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
-                rho
-            };
+            let rho = sat.add_var();
             let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom, atom);
+            trace!("Created resolver {}", resolver);
+            sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             *start_id += 1;
             self.flw.add_resolver(resolver.id());
             trgt_flw.flw.add_support(resolver.id());
@@ -588,15 +606,15 @@ impl Flaw for AtomFlaw {
         }
         let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
         if atom.is_fact() {
-            trace!("Adding resolver {} to activate fact {} and solving flaw {}", start_id, self.atom, self.id());
-            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
+            trace!("Created resolver {}", resolver);
+            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         } else {
-            trace!("Adding resolver {} to activate goal {} and solving flaw {}", start_id, self.atom, self.id());
-            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
+            trace!("Created resolver {}", resolver);
+            solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
@@ -623,6 +641,12 @@ impl ToJson for AtomFlaw {
         json["predicate"] = atom.predicate().name().into();
         json["sigma"] = (*self.sigma).into();
         json
+    }
+}
+
+impl fmt::Display for AtomFlaw {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}, {}) AtomFlaw: {} ({})", self.id(), self.phi(), self.cost(), self.atom, self.sigma)
     }
 }
 
@@ -713,6 +737,12 @@ impl ToJson for UnifyAtom {
     }
 }
 
+impl fmt::Display for UnifyAtom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}) UnifyAtom: {} == {}", self.id(), self.rho(), self.atom, self.target)
+    }
+}
+
 struct ActivateFact {
     res: ResolverData,
     atom: AtomId,
@@ -758,6 +788,12 @@ impl ToJson for ActivateFact {
         let mut json = self.res.to_json();
         json["atom"] = (*self.atom).into();
         json
+    }
+}
+
+impl fmt::Display for ActivateFact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}) ActivateFact: {}", self.id(), self.rho(), self.atom)
     }
 }
 
@@ -834,5 +870,11 @@ impl ToJson for Rational {
             "num": self.num,
             "den": self.den
         })
+    }
+}
+
+impl fmt::Display for ActivateGoal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}) ActivateGoal: {}", self.id(), self.rho(), self.atom)
     }
 }

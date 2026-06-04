@@ -42,26 +42,27 @@ impl Graph {
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.pop_front() {
-                trace!("Processing flaw: {}", flaw.id());
+                trace!("Processing flaw: {}", flaw);
                 let mut causal_constraint = Vec::new();
                 causal_constraint.push(neg(flaw.phi()));
                 for resolver in flaw.clone().compute_resolvers(ResolverId(self.resolvers.len())) {
                     self.add_resolver(resolver.clone());
                     causal_constraint.push(pos(resolver.rho()));
                     solver.set_current_resolver(Some(resolver.clone()));
+                    trace!("Applying resolver {}", resolver);
                     match resolver.apply() {
-                        Ok(_) => trace!("Applied resolver {} for flaw {} successfully", resolver.id(), flaw.id()),
+                        Ok(_) => trace!("Resolver applied successfully."),
                         Err(e) => {
-                            trace!("Failed to apply resolver {} for flaw {} with error: {:?}", resolver.id(), flaw.id(), e);
+                            trace!("Failed to apply resolver with error: {:?}", e);
                             return false;
                         }
                     }
                 }
                 solver.set_current_resolver(None);
                 match solver.sat.borrow_mut().add_clause(causal_constraint) {
-                    Ok(_) => trace!("Added causal constraint for flaw {} successfully.", flaw.id()),
+                    Ok(_) => trace!("Causal constraint added successfully"),
                     Err(e) => {
-                        trace!("Failed to add causal constraint for flaw {} with error: {:?}. Problem is inconsistent.", flaw.id(), e);
+                        trace!("Failed to add causal constraint with error: {:?}", e);
                         return false;
                     }
                 }
@@ -131,7 +132,7 @@ impl Graph {
     }
 
     pub fn add_flaw(&mut self, flaw: Rc<dyn Flaw>) {
-        trace!("Adding flaw: {}", flaw.id());
+        trace!("Adding flaw: {}", flaw);
         let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         if solver.sat.borrow().value(flaw.phi()) == LBool::True {
@@ -162,7 +163,7 @@ impl Graph {
     }
 
     pub fn add_resolver(&mut self, resolver: Rc<dyn Resolver>) {
-        trace!("Adding resolver: {}", resolver.id());
+        trace!("Adding resolver: {}", resolver);
         let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         if solver.sat.borrow().value(resolver.rho()) == LBool::True {
