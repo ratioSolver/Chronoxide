@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw, Flaw, Resolver},
+    flaws::{AtomFlaw, ClauseFlaw, EnumFlaw, Flaw, FlawId, Resolver},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -94,16 +94,16 @@ impl SolverState {
         loop {
             let flaw = self.graph.borrow().get_most_expensive_flaw();
             if let Some(flaw) = flaw {
-                trace!("Best flaw to resolve: {:?}", flaw.id());
+                trace!("Best flaw to resolve: {}", flaw.id());
                 self.set_current_flaw(Some(flaw.clone()));
                 let resolver = self.graph.borrow().get_least_expensive_resolver(flaw.as_ref());
                 if let Some(resolver) = resolver {
-                    trace!("Best resolver to apply: {:?}", resolver.id());
+                    trace!("Best resolver to apply: {}", resolver.id());
                     self.set_current_resolver(Some(resolver.clone()));
                     match self.slv.upgrade().unwrap().sat.borrow_mut().assert(pos(resolver.rho())) {
-                        Ok(_) => trace!("Applied resolver {:?} successfully.", resolver.id()),
+                        Ok(_) => trace!("Applied resolver {} successfully.", resolver.id()),
                         Err(e) => {
-                            trace!("Failed to apply resolver {:?} with error: {:?}. Problem is inconsistent.", resolver.id(), e);
+                            trace!("Failed to apply resolver {} with error: {:?}. Problem is inconsistent.", resolver.id(), e);
                             return false;
                         }
                     }
@@ -127,7 +127,7 @@ impl SolverState {
                     }
                     self.set_current_resolver(None);
                 } else {
-                    trace!("No applicable resolver found for flaw {:?}. Problem is inconsistent.", flaw.id());
+                    trace!("No applicable resolver found for flaw {}. Problem is inconsistent.", flaw.id());
                     return false;
                 }
                 self.set_current_flaw(None);
@@ -148,10 +148,10 @@ impl ToJson for SolverState {
     fn to_json(&self) -> Value {
         let mut slv = self.graph.borrow().to_json();
         if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
-            slv["current_flaw"] = current_flaw.id().into();
+            slv["current_flaw"] = (*current_flaw.id()).into();
         }
         if let Some(current_resolver) = self.c_res.borrow().as_ref() {
-            slv["current_resolver"] = current_resolver.id().into();
+            slv["current_resolver"] = (*current_resolver.id()).into();
         }
         slv
     }
@@ -498,7 +498,7 @@ impl Core for SolverState {
                 let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
                 let cause = c_res.as_ref().map(|res| res.id());
                 let mut graph = self.graph.borrow_mut();
-                let flaw_id = graph.get_num_flaws();
+                let flaw_id = FlawId(graph.get_num_flaws());
                 graph.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, lits));
                 true
             }
@@ -600,7 +600,7 @@ impl Core for SolverState {
         let rho = c_res.as_ref().map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.as_ref().map(|res| res.id());
         let mut graph = self.graph.borrow_mut();
-        let flaw_id = graph.get_num_flaws();
+        let flaw_id = FlawId(graph.get_num_flaws());
         graph.add_flaw(EnumFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, var.clone()));
         Ok(Slot::Primitive(var))
     }
@@ -622,7 +622,7 @@ impl Core for SolverState {
         let cause = c_res.as_ref().map(|res| res.id());
         let sigma = self.sat.borrow_mut().add_var();
         let mut graph = self.graph.borrow_mut();
-        let flaw_id = graph.get_num_flaws();
+        let flaw_id = FlawId(graph.get_num_flaws());
         let flaw = AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm, sigma);
         self.atom_to_flaw.borrow_mut().push(Rc::downgrade(&flaw));
         graph.add_flaw(flaw);

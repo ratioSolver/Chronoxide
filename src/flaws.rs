@@ -14,37 +14,79 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::{HashMap, VecDeque},
+    fmt,
+    ops::{Deref, DerefMut},
     rc::{Rc, Weak},
 };
 use tracing::trace;
 use watchsat::{LBool, Lit, VarId, neg, pos};
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FlawId(pub(crate) usize);
+
+impl Deref for FlawId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for FlawId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ϕ{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ResolverId(pub(crate) usize);
+
+impl Deref for ResolverId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ResolverId {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl fmt::Display for ResolverId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ρ{}", self.0)
+    }
+}
+
 pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
-    fn id(&self) -> usize;
+    fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
-    fn causes(&self) -> Vec<usize>;
-    fn supports(&self) -> Vec<usize>;
-    fn resolvers(&self) -> Vec<usize>;
+    fn causes(&self) -> Vec<ResolverId>;
+    fn supports(&self) -> Vec<ResolverId>;
+    fn resolvers(&self) -> Vec<ResolverId>;
     fn cost(&self) -> Rational;
     fn set_cost(&self, cost: Rational);
-    fn compute_resolvers(self: Rc<Self>, start_id: usize) -> Vec<Rc<dyn Resolver>>;
+    fn compute_resolvers(self: Rc<Self>, start_id: ResolverId) -> Vec<Rc<dyn Resolver>>;
     fn is_expanded(&self) -> bool;
     fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
 }
 
 pub struct FlawData {
     slv: Weak<SolverState>,
-    id: usize,
+    id: FlawId,
     phi: VarId,
-    causes: Vec<usize>,
-    supports: RefCell<Vec<usize>>,
-    resolvers: RefCell<Vec<usize>>,
+    causes: Vec<ResolverId>,
+    supports: RefCell<Vec<ResolverId>>,
+    resolvers: RefCell<Vec<ResolverId>>,
     cost: RefCell<Rational>,
 }
 
 impl FlawData {
-    pub fn new(slv: Weak<SolverState>, id: usize, phi: VarId, causes: Vec<usize>) -> Self {
+    pub fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, causes: Vec<ResolverId>) -> Self {
         Self {
             slv,
             id,
@@ -60,7 +102,7 @@ impl FlawData {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(&self) -> FlawId {
         self.id
     }
 
@@ -68,23 +110,23 @@ impl FlawData {
         self.phi
     }
 
-    pub fn causes(&self) -> Vec<usize> {
+    pub fn causes(&self) -> Vec<ResolverId> {
         self.causes.clone()
     }
 
-    pub fn supports(&self) -> Vec<usize> {
+    pub fn supports(&self) -> Vec<ResolverId> {
         self.supports.borrow().clone()
     }
 
-    pub fn add_support(&self, support_id: usize) {
+    pub fn add_support(&self, support_id: ResolverId) {
         self.supports.borrow_mut().push(support_id);
     }
 
-    pub fn resolvers(&self) -> Vec<usize> {
+    pub fn resolvers(&self) -> Vec<ResolverId> {
         self.resolvers.borrow().clone()
     }
 
-    pub fn add_resolver(&self, resolver_id: usize) {
+    pub fn add_resolver(&self, resolver_id: ResolverId) {
         self.resolvers.borrow_mut().push(resolver_id);
     }
 
@@ -110,11 +152,11 @@ impl FlawData {
 
 pub trait Resolver: ToJson {
     fn solver(&self) -> Rc<SolverState>;
-    fn id(&self) -> usize;
-    fn flaw(&self) -> usize;
+    fn id(&self) -> ResolverId;
+    fn flaw(&self) -> FlawId;
     fn rho(&self) -> VarId;
     fn apply(&self) -> Result<(), SolverError>;
-    fn requirements(&self) -> Vec<usize> {
+    fn requirements(&self) -> Vec<FlawId> {
         Vec::new()
     }
     fn intrinsic_cost(&self) -> Rational;
@@ -131,15 +173,15 @@ pub trait Resolver: ToJson {
 
 pub struct ResolverData {
     slv: Weak<SolverState>,
-    id: usize,
-    flaw: usize,
+    id: ResolverId,
+    flaw: FlawId,
     rho: VarId,
-    requirements: Vec<usize>,
+    requirements: Vec<FlawId>,
     intrinsic_cost: Rational,
 }
 
 impl ResolverData {
-    pub fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, requirements: Vec<usize>, intrinsic_cost: Rational) -> Self {
+    pub fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, requirements: Vec<FlawId>, intrinsic_cost: Rational) -> Self {
         Self { slv, id, flaw, rho, requirements, intrinsic_cost }
     }
 
@@ -147,11 +189,11 @@ impl ResolverData {
         self.slv.upgrade().expect("Solver has been dropped")
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(&self) -> ResolverId {
         self.id
     }
 
-    pub fn flaw(&self) -> usize {
+    pub fn flaw(&self) -> FlawId {
         self.flaw
     }
 
@@ -182,7 +224,7 @@ pub(crate) struct ClauseFlaw {
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, lits: Vec<Lit>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, lits: Vec<Lit>) -> Rc<Self> {
         Rc::new(Self {
             flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
             expanded: RefCell::new(false),
@@ -196,7 +238,7 @@ impl Flaw for ClauseFlaw {
         self.flw.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> FlawId {
         self.flw.id()
     }
 
@@ -204,15 +246,15 @@ impl Flaw for ClauseFlaw {
         self.flw.phi()
     }
 
-    fn causes(&self) -> Vec<usize> {
+    fn causes(&self) -> Vec<ResolverId> {
         self.flw.causes()
     }
 
-    fn supports(&self) -> Vec<usize> {
+    fn supports(&self) -> Vec<ResolverId> {
         self.flw.supports()
     }
 
-    fn resolvers(&self) -> Vec<usize> {
+    fn resolvers(&self) -> Vec<ResolverId> {
         self.flw.resolvers()
     }
 
@@ -224,15 +266,15 @@ impl Flaw for ClauseFlaw {
         self.flw.set_cost(cost);
     }
 
-    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
+    fn compute_resolvers(self: Rc<Self>, mut start_id: ResolverId) -> Vec<Rc<dyn Resolver>> {
         let solver = self.solver();
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         for lit in &self.lits {
-            trace!("Adding resolver ρ{} to satisfy literal {} and solving flaw ϕ{}", start_id, lit, self.id());
+            trace!("Adding resolver {} to satisfy literal {} and solving flaw {}", start_id, lit, self.id());
             solver.sat.borrow_mut().add_clause(vec![!lit, pos(self.phi())]).expect("Failed to add clause for OR flaw resolver");
 
             let resolver = ClauseResolver::new(self.flw.slv.clone(), start_id, self.id(), *lit);
-            start_id += 1;
+            *start_id += 1;
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         }
@@ -264,7 +306,7 @@ struct ClauseResolver {
 }
 
 impl ClauseResolver {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, lit: Lit) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, lit: Lit) -> Rc<Self> {
         Rc::new(Self { res: ResolverData::new(slv, id, flaw, lit.var(), Vec::new(), Rational::from(1)), lit })
     }
 }
@@ -274,11 +316,11 @@ impl Resolver for ClauseResolver {
         self.res.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> ResolverId {
         self.res.id()
     }
 
-    fn flaw(&self) -> usize {
+    fn flaw(&self) -> FlawId {
         self.res.flaw()
     }
 
@@ -311,7 +353,7 @@ pub(crate) struct EnumFlaw {
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, var: Rc<EnumVar>) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, var: Rc<EnumVar>) -> Rc<Self> {
         Rc::new(Self {
             flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
             expanded: RefCell::new(false),
@@ -326,7 +368,7 @@ impl Flaw for EnumFlaw {
         self.flw.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> FlawId {
         self.flw.id()
     }
 
@@ -334,15 +376,15 @@ impl Flaw for EnumFlaw {
         self.flw.phi()
     }
 
-    fn causes(&self) -> Vec<usize> {
+    fn causes(&self) -> Vec<ResolverId> {
         self.flw.causes()
     }
 
-    fn supports(&self) -> Vec<usize> {
+    fn supports(&self) -> Vec<ResolverId> {
         self.flw.supports()
     }
 
-    fn resolvers(&self) -> Vec<usize> {
+    fn resolvers(&self) -> Vec<ResolverId> {
         self.flw.resolvers()
     }
 
@@ -354,7 +396,7 @@ impl Flaw for EnumFlaw {
         self.flw.set_cost(cost);
     }
 
-    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
+    fn compute_resolvers(self: Rc<Self>, mut start_id: ResolverId) -> Vec<Rc<dyn Resolver>> {
         let solver = self.solver();
         let vals = solver.ac.borrow().val(self.var.var);
         let num_vals = vals.len();
@@ -363,13 +405,13 @@ impl Flaw for EnumFlaw {
             let rho = {
                 let mut sat = solver.sat.borrow_mut();
                 let rho = sat.add_var();
-                trace!("Adding resolver ρ{} to assign value {} to variable {:?} and solving flaw ϕ{}", *rho, val, self.var.var, self.id());
+                trace!("Adding resolver {} to assign value {} to variable {:?} and solving flaw {}", start_id, val, self.var.var, self.id());
                 sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Enum flaw resolver");
                 rho
             };
 
             let resolver = EnumResolver::new(self.flw.slv.clone(), start_id, self.id(), rho, self.var.clone(), val, Rational::new(1, num_vals as i64));
-            start_id += 1;
+            *start_id += 1;
             self.flw.add_resolver(resolver.id());
             self.rhos.borrow_mut().insert(val, rho);
             result.push(resolver);
@@ -415,7 +457,7 @@ struct EnumResolver {
 }
 
 impl EnumResolver {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, var: Rc<EnumVar>, val: i32, intrinsic_cost: Rational) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, var: Rc<EnumVar>, val: i32, intrinsic_cost: Rational) -> Rc<Self> {
         Rc::new(Self {
             res: ResolverData::new(slv, id, flaw, rho, Vec::new(), intrinsic_cost),
             var,
@@ -430,11 +472,11 @@ impl Resolver for EnumResolver {
         self.res.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> ResolverId {
         self.res.id()
     }
 
-    fn flaw(&self) -> usize {
+    fn flaw(&self) -> FlawId {
         self.res.flaw()
     }
 
@@ -472,7 +514,7 @@ pub(crate) struct AtomFlaw {
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: usize, phi: VarId, cause: Option<usize>, atom: AtomId, sigma: VarId) -> Rc<Self> {
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, atom: AtomId, sigma: VarId) -> Rc<Self> {
         Rc::new(Self {
             flw: FlawData::new(slv, id, phi, cause.into_iter().collect()),
             expanded: RefCell::new(false),
@@ -487,7 +529,7 @@ impl Flaw for AtomFlaw {
         self.flw.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> FlawId {
         self.flw.id()
     }
 
@@ -495,15 +537,15 @@ impl Flaw for AtomFlaw {
         self.flw.phi()
     }
 
-    fn causes(&self) -> Vec<usize> {
+    fn causes(&self) -> Vec<ResolverId> {
         self.flw.causes()
     }
 
-    fn supports(&self) -> Vec<usize> {
+    fn supports(&self) -> Vec<ResolverId> {
         self.flw.supports()
     }
 
-    fn resolvers(&self) -> Vec<usize> {
+    fn resolvers(&self) -> Vec<ResolverId> {
         self.flw.resolvers()
     }
 
@@ -515,7 +557,7 @@ impl Flaw for AtomFlaw {
         self.flw.set_cost(cost);
     }
 
-    fn compute_resolvers(self: Rc<Self>, mut start_id: usize) -> Vec<Rc<dyn Resolver>> {
+    fn compute_resolvers(self: Rc<Self>, mut start_id: ResolverId) -> Vec<Rc<dyn Resolver>> {
         let mut result: Vec<Rc<dyn Resolver>> = Vec::new();
         let solver = self.solver();
         let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
@@ -534,25 +576,25 @@ impl Flaw for AtomFlaw {
 
             let rho = {
                 let rho = sat.add_var();
-                trace!("Adding resolver ρ{} to unify atom {} with atom {} and solving flaw ϕ{}", *rho, self.atom, atom, self.id());
+                trace!("Adding resolver {} to unify atom {} with atom {} and solving flaw {}", start_id, self.atom, atom, self.id());
                 sat.add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
                 rho
             };
             let resolver = UnifyAtom::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom, atom);
-            start_id += 1;
+            *start_id += 1;
             self.flw.add_resolver(resolver.id());
             trgt_flw.flw.add_support(resolver.id());
             result.push(resolver);
         }
         let rho = if result.is_empty() { solver.sat.borrow_mut().add_var() } else { self.sigma };
         if atom.is_fact() {
-            trace!("Adding resolver ρ{} to activate fact {} and solving flaw ϕ{}", *rho, self.atom, self.id());
+            trace!("Adding resolver {} to activate fact {} and solving flaw {}", start_id, self.atom, self.id());
             solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateFact::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
             result.push(resolver);
         } else {
-            trace!("Adding resolver ρ{} to activate goal {} and solving flaw ϕ{}", *rho, self.atom, self.id());
+            trace!("Adding resolver {} to activate goal {} and solving flaw {}", start_id, self.atom, self.id());
             solver.sat.borrow_mut().add_clause(vec![neg(rho), pos(self.phi())]).expect("Failed to add clause for Atom flaw resolver");
             let resolver = ActivateGoal::new(self.flw.slv.clone(), start_id, self.id(), rho, self.atom);
             self.flw.add_resolver(resolver.id());
@@ -593,7 +635,7 @@ struct UnifyAtom {
 }
 
 impl UnifyAtom {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: AtomId, target: AtomId) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId, target: AtomId) -> Rc<Self> {
         let solver = slv.upgrade().expect("Solver has been dropped");
         Rc::new(Self {
             res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
@@ -610,11 +652,11 @@ impl Resolver for UnifyAtom {
         self.res.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> ResolverId {
         self.res.id()
     }
 
-    fn flaw(&self) -> usize {
+    fn flaw(&self) -> FlawId {
         self.res.flaw()
     }
 
@@ -677,7 +719,7 @@ struct ActivateFact {
 }
 
 impl ActivateFact {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: AtomId) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId) -> Rc<Self> {
         Rc::new(Self { res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)), atom })
     }
 }
@@ -687,11 +729,11 @@ impl Resolver for ActivateFact {
         self.res.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> ResolverId {
         self.res.id()
     }
 
-    fn flaw(&self) -> usize {
+    fn flaw(&self) -> FlawId {
         self.res.flaw()
     }
 
@@ -727,7 +769,7 @@ struct ActivateGoal {
 }
 
 impl ActivateGoal {
-    fn new(slv: Weak<SolverState>, id: usize, flaw: usize, rho: VarId, atom: AtomId) -> Rc<Self> {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId) -> Rc<Self> {
         let solver = slv.upgrade().expect("Solver has been dropped");
         Rc::new(Self {
             res: ResolverData::new(slv, id, flaw, rho, Vec::new(), Rational::from(1)),
@@ -743,11 +785,11 @@ impl Resolver for ActivateGoal {
         self.res.solver()
     }
 
-    fn id(&self) -> usize {
+    fn id(&self) -> ResolverId {
         self.res.id()
     }
 
-    fn flaw(&self) -> usize {
+    fn flaw(&self) -> FlawId {
         self.res.flaw()
     }
 
