@@ -11,7 +11,6 @@ use riddle::{
 };
 use serde_json::{Value, json};
 use std::{
-    any::Any,
     cell::RefCell,
     collections::{HashMap, VecDeque},
     fmt,
@@ -72,7 +71,6 @@ pub trait Flaw: ToJson + fmt::Display {
     fn set_cost(&self, cost: Rational);
     fn compute_resolvers(self: Rc<Self>, start_id: ResolverId) -> Vec<Rc<dyn Resolver>>;
     fn is_expanded(&self) -> bool;
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
 }
 
 pub struct FlawData {
@@ -284,10 +282,6 @@ impl Flaw for ClauseFlaw {
     fn is_expanded(&self) -> bool {
         *self.expanded.borrow()
     }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
-    }
 }
 
 impl ToJson for ClauseFlaw {
@@ -442,10 +436,6 @@ impl Flaw for EnumFlaw {
 
     fn is_expanded(&self) -> bool {
         *self.expanded.borrow()
-    }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
     }
 }
 
@@ -625,10 +615,6 @@ impl Flaw for AtomFlaw {
 
     fn is_expanded(&self) -> bool {
         *self.expanded.borrow()
-    }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
     }
 }
 
