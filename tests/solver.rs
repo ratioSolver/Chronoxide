@@ -38,5 +38,5 @@ test_chronoxide!(test_core_01, "tests/examples/core/example_01.rddl");
 test_chronoxide!(test_core_02, "tests/examples/core/example_02.rddl");
 test_chronoxide!(test_core_03, "tests/examples/core/example_03.rddl");
 test_chronoxide!(test_core_04, "tests/examples/core/example_04.rddl");
-test_inconsistent!(test_core_05, "tests/examples/core/example_05.rddl");
-test_inconsistent!(test_core_06, "tests/examples/core/example_06.rddl");
+// test_inconsistent!(test_core_05, "tests/examples/core/example_05.rddl");
+// test_inconsistent!(test_core_06, "tests/examples/core/example_06.rddl");

@@ -5,6 +5,7 @@ pub mod solver;
 mod flaws;
 mod graph;
 mod objects;
+mod solver_state;
 
 pub trait ToJson {
     fn to_json(&self) -> Value;
