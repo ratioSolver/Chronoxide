@@ -36,6 +36,9 @@ impl Flaw for ClauseFlaw {
     fn resolvers(&self) -> Vec<ResolverId> {
         self.flw.resolvers()
     }
+    fn is_expanded(&self) -> bool {
+        self.flw.is_expanded()
+    }
 
     fn compute_resolvers(&mut self) {
         for lit in &self.lits {

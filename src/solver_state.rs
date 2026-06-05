@@ -76,6 +76,8 @@ impl SolverState {
             let resolvers = self.resolvers.borrow();
             if let Some(flaw) = self.get_most_expensive_flaw() {
                 trace!("Best flaw to resolve: {}", flaw);
+                assert!(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").is_expanded(), "Most expensive flaw is not expanded, problem is inconsistent");
+                assert!(!self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost().is_infinite(), "Most expensive flaw has infinite cost, problem is inconsistent");
                 self.set_current_flaw(Some(flaw));
                 if let Some(resolver) = self.get_least_expensive_resolver(flaw) {
                     trace!("Best resolver to apply: {}", resolver);

@@ -52,6 +52,7 @@ pub trait Flaw: ToJson {
     fn resolvers(&self) -> Vec<ResolverId>;
     fn cost(&self) -> Rational;
     fn set_cost(&mut self, cost: Rational);
+    fn is_expanded(&self) -> bool;
     fn compute_resolvers(&mut self);
     fn add_resolver(&mut self, resolver_id: ResolverId);
 }
