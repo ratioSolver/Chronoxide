@@ -456,91 +456,95 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let resolvers = self.resolvers.borrow();
-        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
+        let mut resolvers = self.resolvers.borrow_mut();
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
-                if let Some(res) = c_res {
+                if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
                     return self.sat.borrow_mut().add_clause(vec![neg(res.rho()), lit]).is_ok();
                 } else {
                     return self.sat.borrow_mut().add_clause(vec![lit]).is_ok();
                 }
             }
-            BoolExpr::Eq { left, right, .. } => {
-                let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
-                match (left, right) {
-                    (Slot::Primitive(left), Slot::Primitive(right)) => {
-                        if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
-                            let left_lit = left.lit;
-                            let right_lit = right.lit;
-                            if c_res.is_some() {
-                                return self.sat.borrow_mut().add_clause(vec![!rho, left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![!rho, !left_lit, right_lit]).is_ok();
-                            } else {
-                                return self.sat.borrow_mut().add_clause(vec![left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![!left_lit, right_lit]).is_ok();
-                            }
-                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
-                            let left_lin = &left.lin;
-                            let right_lin = &right.lin;
-                            let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
-                            return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok();
-                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
-                            if c_res.is_some() {
-                                return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
-                            } else {
-                                left.value == right.value
-                            }
-                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
-                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Equality(left.var, right.var));
-                            if let Some(res) = c_res {
-                                res.add_ac_constraint(constraint_id);
-                                true
-                            } else {
-                                return self.ac.borrow_mut().assert(constraint_id).is_ok();
-                            }
+            BoolExpr::Eq { left, right, .. } => match (left, right) {
+                (Slot::Primitive(left), Slot::Primitive(right)) => {
+                    if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
+                        let left_lit = left.lit;
+                        let right_lit = right.lit;
+                        if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                            self.sat.borrow_mut().add_clause(vec![neg(res.rho()), left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![neg(res.rho()), !left_lit, right_lit]).is_ok()
                         } else {
-                            return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
+                            self.sat.borrow_mut().add_clause(vec![left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![!left_lit, right_lit]).is_ok()
                         }
-                    }
-                    (Slot::Primitive(left), Slot::ObjectRef(right)) => {
-                        if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
-                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(left.var, **right as i32));
-                            if let Some(res) = c_res {
-                                res.add_ac_constraint(constraint_id);
-                                true
-                            } else {
-                                return self.ac.borrow_mut().assert(constraint_id).is_ok();
-                            }
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
+                        let left_lin = &left.lin;
+                        let right_lin = &right.lin;
+                        let lin_cnstr = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)).and_then(|res| Some(res.lin_guard()));
+                        self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok()
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
+                        if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) { self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok() } else { left.value == right.value }
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
+                        let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Equality(left.var, right.var));
+                        if let Some(res) = self.c_res.borrow_mut().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                            res.add_ac_constraint(constraint_id);
+                            true
                         } else {
-                            return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
+                            self.ac.borrow_mut().assert(constraint_id).is_ok()
                         }
+                    } else if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                        self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                    } else {
+                        false
                     }
-                    (Slot::ObjectRef(left), Slot::Primitive(right)) => {
-                        if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(right.var, **left as i32));
-                            if let Some(res) = c_res {
-                                res.add_ac_constraint(constraint_id);
-                                true
-                            } else {
-                                return self.ac.borrow_mut().assert(constraint_id).is_ok();
-                            }
-                        } else {
-                            return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok();
-                        }
-                    }
-                    _ => return self.sat.borrow_mut().add_clause(vec![!rho]).is_ok(),
                 }
-            }
+                (Slot::Primitive(left), Slot::ObjectRef(right)) => {
+                    if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                        let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(left.var, **right as i32));
+                        if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                            res.add_ac_constraint(constraint_id);
+                            true
+                        } else {
+                            self.ac.borrow_mut().assert(constraint_id).is_ok()
+                        }
+                    } else if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                        self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                    } else {
+                        false
+                    }
+                }
+                (Slot::ObjectRef(left), Slot::Primitive(right)) => {
+                    if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                        let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(right.var, **left as i32));
+                        if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                            res.add_ac_constraint(constraint_id);
+                            true
+                        } else {
+                            self.ac.borrow_mut().assert(constraint_id).is_ok()
+                        }
+                    } else if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                        self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                    } else {
+                        false
+                    }
+                }
+                _ => {
+                    if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                        self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                    } else {
+                        false
+                    }
+                }
+            },
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
+                let lin_cnstr = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)).and_then(|res| Some(res.lin_guard()));
                 return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
+                let lin_cnstr = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)).and_then(|res| Some(res.lin_guard()));
                 return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr).is_ok();
             }
             BoolExpr::Or { terms, .. } => {
@@ -560,10 +564,9 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
-                let cause = c_res.map(|res| res.id());
+                let (phi, cause) = if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) { (pos(res.rho()), Some(res.id())) } else { (TRUE_LIT, None) };
                 let flaw_id = FlawId(self.get_flaws_len());
-                self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, lits));
+                self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, phi.var(), cause, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -577,78 +580,79 @@ impl Core for SolverState {
             BoolExpr::Not { term, .. } => match term.as_ref() {
                 BoolExpr::Term { term, .. } => {
                     let lit = bool_lit(term);
-                    if let Some(res) = c_res {
+                    if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
                         return self.sat.borrow_mut().add_clause(vec![neg(res.rho()), !lit]).is_ok();
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![!lit]).is_ok();
                     }
                 }
-                BoolExpr::Eq { left, right, .. } => {
-                    let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
-                    match (left, right) {
-                        (Slot::Primitive(left_v), Slot::Primitive(right_v)) => {
-                            if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<BoolVar>(), right_v.clone().as_any().downcast_ref::<BoolVar>()) {
-                                let left_lit = left.lit;
-                                let right_lit = right.lit;
-                                if c_res.is_some() { self.sat.borrow_mut().add_clause(vec![!rho, !left_lit, !right_lit]).is_ok() } else { self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]).is_ok() }
-                            } else if let (Some(_left), Some(_right)) = (left_v.clone().as_any().downcast_ref::<ArithVar>(), right_v.clone().as_any().downcast_ref::<ArithVar>()) {
-                                self.assert(Rc::new(BoolExpr::Or {
-                                    var_type: Rc::downgrade(&self.bool_type()),
-                                    terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() })],
-                                }))
-                            } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<StringVar>(), right_v.clone().as_any().downcast_ref::<StringVar>()) {
-                                if c_res.is_some() && left.value == right.value { self.sat.borrow_mut().add_clause(vec![!rho]).is_ok() } else { true }
-                            } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<EnumVar>(), right_v.clone().as_any().downcast_ref::<EnumVar>()) {
-                                let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Inequality(left.var, right.var));
-                                if let Some(res) = c_res {
-                                    res.add_ac_constraint(constraint_id);
-                                    true
-                                } else {
-                                    self.ac.borrow_mut().assert(constraint_id).is_ok()
-                                }
-                            } else {
+                BoolExpr::Eq { left, right, .. } => match (left, right) {
+                    (Slot::Primitive(left_v), Slot::Primitive(right_v)) => {
+                        if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<BoolVar>(), right_v.clone().as_any().downcast_ref::<BoolVar>()) {
+                            let left_lit = left.lit;
+                            let right_lit = right.lit;
+                            if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) { self.sat.borrow_mut().add_clause(vec![neg(res.rho()), !left_lit, !right_lit]).is_ok() } else { self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]).is_ok() }
+                        } else if let (Some(_left), Some(_right)) = (left_v.clone().as_any().downcast_ref::<ArithVar>(), right_v.clone().as_any().downcast_ref::<ArithVar>()) {
+                            self.assert(Rc::new(BoolExpr::Or {
+                                var_type: Rc::downgrade(&self.bool_type()),
+                                terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() })],
+                            }))
+                        } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<StringVar>(), right_v.clone().as_any().downcast_ref::<StringVar>()) {
+                            if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) { self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok() } else { left.value != right.value }
+                        } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<EnumVar>(), right_v.clone().as_any().downcast_ref::<EnumVar>()) {
+                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Inequality(left.var, right.var));
+                            if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                                res.add_ac_constraint(constraint_id);
                                 true
-                            }
-                        }
-                        (Slot::Primitive(left), Slot::ObjectRef(right)) => {
-                            if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
-                                let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(left.var, **right as i32));
-                                if let Some(res) = c_res {
-                                    res.add_ac_constraint(constraint_id);
-                                    true
-                                } else {
-                                    self.ac.borrow_mut().assert(constraint_id).is_ok()
-                                }
                             } else {
-                                self.sat.borrow_mut().add_clause(vec![!rho]).is_ok()
+                                self.ac.borrow_mut().assert(constraint_id).is_ok()
                             }
+                        } else {
+                            true
                         }
-                        (Slot::ObjectRef(left), Slot::Primitive(right)) => {
-                            if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                                let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(right.var, **left as i32));
-                                if let Some(res) = c_res {
-                                    res.add_ac_constraint(constraint_id);
-                                    true
-                                } else {
-                                    self.ac.borrow_mut().assert(constraint_id).is_ok()
-                                }
-                            } else {
-                                self.sat.borrow_mut().add_clause(vec![!rho]).is_ok()
-                            }
-                        }
-                        _ => true,
                     }
-                }
+                    (Slot::Primitive(left), Slot::ObjectRef(right)) => {
+                        if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(left.var, **right as i32));
+                            if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                                res.add_ac_constraint(constraint_id);
+                                true
+                            } else {
+                                self.ac.borrow_mut().assert(constraint_id).is_ok()
+                            }
+                        } else if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                            self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                        } else {
+                            false
+                        }
+                    }
+                    (Slot::ObjectRef(left), Slot::Primitive(right)) => {
+                        if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                            let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(right.var, **left as i32));
+                            if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get_mut(*res_id)) {
+                                res.add_ac_constraint(constraint_id);
+                                true
+                            } else {
+                                self.ac.borrow_mut().assert(constraint_id).is_ok()
+                            }
+                        } else if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) {
+                            self.sat.borrow_mut().add_clause(vec![neg(res.rho())]).is_ok()
+                        } else {
+                            false
+                        }
+                    }
+                    _ => true,
+                },
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
+                    let lin_cnstr = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)).and_then(|res| Some(res.lin_guard()));
                     return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr).is_ok();
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
+                    let lin_cnstr = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)).and_then(|res| Some(res.lin_guard()));
                     return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
