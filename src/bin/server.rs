@@ -16,7 +16,6 @@ use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{Level, error, subscriber, trace};
-use watchsat::LBool;
 
 #[derive(Clone)]
 struct AppState {
@@ -104,7 +103,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             "phi": format!("{}", phi),
                             "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                             "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                            "status": lbool_to_json(status),
+                            "status": status.to_json(),
                             "cost": cost.to_json()
                         });
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
@@ -122,7 +121,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         let msg = json!({
                             "msg_type": "flaw-status-update",
                             "id": format!("{}", flaw_id),
-                            "status": lbool_to_json(status),
+                            "status": status.to_json(),
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
@@ -140,7 +139,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             "flaw_id": format!("{}", flaw_id),
                             "requirements": requirements.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                             "intrinsic_cost": intrinsic_cost.to_json(),
-                            "status": lbool_to_json(status),
+                            "status": status.to_json(),
                         });
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
@@ -149,7 +148,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         let msg = json!({
                             "msg_type": "resolver-status-update",
                             "id": format!("{}", resolver_id),
-                            "status": lbool_to_json(status),
+                            "status": status.to_json(),
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
@@ -166,13 +165,5 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
             }
         }
-    }
-}
-
-fn lbool_to_json(v: LBool) -> Value {
-    match v {
-        LBool::True => true.into(),
-        LBool::False => false.into(),
-        LBool::Undef => Value::Null,
     }
 }

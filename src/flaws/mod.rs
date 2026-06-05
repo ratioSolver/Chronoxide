@@ -6,7 +6,7 @@ use std::{
     ops::Deref,
     rc::{Rc, Weak},
 };
-use watchsat::VarId;
+use watchsat::{LBool, VarId};
 
 pub(crate) mod clause;
 
@@ -203,5 +203,15 @@ impl ToJson for Rational {
             "num": self.num,
             "den": self.den
         })
+    }
+}
+
+impl ToJson for LBool {
+    fn to_json(&self) -> Value {
+        match self {
+            LBool::True => true.into(),
+            LBool::False => false.into(),
+            LBool::Undef => Value::Null,
+        }
     }
 }
