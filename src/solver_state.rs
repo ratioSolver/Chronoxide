@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tracing::trace;
-use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
+use watchsat::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
 
 pub struct SolverState {
     core: Rc<CommonCore>,
@@ -470,15 +470,5 @@ fn numeric_lin(var: &Slot) -> Lin {
         var.clone().as_any().downcast_ref::<ArithVar>().expect("Expected ArithVar").lin.clone()
     } else {
         panic!("Expected ArithVar");
-    }
-}
-
-impl ToJson for LBool {
-    fn to_json(&self) -> Value {
-        match self {
-            LBool::True => true.into(),
-            LBool::False => false.into(),
-            LBool::Undef => Value::Null,
-        }
     }
 }

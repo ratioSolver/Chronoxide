@@ -1,6 +1,12 @@
-use crate::ToJson;
-use std::{fmt, ops::Deref};
-use watchsat::VarId;
+use crate::{ToJson, solver_state::SolverState};
+use linarith::Rational;
+use serde_json::{Value, json};
+use std::{
+    fmt,
+    ops::Deref,
+    rc::{Rc, Weak},
+};
+use watchsat::{LBool, VarId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);
@@ -37,11 +43,13 @@ impl fmt::Display for ResolverId {
 }
 
 pub trait Flaw: ToJson {
+    fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
 }
 
 pub trait Resolver: ToJson {
+    fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> ResolverId;
     fn flaw(&self) -> FlawId;
     fn rho(&self) -> VarId;
@@ -50,5 +58,164 @@ pub trait Resolver: ToJson {
     }
     fn lin_guard(&self) -> Option<linarith::GuardId> {
         None
+    }
+}
+
+pub struct FlawData {
+    slv: Weak<SolverState>,
+    id: FlawId,
+    phi: VarId,
+    causes: Vec<ResolverId>,
+    supports: Vec<ResolverId>,
+    resolvers: Vec<ResolverId>,
+    cost: Rational,
+    expanded: bool,
+}
+
+impl FlawData {
+    pub fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, causes: Vec<ResolverId>) -> Self {
+        Self {
+            slv,
+            id,
+            phi,
+            causes: causes.clone(),
+            supports: causes,
+            resolvers: Vec::new(),
+            cost: Rational::POSITIVE_INFINITY,
+            expanded: false,
+        }
+    }
+
+    pub fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    pub fn id(&self) -> FlawId {
+        self.id
+    }
+
+    pub fn phi(&self) -> VarId {
+        self.phi
+    }
+
+    pub fn causes(&self) -> Vec<ResolverId> {
+        self.causes.clone()
+    }
+
+    pub fn supports(&self) -> Vec<ResolverId> {
+        self.supports.clone()
+    }
+
+    pub fn add_support(&mut self, support_id: ResolverId) {
+        self.supports.push(support_id);
+    }
+
+    pub fn resolvers(&self) -> Vec<ResolverId> {
+        self.resolvers.clone()
+    }
+
+    pub fn add_resolver(&mut self, resolver_id: ResolverId) {
+        self.resolvers.push(resolver_id);
+    }
+
+    pub fn cost(&self) -> Rational {
+        self.cost
+    }
+
+    pub fn set_cost(&mut self, cost: Rational) {
+        self.cost = cost;
+    }
+
+    pub fn is_expanded(&self) -> bool {
+        self.expanded
+    }
+
+    pub fn set_expanded(&mut self) {
+        assert!(!self.expanded, "Flaw {} is already expanded", self.id);
+        self.expanded = true;
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": format!("f{}", self.id),
+            "phi": *self.phi(),
+            "causes": self.causes.iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
+            "supports": self.supports.iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
+            "status": self.solver().sat.borrow().value(self.phi()).to_json(),
+            "cost": self.cost.to_json(),
+        })
+    }
+}
+
+pub struct ResolverData {
+    slv: Weak<SolverState>,
+    id: ResolverId,
+    flaw: FlawId,
+    rho: VarId,
+    requirements: Vec<FlawId>,
+    intrinsic_cost: Rational,
+}
+
+impl ResolverData {
+    pub fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, intrinsic_cost: Rational) -> Self {
+        Self { slv, id, flaw, rho, requirements: Vec::new(), intrinsic_cost }
+    }
+
+    pub fn solver(&self) -> Rc<SolverState> {
+        self.slv.upgrade().expect("Solver has been dropped")
+    }
+
+    pub fn id(&self) -> ResolverId {
+        self.id
+    }
+
+    pub fn flaw(&self) -> FlawId {
+        self.flaw
+    }
+
+    pub fn rho(&self) -> VarId {
+        self.rho
+    }
+
+    pub fn requirements(&self) -> Vec<FlawId> {
+        self.requirements.clone()
+    }
+
+    pub fn add_requirement(&mut self, flaw_id: FlawId) {
+        self.requirements.push(flaw_id);
+    }
+
+    pub fn intrinsic_cost(&self) -> Rational {
+        self.intrinsic_cost
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": format!("r{}", self.id),
+            "flaw": format!("f{}", self.flaw),
+            "requirements": self.requirements.iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
+            "intrinsic_cost": self.intrinsic_cost.to_json(),
+            "status": self.solver().sat.borrow().value(self.rho).to_json(),
+            "rho": *self.rho(),
+        })
+    }
+}
+
+impl ToJson for LBool {
+    fn to_json(&self) -> Value {
+        match self {
+            LBool::True => true.into(),
+            LBool::False => false.into(),
+            LBool::Undef => Value::Null,
+        }
+    }
+}
+
+impl ToJson for Rational {
+    fn to_json(&self) -> Value {
+        json!({
+            "num": self.num,
+            "den": self.den
+        })
     }
 }
