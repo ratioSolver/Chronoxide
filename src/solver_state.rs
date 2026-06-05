@@ -64,8 +64,26 @@ impl SolverState {
         true
     }
 
-    pub fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
+    pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {}", flaw.id());
+        self.flaws.borrow_mut().push(flaw);
+    }
+
+    pub fn get_flaws_len(&self) -> usize {
+        self.flaws.borrow().len()
+    }
+
+    pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
+        trace!("Adding resolver: {}", resolver.id());
+        let mut flaws = self.flaws.borrow_mut();
+        let flaw = flaws.get_mut(*resolver.flaw()).expect("Flaw for resolver should exist");
+        flaw.add_resolver(resolver.id());
+        self.sat.borrow_mut().add_clause(vec![neg(resolver.rho()), pos(flaw.phi())]).expect("Failed to add clause for OR flaw resolver");
+        self.resolvers.borrow_mut().push(resolver);
+    }
+
+    pub fn get_resolvers_len(&self) -> usize {
+        self.resolvers.borrow().len()
     }
 }
 

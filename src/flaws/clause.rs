@@ -14,8 +14,8 @@ pub(crate) struct ClauseFlaw {
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, lits: Vec<Lit>) -> Rc<Self> {
-        Rc::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), lits })
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, lits: Vec<Lit>) -> Box<Self> {
+        Box::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), lits })
     }
 }
 
@@ -28,6 +28,19 @@ impl Flaw for ClauseFlaw {
     }
     fn phi(&self) -> VarId {
         self.flw.phi()
+    }
+
+    fn compute_resolvers(&mut self) {
+        for lit in &self.lits {
+            let res_id = ResolverId(self.solver().get_resolvers_len());
+            let res = ClauseResolver::new(self.flw.slv.clone(), res_id, self.id(), *lit);
+            self.solver().add_resolver(res);
+        }
+        self.flw.set_expanded();
+    }
+
+    fn add_resolver(&mut self, resolver_id: ResolverId) {
+        self.flw.add_resolver(resolver_id);
     }
 }
 
@@ -46,8 +59,8 @@ struct ClauseResolver {
 }
 
 impl ClauseResolver {
-    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, lit: Lit) -> Rc<Self> {
-        Rc::new(Self { res: ResolverData::new(slv, id, flaw, lit.var(), Rational::from(1)), lit })
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, lit: Lit) -> Box<Self> {
+        Box::new(Self { res: ResolverData::new(slv, id, flaw, lit.var(), Rational::from(1)), lit })
     }
 }
 

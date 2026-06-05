@@ -48,6 +48,8 @@ pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
+    fn compute_resolvers(&mut self);
+    fn add_resolver(&mut self, resolver_id: ResolverId);
 }
 
 pub trait Resolver: ToJson {
