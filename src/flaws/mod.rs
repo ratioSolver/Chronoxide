@@ -6,7 +6,7 @@ use std::{
     ops::Deref,
     rc::{Rc, Weak},
 };
-use watchsat::{LBool, VarId};
+use watchsat::VarId;
 
 pub(crate) mod clause;
 
@@ -147,17 +147,6 @@ impl FlawData {
         assert!(!self.expanded, "Flaw {} is already expanded", self.id);
         self.expanded = true;
     }
-
-    pub fn to_json(&self) -> Value {
-        json!({
-            "id": format!("f{}", self.id),
-            "phi": *self.phi(),
-            "causes": self.causes.iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
-            "supports": self.supports.iter().map(|id| format!("r{}", id)).collect::<Vec<_>>(),
-            "status": self.solver().sat.borrow().value(self.phi()).to_json(),
-            "cost": self.cost.to_json(),
-        })
-    }
 }
 
 pub struct ResolverData {
@@ -200,27 +189,6 @@ impl ResolverData {
 
     pub fn intrinsic_cost(&self) -> Rational {
         self.intrinsic_cost
-    }
-
-    pub fn to_json(&self) -> Value {
-        json!({
-            "id": format!("r{}", self.id),
-            "flaw": format!("f{}", self.flaw),
-            "requirements": self.requirements.iter().map(|id| format!("f{}", id)).collect::<Vec<_>>(),
-            "intrinsic_cost": self.intrinsic_cost.to_json(),
-            "status": self.solver().sat.borrow().value(self.rho).to_json(),
-            "rho": *self.rho(),
-        })
-    }
-}
-
-impl ToJson for LBool {
-    fn to_json(&self) -> Value {
-        match self {
-            LBool::True => true.into(),
-            LBool::False => false.into(),
-            LBool::Undef => Value::Null,
-        }
     }
 }
 

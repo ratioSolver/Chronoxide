@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     Router,
     extract::{
@@ -9,11 +7,16 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chronoxide::solver::{Solver, SolverEvent};
+use chronoxide::{
+    ToJson,
+    solver::{Solver, SolverEvent},
+};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{Level, error, subscriber, trace};
+use watchsat::LBool;
 
 #[derive(Clone)]
 struct AppState {
@@ -95,47 +98,66 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 };
 
                 let send_result = match event {
-                    SolverEvent::NewFlaw(flaw) => {
-                        let mut msg = flaw;
-                        msg["msg_type"] = "new-flaw".into();
+                    SolverEvent::NewFlaw{  flaw_id,  phi, causes, supports, status, cost, data } => {
+                        let mut msg = json!({
+                            "id": format!("{}", flaw_id),
+                            "phi": format!("{}", phi),
+                            "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                            "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                            "status": lbool_to_json(status),
+                            "cost": cost.to_json()
+                        });
+                        msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::FlawCostUpdate(update) => {
-                        let mut msg = update;
-                        msg["msg_type"] = "flaw-cost-update".into();
+                    SolverEvent::FlawCostUpdate { flaw_id, cost } => {
+                        let msg = json!({
+                            "msg_type": "flaw-cost-update",
+                            "id": format!("{}", flaw_id),
+                            "cost": cost.to_json(),
+                        });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::FlawStatusUpdate(update) => {
-                        let mut msg = update;
-                        msg["msg_type"] = "flaw-status-update".into();
+                    SolverEvent::FlawStatusUpdate { flaw_id, status } => {
+                        let msg = json!({
+                            "msg_type": "flaw-status-update",
+                            "id": format!("{}", flaw_id),
+                            "status": lbool_to_json(status),
+                        });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
                     SolverEvent::CurrentFlaw(flaw_id) => {
-                        let mut msg = json!({"msg_type": "current-flaw"});
-                        if let Some(flaw_id) = flaw_id {
-                            msg["id"] = format!("{}", flaw_id).into();
-                        } else {
-                            msg["id"] = Value::Null;
-                        }
+                        let msg = json!({
+                            "msg_type": "current-flaw",
+                            "id": flaw_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
+                        });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::NewResolver(resolver) => {
-                        let mut msg = resolver;
-                        msg["msg_type"] = "new-resolver".into();
+                    SolverEvent::NewResolver { resolver_id, rho, flaw_id, requirements, intrinsic_cost, status, data } => {
+                        let mut msg = json!({
+                            "id": format!("{}", resolver_id),
+                            "rho": format!("{}", rho),
+                            "flaw_id": format!("{}", flaw_id),
+                            "requirements": requirements.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                            "intrinsic_cost": intrinsic_cost.to_json(),
+                            "status": lbool_to_json(status),
+                        });
+                        msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::ResolverStatusUpdate(update) => {
-                        let mut msg = update;
-                        msg["msg_type"] = "resolver-status-update".into();
+                    SolverEvent::ResolverStatusUpdate { resolver_id, status } => {
+                        let msg = json!({
+                            "msg_type": "resolver-status-update",
+                            "id": format!("{}", resolver_id),
+                            "status": lbool_to_json(status),
+                        });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
                     SolverEvent::CurrentResolver(resolver_id) => {
-                        let mut msg = json!({"msg_type": "current-resolver"});
-                        if let Some(resolver_id) = resolver_id {
-                            msg["id"] = format!("{}", resolver_id).into();
-                        } else {
-                            msg["id"] = Value::Null;
-                        }
+                        let msg = json!({
+                            "msg_type": "current-resolver",
+                            "id": resolver_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
+                        });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
                 };
@@ -144,5 +166,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
             }
         }
+    }
+}
+
+fn lbool_to_json(v: LBool) -> Value {
+    match v {
+        LBool::True => true.into(),
+        LBool::False => false.into(),
+        LBool::Undef => Value::Null,
     }
 }

@@ -102,7 +102,15 @@ impl SolverState {
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let flaw_id = flaw.id();
         trace!("Adding flaw: {}", flaw_id);
-        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
+        let _ = self.tx_event.send(SolverEvent::NewFlaw {
+            flaw_id,
+            phi: flaw.phi(),
+            causes: flaw.supports(),
+            supports: flaw.supports(),
+            status: if self.sat.borrow().value(flaw.phi()) == LBool::True { LBool::True } else { LBool::False },
+            cost: flaw.cost(),
+            data: flaw.to_json(),
+        });
         if self.sat.borrow().value(flaw.phi()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             active_flaws.insert(flaw_id);
@@ -119,10 +127,7 @@ impl SolverState {
                         trace!("Active flaws count: {}", active_flaws.len());
                     }
                 }
-                let _ = tx_event.send(SolverEvent::FlawStatusUpdate(json!({
-                    "id": format!("{}", flaw_id),
-                    "status": val.to_json()
-                })));
+                let _ = tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id, status: val });
             }
         });
         self.flaw_q.borrow_mut().push_back(flaw_id);
@@ -136,7 +141,15 @@ impl SolverState {
     pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
         let resolver_id = resolver.id();
         trace!("Adding resolver: {}", resolver_id);
-        let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
+        let _ = self.tx_event.send(SolverEvent::NewResolver {
+            resolver_id,
+            rho: resolver.rho(),
+            flaw_id: resolver.flaw(),
+            requirements: resolver.requirements(),
+            intrinsic_cost: resolver.intrinsic_cost(),
+            status: if self.sat.borrow().value(resolver.rho()) == LBool::True { LBool::True } else { LBool::False },
+            data: resolver.to_json(),
+        });
         if self.sat.borrow().value(resolver.rho()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             if active_flaws.remove(&resolver.flaw()) {
@@ -174,10 +187,7 @@ impl SolverState {
                     }
                     LBool::Undef => {}
                 }
-                let _ = tx_event.send(SolverEvent::ResolverStatusUpdate(json!({
-                    "id": format!("{}", resolver_id),
-                    "status": val.to_json()
-                })));
+                let _ = tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id, status: val });
             }
         });
 
@@ -266,13 +276,7 @@ impl SolverState {
             if flaw.cost() != current_cost {
                 trace!("Updating cost for flaw {} from {} to {}", flaw_id, flaw.cost(), current_cost);
                 flaw.set_cost(current_cost);
-                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
-                    let mut msg = flaw.to_json();
-                    msg["id"] = format!("{}", flaw_id).into();
-                    msg["cost"] = current_cost.to_json();
-                    msg
-                }));
-
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
                 for support in flaw.supports() {
                     let support = resolvers.get(*support).expect("Invalid flaw cause");
                     stack.push((support.flaw(), visited.clone()));

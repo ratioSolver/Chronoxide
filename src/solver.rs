@@ -1,8 +1,10 @@
 use crate::flaws::ResolverId;
 use crate::solver_state::SolverState;
 use crate::{ToJson, flaws::FlawId};
+use linarith::Rational;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
+use watchsat::{LBool, VarId};
 
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
@@ -20,12 +22,12 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw(Value),
-    FlawCostUpdate(Value),
-    FlawStatusUpdate(Value),
+    NewFlaw { flaw_id: FlawId, phi: VarId, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: LBool, cost: Rational, data: Value },
+    FlawCostUpdate { flaw_id: FlawId, cost: Rational },
+    FlawStatusUpdate { flaw_id: FlawId, status: LBool },
     CurrentFlaw(Option<FlawId>),
-    NewResolver(Value),
-    ResolverStatusUpdate(Value),
+    NewResolver { resolver_id: ResolverId, rho: VarId, flaw_id: FlawId, requirements: Vec<FlawId>, intrinsic_cost: Rational, status: LBool, data: Value },
+    ResolverStatusUpdate { resolver_id: ResolverId, status: LBool },
     CurrentResolver(Option<ResolverId>),
 }
 

@@ -5,7 +5,7 @@ use crate::{
     solver_state::SolverState,
 };
 use linarith::Rational;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::rc::{Rc, Weak};
 use watchsat::{Lit, VarId};
 
@@ -63,10 +63,10 @@ impl Flaw for ClauseFlaw {
 
 impl ToJson for ClauseFlaw {
     fn to_json(&self) -> Value {
-        let mut json = self.flw.to_json();
-        json["kind"] = "clause".into();
-        json["lits"] = self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>().into();
-        json
+        json!({
+            "kind": "clause",
+            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>(),
+        })
     }
 }
 
@@ -105,8 +105,8 @@ impl Resolver for ClauseResolver {
 
 impl ToJson for ClauseResolver {
     fn to_json(&self) -> Value {
-        let mut json = self.res.to_json();
-        json["lit"] = self.lit.to_string().into();
-        json
+        json!({
+            "lit": self.lit.to_string(),
+        })
     }
 }
