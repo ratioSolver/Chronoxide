@@ -15,12 +15,12 @@ use riddle::{
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     rc::{Rc, Weak},
 };
 use tokio::sync::broadcast;
 use tracing::trace;
-use watchsat::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
+use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 
 pub struct SolverState {
     core: Rc<CommonCore>,
@@ -32,6 +32,9 @@ pub struct SolverState {
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
     c_res: RefCell<Option<ResolverId>>,
+    active_flaws: RefCell<HashSet<FlawId>>,
+    flaw_q: RefCell<VecDeque<FlawId>>,
+    to_recompute: RefCell<HashSet<FlawId>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -50,6 +53,9 @@ impl SolverState {
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
+            active_flaws: RefCell::new(HashSet::new()),
+            flaw_q: RefCell::new(VecDeque::new()),
+            to_recompute: RefCell::new(HashSet::new()),
             tx_event,
         })
     }
@@ -61,6 +67,11 @@ impl SolverState {
 
     pub(super) fn solve(&self) -> bool {
         trace!("Solving problem...");
+        if !self.build_graph() {
+            trace!("No solution found during graph building");
+            return false;
+        }
+        self.update_costs();
         true
     }
 
@@ -84,6 +95,90 @@ impl SolverState {
 
     pub fn get_resolvers_len(&self) -> usize {
         self.resolvers.borrow().len()
+    }
+
+    fn build_graph(&self) -> bool {
+        trace!("Building graph...");
+        while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
+            if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
+                trace!("Expanding flaw {}", flaw);
+                self.flaws.borrow_mut().get_mut(*flaw).expect("Invalid flaw ID").compute_resolvers();
+                let mut causal_constraint = Vec::new();
+                causal_constraint.push(neg(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").phi()));
+                let resolvers = self.resolvers.borrow();
+                for res_id in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").resolvers() {
+                    let res = resolvers.get(*res_id).expect("Invalid resolver ID");
+                    if let Err(_) = res.apply() {
+                        trace!("Failed to apply resolver {}", res.id());
+                        return false;
+                    }
+                    causal_constraint.push(pos(res.rho()));
+                }
+                if let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint) {
+                    trace!("Failed to add causal constraint for flaw {}", flaw);
+                    return false;
+                }
+            } else {
+                trace!("No more active flaws to expand, but some flaws have infinite cost. No solution found.");
+                return false;
+            }
+        }
+        true
+    }
+
+    fn update_costs(&self) {
+        trace!("Recomputing costs for flaws: {}", self.to_recompute.borrow().iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
+        for flaw_id in self.to_recompute.borrow().iter() {
+            self.compute_flaw_cost(*flaw_id);
+        }
+        self.to_recompute.borrow_mut().clear();
+    }
+
+    fn compute_flaw_cost(&self, flaw: FlawId) {
+        trace!("Computing cost for flaw: {}", flaw);
+        let mut stack: Vec<(FlawId, HashSet<FlawId>)> = vec![(flaw, HashSet::new())];
+
+        let mut flaws = self.flaws.borrow_mut();
+        let resolvers = self.resolvers.borrow();
+        while let Some((flaw, mut visited)) = stack.pop() {
+            let mut current_cost = Rational::POSITIVE_INFINITY;
+
+            let flaw = flaws.get_mut(*flaw).expect("Invalid flaw ID");
+            if self.sat.borrow().value(flaw.phi()) != LBool::False && visited.insert(flaw.id()) {
+                for resolver_id in flaw.resolvers() {
+                    let resolver = resolvers.get(*resolver_id).expect("Invalid resolver ID");
+                    if self.sat.borrow().value(resolver.rho()) != LBool::False {
+                        let resolver_cost = self.compute_resolver_cost(resolver_id);
+                        if resolver_cost < current_cost {
+                            current_cost = resolver_cost;
+                        }
+                    }
+                }
+            }
+
+            if flaw.cost() != current_cost {
+                trace!("Updating cost for flaw {} from {} to {}", flaw.id(), flaw.cost(), current_cost);
+                flaw.set_cost(current_cost);
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
+                    let mut msg = flaw.to_json();
+                    msg["id"] = format!("f{}", flaw.id()).into();
+                    msg["cost"] = current_cost.to_json();
+                    msg
+                }));
+
+                for support in flaw.supports() {
+                    let support = resolvers.get(*support).expect("Invalid flaw cause");
+                    stack.push((support.flaw(), visited.clone()));
+                }
+            }
+        }
+    }
+
+    fn compute_resolver_cost(&self, resolver: ResolverId) -> Rational {
+        let flaws = self.flaws.borrow();
+        let resolvers = self.resolvers.borrow();
+        let resolver = resolvers.get(*resolver).expect("Invalid resolver ID");
+        resolver.requirements().iter().map(|flaw| flaws.get(**flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
     }
 }
 

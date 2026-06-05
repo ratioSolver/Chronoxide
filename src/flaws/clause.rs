@@ -1,6 +1,7 @@
 use crate::{
     ToJson,
     flaws::{Flaw, FlawData, FlawId, Resolver, ResolverData, ResolverId},
+    solver::SolverError,
     solver_state::SolverState,
 };
 use linarith::Rational;
@@ -29,6 +30,15 @@ impl Flaw for ClauseFlaw {
     fn phi(&self) -> VarId {
         self.flw.phi()
     }
+    fn causes(&self) -> Vec<ResolverId> {
+        self.flw.causes()
+    }
+    fn supports(&self) -> Vec<ResolverId> {
+        self.flw.supports()
+    }
+    fn resolvers(&self) -> Vec<ResolverId> {
+        self.flw.resolvers()
+    }
 
     fn compute_resolvers(&mut self) {
         for lit in &self.lits {
@@ -41,6 +51,13 @@ impl Flaw for ClauseFlaw {
 
     fn add_resolver(&mut self, resolver_id: ResolverId) {
         self.flw.add_resolver(resolver_id);
+    }
+
+    fn cost(&self) -> Rational {
+        self.flw.cost()
+    }
+    fn set_cost(&mut self, cost: Rational) {
+        self.flw.set_cost(cost);
     }
 }
 
@@ -76,6 +93,13 @@ impl Resolver for ClauseResolver {
     }
     fn rho(&self) -> VarId {
         self.res.rho()
+    }
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        Ok(())
     }
 }
 

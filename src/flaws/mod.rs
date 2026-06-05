@@ -1,4 +1,4 @@
-use crate::{ToJson, solver_state::SolverState};
+use crate::{ToJson, solver::SolverError, solver_state::SolverState};
 use linarith::Rational;
 use serde_json::{Value, json};
 use std::{
@@ -48,6 +48,11 @@ pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
+    fn causes(&self) -> Vec<ResolverId>;
+    fn supports(&self) -> Vec<ResolverId>;
+    fn resolvers(&self) -> Vec<ResolverId>;
+    fn cost(&self) -> Rational;
+    fn set_cost(&mut self, cost: Rational);
     fn compute_resolvers(&mut self);
     fn add_resolver(&mut self, resolver_id: ResolverId);
 }
@@ -57,6 +62,11 @@ pub trait Resolver: ToJson {
     fn id(&self) -> ResolverId;
     fn flaw(&self) -> FlawId;
     fn rho(&self) -> VarId;
+    fn intrinsic_cost(&self) -> Rational;
+    fn apply(&self) -> Result<(), SolverError>;
+    fn requirements(&self) -> Vec<FlawId> {
+        unimplemented!()
+    }
     fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
         unimplemented!()
     }
