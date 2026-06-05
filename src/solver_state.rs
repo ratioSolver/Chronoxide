@@ -100,9 +100,9 @@ impl SolverState {
     }
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
-        trace!("Adding flaw: {}", flaw.id());
-        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         let flaw_id = flaw.id();
+        trace!("Adding flaw: {}", flaw_id);
+        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
         if self.sat.borrow().value(flaw.phi()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             active_flaws.insert(flaw_id);
@@ -120,7 +120,7 @@ impl SolverState {
                     }
                 }
                 let _ = tx_event.send(SolverEvent::FlawStatusUpdate(json!({
-                    "id": format!("f{}", flaw_id),
+                    "id": format!("{}", flaw_id),
                     "status": val.to_json()
                 })));
             }
@@ -134,23 +134,46 @@ impl SolverState {
     }
 
     pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
-        trace!("Adding resolver: {}", resolver.id());
+        let resolver_id = resolver.id();
+        trace!("Adding resolver: {}", resolver_id);
         let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
         if self.sat.borrow().value(resolver.rho()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             if active_flaws.remove(&resolver.flaw()) {
-                trace!("Flaw {} resolved by resolver {}.", resolver.flaw(), resolver.id());
+                trace!("Flaw {} resolved by resolver {}.", resolver.flaw(), resolver_id);
                 trace!("Active flaws count: {}", active_flaws.len());
             }
         }
         let active_flaws = self.active_flaws.clone();
         let resolver_flaw = resolver.flaw();
+        let solver = self.slv.upgrade().expect("SolverState has been dropped");
         self.sat.borrow_mut().add_listener(resolver.rho(), {
-            let resolver_id = resolver.id();
             let resolver_ac_constraints = resolver.ac_constraints();
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
             move |_var, val| {
+                match val {
+                    LBool::True => {
+                        if let Some(constrs) = &resolver_ac_constraints {
+                            match solver.ac.borrow_mut().assert_batch(constrs) {
+                                Ok(_) => {
+                                    trace!("Applied AC constraints for resolver {} successfully.", resolver_id);
+                                }
+                                Err(e) => trace!("Failed to apply AC constraints for resolver {} with error: {:?}. Problem might be inconsistent.", resolver_id, e),
+                            }
+                        }
+                        let mut active_flaws = active_flaws.borrow_mut();
+                        if active_flaws.remove(&resolver_flaw) {
+                            trace!("Flaw {} resolved by resolver {}.", resolver_flaw, resolver_id);
+                            trace!("Active flaws count: {}", active_flaws.len());
+                        }
+                        to_recompute.borrow_mut().remove(&resolver_flaw);
+                    }
+                    LBool::False => {
+                        to_recompute.borrow_mut().insert(resolver_flaw);
+                    }
+                    LBool::Undef => {}
+                }
                 let _ = tx_event.send(SolverEvent::ResolverStatusUpdate(json!({
                     "id": format!("{}", resolver_id),
                     "status": val.to_json()
@@ -160,7 +183,7 @@ impl SolverState {
 
         let mut flaws = self.flaws.borrow_mut();
         let flaw = flaws.get_mut(*resolver.flaw()).expect("Flaw for resolver should exist");
-        flaw.add_resolver(resolver.id());
+        flaw.add_resolver(resolver_id);
         self.sat.borrow_mut().add_clause(vec![neg(resolver.rho()), pos(flaw.phi())]).expect("Failed to add clause for OR flaw resolver");
         self.resolvers.borrow_mut().push(resolver);
     }
@@ -170,20 +193,12 @@ impl SolverState {
     }
 
     fn set_current_flaw(&self, flaw: Option<FlawId>) {
-        if let Some(flaw) = &flaw {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("{}", flaw)})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
-        }
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(flaw));
         self.c_flaw.replace(flaw);
     }
 
     fn set_current_resolver(&self, resolver: Option<ResolverId>) {
-        if let Some(resolver) = &resolver {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("{}", resolver)})));
-        } else {
-            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
-        }
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(resolver));
         self.c_res.replace(resolver);
     }
 
@@ -226,9 +241,9 @@ impl SolverState {
         self.to_recompute.borrow_mut().clear();
     }
 
-    fn compute_flaw_cost(&self, flaw: FlawId) {
-        trace!("Computing cost for flaw: {}", flaw);
-        let mut stack: Vec<(FlawId, HashSet<FlawId>)> = vec![(flaw, HashSet::new())];
+    fn compute_flaw_cost(&self, flaw_id: FlawId) {
+        trace!("Computing cost for flaw: {}", flaw_id);
+        let mut stack: Vec<(FlawId, HashSet<FlawId>)> = vec![(flaw_id, HashSet::new())];
 
         let mut flaws = self.flaws.borrow_mut();
         let resolvers = self.resolvers.borrow();
@@ -236,7 +251,7 @@ impl SolverState {
             let mut current_cost = Rational::POSITIVE_INFINITY;
 
             let flaw = flaws.get_mut(*flaw).expect("Invalid flaw ID");
-            if self.sat.borrow().value(flaw.phi()) != LBool::False && visited.insert(flaw.id()) {
+            if self.sat.borrow().value(flaw.phi()) != LBool::False && visited.insert(flaw_id) {
                 for resolver_id in flaw.resolvers() {
                     let resolver = resolvers.get(*resolver_id).expect("Invalid resolver ID");
                     if self.sat.borrow().value(resolver.rho()) != LBool::False {
@@ -249,11 +264,11 @@ impl SolverState {
             }
 
             if flaw.cost() != current_cost {
-                trace!("Updating cost for flaw {} from {} to {}", flaw.id(), flaw.cost(), current_cost);
+                trace!("Updating cost for flaw {} from {} to {}", flaw_id, flaw.cost(), current_cost);
                 flaw.set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate({
                     let mut msg = flaw.to_json();
-                    msg["id"] = format!("f{}", flaw.id()).into();
+                    msg["id"] = format!("{}", flaw_id).into();
                     msg["cost"] = current_cost.to_json();
                     msg
                 }));

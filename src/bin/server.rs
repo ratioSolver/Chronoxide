@@ -10,6 +10,7 @@ use axum::{
     routing::get,
 };
 use chronoxide::solver::{Solver, SolverEvent};
+use serde_json::{Value, json};
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{Level, error, subscriber, trace};
@@ -109,9 +110,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         msg["msg_type"] = "flaw-status-update".into();
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::CurrentFlaw(update) => {
-                        let mut msg = update;
-                        msg["msg_type"] = "current-flaw".into();
+                    SolverEvent::CurrentFlaw(flaw_id) => {
+                        let mut msg = json!({"msg_type": "current-flaw"});
+                        if let Some(flaw_id) = flaw_id {
+                            msg["id"] = format!("{}", flaw_id).into();
+                        } else {
+                            msg["id"] = Value::Null;
+                        }
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
                     SolverEvent::NewResolver(resolver) => {
@@ -124,9 +129,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         msg["msg_type"] = "resolver-status-update".into();
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::CurrentResolver(update) => {
-                        let mut msg = update;
-                        msg["msg_type"] = "current-resolver".into();
+                    SolverEvent::CurrentResolver(resolver_id) => {
+                        let mut msg = json!({"msg_type": "current-resolver"});
+                        if let Some(resolver_id) = resolver_id {
+                            msg["id"] = format!("{}", resolver_id).into();
+                        } else {
+                            msg["id"] = Value::Null;
+                        }
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
                 };

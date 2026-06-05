@@ -1,5 +1,6 @@
-use crate::ToJson;
+use crate::flaws::ResolverId;
 use crate::solver_state::SolverState;
+use crate::{ToJson, flaws::FlawId};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -22,10 +23,10 @@ pub enum SolverEvent {
     NewFlaw(Value),
     FlawCostUpdate(Value),
     FlawStatusUpdate(Value),
-    CurrentFlaw(Value),
+    CurrentFlaw(Option<FlawId>),
     NewResolver(Value),
     ResolverStatusUpdate(Value),
-    CurrentResolver(Value),
+    CurrentResolver(Option<ResolverId>),
 }
 
 #[derive(Clone)]

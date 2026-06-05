@@ -67,7 +67,7 @@ pub trait Resolver: ToJson {
     fn requirements(&self) -> Vec<FlawId> {
         unimplemented!()
     }
-    fn ac_constraints(&self) -> Vec<ac3rm::ConstraintId> {
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         unimplemented!()
     }
     fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
