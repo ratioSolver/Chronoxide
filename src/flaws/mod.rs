@@ -67,11 +67,14 @@ pub trait Resolver: ToJson {
     fn requirements(&self) -> Vec<FlawId> {
         unimplemented!()
     }
+    fn ac_constraints(&self) -> Vec<ac3rm::ConstraintId> {
+        unimplemented!()
+    }
     fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
         unimplemented!()
     }
-    fn lin_guard(&self) -> Option<linarith::GuardId> {
-        None
+    fn lin_guard(&self) -> linarith::GuardId {
+        unimplemented!()
     }
 }
 

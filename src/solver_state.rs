@@ -32,9 +32,9 @@ pub struct SolverState {
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
     c_res: RefCell<Option<ResolverId>>,
-    active_flaws: RefCell<HashSet<FlawId>>,
+    active_flaws: Rc<RefCell<HashSet<FlawId>>>,
     flaw_q: RefCell<VecDeque<FlawId>>,
-    to_recompute: RefCell<HashSet<FlawId>>,
+    to_recompute: Rc<RefCell<HashSet<FlawId>>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -53,9 +53,9 @@ impl SolverState {
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
-            active_flaws: RefCell::new(HashSet::new()),
+            active_flaws: Rc::new(RefCell::new(HashSet::new())),
             flaw_q: RefCell::new(VecDeque::new()),
-            to_recompute: RefCell::new(HashSet::new()),
+            to_recompute: Rc::new(RefCell::new(HashSet::new())),
             tx_event,
         })
     }
@@ -101,6 +101,31 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {}", flaw.id());
+        let _ = self.tx_event.send(SolverEvent::NewFlaw(flaw.to_json()));
+        let flaw_id = flaw.id();
+        if self.sat.borrow().value(flaw.phi()) == LBool::True {
+            let mut active_flaws = self.active_flaws.borrow_mut();
+            active_flaws.insert(flaw_id);
+            trace!("Active flaws count: {}", active_flaws.len());
+        }
+        self.sat.borrow_mut().add_listener(flaw.phi(), {
+            let tx_event = self.tx_event.clone();
+            let active_flaws = self.active_flaws.clone();
+            move |_var, val| {
+                if val == LBool::True {
+                    let mut active_flaws = active_flaws.borrow_mut();
+                    if active_flaws.insert(flaw_id) {
+                        trace!("Flaw {} became active.", flaw_id);
+                        trace!("Active flaws count: {}", active_flaws.len());
+                    }
+                }
+                let _ = tx_event.send(SolverEvent::FlawStatusUpdate(json!({
+                    "id": format!("f{}", flaw_id),
+                    "status": val.to_json()
+                })));
+            }
+        });
+        self.flaw_q.borrow_mut().push_back(flaw_id);
         self.flaws.borrow_mut().push(flaw);
     }
 
@@ -110,6 +135,29 @@ impl SolverState {
 
     pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
         trace!("Adding resolver: {}", resolver.id());
+        let _ = self.tx_event.send(SolverEvent::NewResolver(resolver.to_json()));
+        if self.sat.borrow().value(resolver.rho()) == LBool::True {
+            let mut active_flaws = self.active_flaws.borrow_mut();
+            if active_flaws.remove(&resolver.flaw()) {
+                trace!("Flaw {} resolved by resolver {}.", resolver.flaw(), resolver.id());
+                trace!("Active flaws count: {}", active_flaws.len());
+            }
+        }
+        let active_flaws = self.active_flaws.clone();
+        let resolver_flaw = resolver.flaw();
+        self.sat.borrow_mut().add_listener(resolver.rho(), {
+            let resolver_id = resolver.id();
+            let resolver_ac_constraints = resolver.ac_constraints();
+            let tx_event = self.tx_event.clone();
+            let to_recompute = self.to_recompute.clone();
+            move |_var, val| {
+                let _ = tx_event.send(SolverEvent::ResolverStatusUpdate(json!({
+                    "id": format!("{}", resolver_id),
+                    "status": val.to_json()
+                })));
+            }
+        });
+
         let mut flaws = self.flaws.borrow_mut();
         let flaw = flaws.get_mut(*resolver.flaw()).expect("Flaw for resolver should exist");
         flaw.add_resolver(resolver.id());
@@ -415,7 +463,7 @@ impl Core for SolverState {
                         } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
                             let left_lin = &left.lin;
                             let right_lin = &right.lin;
-                            let lin_cnstr = c_res.and_then(|res| res.lin_guard());
+                            let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
                             return self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok();
                         } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
                             if c_res.is_some() {
@@ -467,13 +515,13 @@ impl Core for SolverState {
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.and_then(|res| res.lin_guard());
+                let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
                 return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_res.and_then(|res| res.lin_guard());
+                let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
                 return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr).is_ok();
             }
             BoolExpr::Or { terms, .. } => {
@@ -575,13 +623,13 @@ impl Core for SolverState {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| res.lin_guard());
+                    let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
                     return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr).is_ok();
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_res.and_then(|res| res.lin_guard());
+                    let lin_cnstr = c_res.and_then(|res| Some(res.lin_guard()));
                     return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
