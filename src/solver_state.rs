@@ -71,8 +71,18 @@ impl SolverState {
             trace!("No solution found during graph building");
             return false;
         }
-        self.update_costs();
-        true
+
+        loop {
+            if let Some(flaw) = self.get_most_expensive_flaw() {
+                trace!("Best flaw to resolve: {}", flaw);
+                self.set_current_flaw(Some(flaw));
+                self.set_current_flaw(None);
+                self.update_costs();
+            } else {
+                trace!("Hurray! No more flaws to resolve. Problem is consistent.");
+                return true;
+            };
+        }
     }
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
@@ -97,6 +107,24 @@ impl SolverState {
         self.resolvers.borrow().len()
     }
 
+    fn set_current_flaw(&self, flaw: Option<FlawId>) {
+        if let Some(flaw) = &flaw {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(json!({"id": format!("{}", flaw)})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Value::Null));
+        }
+        self.c_flaw.replace(flaw);
+    }
+
+    fn set_current_resolver(&self, resolver: Option<ResolverId>) {
+        if let Some(resolver) = &resolver {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(json!({"id": format!("{}", resolver)})));
+        } else {
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(Value::Null));
+        }
+        self.c_res.replace(resolver);
+    }
+
     fn build_graph(&self) -> bool {
         trace!("Building graph...");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
@@ -108,12 +136,14 @@ impl SolverState {
                 let resolvers = self.resolvers.borrow();
                 for res_id in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").resolvers() {
                     let res = resolvers.get(*res_id).expect("Invalid resolver ID");
+                    self.set_current_resolver(Some(res_id));
                     if let Err(_) = res.apply() {
                         trace!("Failed to apply resolver {}", res.id());
                         return false;
                     }
                     causal_constraint.push(pos(res.rho()));
                 }
+                self.set_current_resolver(None);
                 if let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint) {
                     trace!("Failed to add causal constraint for flaw {}", flaw);
                     return false;
@@ -179,6 +209,10 @@ impl SolverState {
         let resolvers = self.resolvers.borrow();
         let resolver = resolvers.get(*resolver).expect("Invalid resolver ID");
         resolver.requirements().iter().map(|flaw| flaws.get(**flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+    }
+
+    fn get_most_expensive_flaw(&self) -> Option<FlawId> {
+        self.flaws.borrow().iter().max_by_key(|flaw| flaw.cost()).map(|flaw| flaw.id())
     }
 }
 

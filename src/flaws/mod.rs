@@ -48,7 +48,6 @@ pub trait Flaw: ToJson {
     fn solver(&self) -> Rc<SolverState>;
     fn id(&self) -> FlawId;
     fn phi(&self) -> VarId;
-    fn causes(&self) -> Vec<ResolverId>;
     fn supports(&self) -> Vec<ResolverId>;
     fn resolvers(&self) -> Vec<ResolverId>;
     fn cost(&self) -> Rational;

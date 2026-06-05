@@ -30,9 +30,6 @@ impl Flaw for ClauseFlaw {
     fn phi(&self) -> VarId {
         self.flw.phi()
     }
-    fn causes(&self) -> Vec<ResolverId> {
-        self.flw.causes()
-    }
     fn supports(&self) -> Vec<ResolverId> {
         self.flw.supports()
     }
