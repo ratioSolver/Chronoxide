@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{Flaw, FlawId, Resolver, ResolverId},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, clause::ClauseFlaw},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     solver::{SolverError, SolverEvent},
 };
@@ -28,8 +28,8 @@ pub struct SolverState {
     pub sat: RefCell<watchsat::Engine>,
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
-    flaws: Vec<Box<dyn Flaw>>,
-    resolvers: Vec<Box<dyn Resolver>>,
+    flaws: RefCell<Vec<Box<dyn Flaw>>>,
+    resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
     c_res: RefCell<Option<ResolverId>>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -46,8 +46,8 @@ impl SolverState {
             sat: RefCell::new(watchsat::Engine::new()),
             ac: RefCell::new(ac3rm::Engine::new()),
             lin: RefCell::new(linarith::Engine::new()),
-            flaws: Vec::new(),
-            resolvers: Vec::new(),
+            flaws: RefCell::new(Vec::new()),
+            resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
             tx_event,
@@ -62,6 +62,10 @@ impl SolverState {
     pub(super) fn solve(&self) -> bool {
         trace!("Solving problem...");
         true
+    }
+
+    pub fn add_flaw(&self, flaw: Rc<dyn Flaw>) {
+        trace!("Adding flaw: {}", flaw.id());
     }
 }
 
@@ -208,7 +212,8 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let c_res = self.c_res.borrow().map_or(None, |res_id| self.resolvers.get(*res_id).map(|res| res.as_ref()));
+        let resolvers = self.resolvers.borrow();
+        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
@@ -313,7 +318,8 @@ impl Core for SolverState {
                     .collect();
                 let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
                 let cause = c_res.map(|res| res.id());
-                let flaw_id = FlawId(self.flaws.len());
+                let flaw_id = FlawId(self.flaws.borrow().len());
+                self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, lits));
                 true
             }
             BoolExpr::And { terms, .. } => {
@@ -410,10 +416,11 @@ impl Core for SolverState {
         let vals = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
         let var = self.ac.borrow_mut().add_var(vals);
         let var = Rc::new(EnumVar::new(class, var));
-        let c_res = self.c_res.borrow().map_or(None, |res_id| self.resolvers.get(*res_id).map(|res| res.as_ref()));
+        let resolvers = self.resolvers.borrow();
+        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
         let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.map(|res| res.id());
-        let flaw_id = FlawId(self.flaws.len());
+        let flaw_id = FlawId(self.flaws.borrow().len());
         Ok(Slot::Primitive(var))
     }
 
@@ -429,10 +436,11 @@ impl Core for SolverState {
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let atm = self.core.new_atom(predicate, fact, args);
-        let c_res = self.c_res.borrow().map_or(None, |res_id| self.resolvers.get(*res_id).map(|res| res.as_ref()));
+        let resolvers = self.resolvers.borrow();
+        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
         let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.map(|res| res.id());
-        let flaw_id = FlawId(self.flaws.len());
+        let flaw_id = FlawId(self.flaws.borrow().len());
         let sigma = self.sat.borrow_mut().add_var();
         atm
     }
@@ -444,8 +452,8 @@ impl Core for SolverState {
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
         let mut slv = json!({
-            "flaws": self.flaws.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
-            "resolvers": self.resolvers.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
+            "flaws": self.flaws.borrow().iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+            "resolvers": self.resolvers.borrow().iter().map(|r| r.to_json()).collect::<Vec<_>>(),
         });
         if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
             slv["current_flaw"] = json!(current_flaw.0);

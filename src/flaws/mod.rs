@@ -8,6 +8,8 @@ use std::{
 };
 use watchsat::{LBool, VarId};
 
+pub(crate) mod clause;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);
 
