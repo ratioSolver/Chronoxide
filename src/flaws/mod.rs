@@ -111,10 +111,6 @@ impl FlawData {
         self.phi
     }
 
-    pub fn causes(&self) -> Vec<ResolverId> {
-        self.causes.clone()
-    }
-
     pub fn supports(&self) -> Vec<ResolverId> {
         self.supports.clone()
     }

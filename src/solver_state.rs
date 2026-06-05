@@ -73,9 +73,21 @@ impl SolverState {
         }
 
         loop {
+            let resolvers = self.resolvers.borrow();
             if let Some(flaw) = self.get_most_expensive_flaw() {
                 trace!("Best flaw to resolve: {}", flaw);
                 self.set_current_flaw(Some(flaw));
+                if let Some(resolver) = self.get_least_expensive_resolver(flaw) {
+                    trace!("Best resolver to apply: {}", resolver);
+                    self.set_current_resolver(Some(resolver));
+                    if let Err(_) = self.sat.borrow_mut().assert(pos(resolvers.get(*resolver).expect("Invalid resolver ID").rho())) {
+                        trace!("Failed to assert resolver {}, problem is inconsistent", resolver);
+                        return false;
+                    }
+                } else {
+                    trace!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
+                    return false;
+                }
                 self.set_current_flaw(None);
                 self.update_costs();
             } else {
@@ -213,6 +225,22 @@ impl SolverState {
 
     fn get_most_expensive_flaw(&self) -> Option<FlawId> {
         self.flaws.borrow().iter().max_by_key(|flaw| flaw.cost()).map(|flaw| flaw.id())
+    }
+
+    fn get_least_expensive_resolver(&self, flaw: FlawId) -> Option<ResolverId> {
+        let resolvers = self.resolvers.borrow();
+        self.flaws
+            .borrow()
+            .get(*flaw)
+            .expect("Invalid flaw ID")
+            .resolvers()
+            .iter()
+            .filter_map(|res_id| {
+                let res = resolvers.get(**res_id).expect("Invalid resolver ID");
+                if self.sat.borrow().value(res.rho()) != LBool::False { Some((res_id, self.compute_resolver_cost(*res_id))) } else { None }
+            })
+            .min_by_key(|(_, cost)| *cost)
+            .map(|(res_id, _)| *res_id)
     }
 }
 
@@ -465,7 +493,7 @@ impl Core for SolverState {
                     .collect();
                 let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
                 let cause = c_res.map(|res| res.id());
-                let flaw_id = FlawId(self.flaws.borrow().len());
+                let flaw_id = FlawId(self.get_flaws_len());
                 self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, lits));
                 true
             }
