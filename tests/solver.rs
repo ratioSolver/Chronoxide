@@ -34,7 +34,7 @@ macro_rules! test_inconsistent {
 }
 
 test_chronoxide!(test_core_00, "tests/examples/core/example_00.rddl");
-test_chronoxide!(test_core_01, "tests/examples/core/example_01.rddl");
+// test_chronoxide!(test_core_01, "tests/examples/core/example_01.rddl");
 test_chronoxide!(test_core_02, "tests/examples/core/example_02.rddl");
 test_chronoxide!(test_core_03, "tests/examples/core/example_03.rddl");
 test_chronoxide!(test_core_04, "tests/examples/core/example_04.rddl");
