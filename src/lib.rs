@@ -3,7 +3,6 @@ use serde_json::Value;
 pub mod solver;
 
 mod flaws;
-mod graph;
 mod objects;
 mod solver_state;
 

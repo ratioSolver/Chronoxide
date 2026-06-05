@@ -1,6 +1,6 @@
-use std::{fmt, ops::Deref};
-
 use crate::ToJson;
+use std::{fmt, ops::Deref};
+use watchsat::VarId;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);
@@ -36,6 +36,19 @@ impl fmt::Display for ResolverId {
     }
 }
 
-pub trait Flaw: ToJson {}
+pub trait Flaw: ToJson {
+    fn id(&self) -> FlawId;
+    fn phi(&self) -> VarId;
+}
 
-pub trait Resolver: ToJson {}
+pub trait Resolver: ToJson {
+    fn id(&self) -> ResolverId;
+    fn flaw(&self) -> FlawId;
+    fn rho(&self) -> VarId;
+    fn add_ac_constraint(&self, _constraint: ac3rm::ConstraintId) {
+        unimplemented!()
+    }
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        None
+    }
+}
