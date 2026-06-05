@@ -105,7 +105,7 @@ impl SolverState {
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id,
             phi: flaw.phi(),
-            causes: flaw.supports(),
+            causes: flaw.causes(),
             supports: flaw.supports(),
             status: if self.sat.borrow().value(flaw.phi()) == LBool::True { LBool::True } else { LBool::False },
             cost: flaw.cost(),
