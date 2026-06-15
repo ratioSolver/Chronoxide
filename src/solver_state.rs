@@ -19,7 +19,7 @@ use std::{
     rc::{Rc, Weak},
 };
 use tokio::sync::broadcast;
-use tracing::trace;
+use tracing::{info, trace, warn};
 use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
 
 pub struct SolverState {
@@ -72,7 +72,7 @@ impl SolverState {
     }
 
     pub(super) fn solve(&self) -> bool {
-        trace!("Solving problem...");
+        info!("Solving problem...");
         if !self.build_graph() {
             trace!("No solution found during graph building");
             return false;
@@ -94,7 +94,7 @@ impl SolverState {
                     trace!("Best resolver to apply: {}", resolver);
                     self.set_current_resolver(Some(resolver));
                     if let Err(_) = self.sat.borrow_mut().assert(pos(resolvers.get(*resolver).expect("Invalid resolver ID").rho())) {
-                        trace!("Failed to assert resolver {}, problem is inconsistent", resolver);
+                        warn!("Failed to assert resolver {}, problem is inconsistent", resolver);
                         return false;
                     }
                     let mut sat = self.sat.borrow_mut();
@@ -102,12 +102,12 @@ impl SolverState {
                         match sat.lit_value(&lit) {
                             LBool::True => continue,
                             LBool::False => {
-                                trace!("Conflict detected when applying resolver {}, problem is inconsistent", resolver);
+                                warn!("Conflict detected when applying resolver {}, problem is inconsistent", resolver);
                                 return false;
                             }
                             LBool::Undef => {
                                 if let Err(_) = sat.assert(lit) {
-                                    trace!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
+                                    warn!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
                                     return false;
                                 }
                             }
@@ -115,13 +115,13 @@ impl SolverState {
                     }
                     self.set_current_resolver(None);
                 } else {
-                    trace!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
+                    warn!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
                     return false;
                 }
                 self.set_current_flaw(None);
                 self.update_costs();
             } else {
-                trace!("Hurray! No more flaws to resolve. Problem is consistent.");
+                info!("Hurray! No more flaws to resolve. Problem is consistent.");
                 return true;
             };
         }
@@ -238,7 +238,7 @@ impl SolverState {
     }
 
     fn build_graph(&self) -> bool {
-        trace!("Building graph...");
+        info!("Building graph...");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
                 trace!("Expanding flaw {}", flaw);
