@@ -138,7 +138,7 @@ impl SolverState {
         self.flaws.borrow().len()
     }
 
-    pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
+    pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
         let resolver_id = resolver.id();
         trace!("Adding resolver: {}", resolver_id);
         let _ = self.tx_event.send(SolverEvent::NewResolver {
@@ -191,8 +191,6 @@ impl SolverState {
             }
         });
 
-        let mut flaws = self.flaws.borrow_mut();
-        let flaw = flaws.get_mut(*resolver.flaw()).expect("Flaw for resolver should exist");
         flaw.add_resolver(resolver_id);
         self.sat.borrow_mut().add_clause(vec![neg(resolver.rho()), pos(flaw.phi())]).expect("Failed to add clause for OR flaw resolver");
         self.resolvers.borrow_mut().push(resolver);

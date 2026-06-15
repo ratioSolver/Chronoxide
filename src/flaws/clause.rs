@@ -44,10 +44,10 @@ impl Flaw for ClauseFlaw {
     }
 
     fn compute_resolvers(&mut self) {
-        for lit in &self.lits {
+        for lit in self.lits.clone() {
             let res_id = ResolverId(self.solver().get_resolvers_len());
-            let res = ClauseResolver::new(self.flw.slv.clone(), res_id, self.id(), *lit);
-            self.solver().add_resolver(res);
+            let res = ClauseResolver::new(self.flw.slv.clone(), res_id, self.id(), lit);
+            self.solver().add_resolver(self, res);
         }
         self.flw.set_expanded();
     }
