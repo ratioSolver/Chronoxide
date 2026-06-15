@@ -1,7 +1,3 @@
-use linarith::Rational;
-use serde_json::{Value, json};
-use watchsat::VarId;
-
 use crate::{
     ToJson,
     flaws::{Flaw, FlawData, FlawId, Resolver, ResolverData, ResolverId},
@@ -9,11 +5,14 @@ use crate::{
     solver::SolverError,
     solver_state::SolverState,
 };
+use linarith::Rational;
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
+use watchsat::{VarId, neg};
 
 pub(crate) struct EnumFlaw {
     flw: FlawData,
@@ -60,11 +59,21 @@ impl Flaw for EnumFlaw {
         let num_vals = vals.len();
         for val in vals {
             let res_id = ResolverId(self.solver().get_resolvers_len());
-            let mut sat = solver.sat.borrow_mut();
-            let rho = sat.add_var();
+            let rho = solver.sat.borrow_mut().add_var();
             let res = EnumResolver::new(self.flw.slv.clone(), res_id, self.id(), rho, self.var.clone(), val, Rational::new(1, num_vals as i64));
             solver.add_resolver(self, res);
         }
+        let c_solver = self.solver().clone();
+        solver.ac.borrow_mut().set_listener(self.var.var, {
+            let rhos = self.rhos.clone();
+            move |_var, c_vals| {
+                for (val, rho) in rhos.borrow().iter() {
+                    if !c_vals.contains(val) {
+                        c_solver.enqueue(neg(*rho));
+                    }
+                }
+            }
+        });
 
         self.flw.set_expanded();
     }

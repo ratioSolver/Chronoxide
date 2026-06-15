@@ -26,6 +26,7 @@ pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     pub sat: RefCell<watchsat::Engine>,
+    prop_q: RefCell<VecDeque<Lit>>,
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
     flaws: RefCell<Vec<Box<dyn Flaw>>>,
@@ -47,6 +48,7 @@ impl SolverState {
             },
             slv: core.clone(),
             sat: RefCell::new(watchsat::Engine::new()),
+            prop_q: RefCell::new(VecDeque::new()),
             ac: RefCell::new(ac3rm::Engine::new()),
             lin: RefCell::new(linarith::Engine::new()),
             flaws: RefCell::new(Vec::new()),
@@ -63,6 +65,10 @@ impl SolverState {
     pub(super) fn read(&self, script: &str) -> Result<(), SolverError> {
         trace!("Reading RiDDle script");
         self.core.read(script).map_err(|e| SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e)))
+    }
+
+    pub fn enqueue(&self, lit: Lit) {
+        self.prop_q.borrow_mut().push_back(lit);
     }
 
     pub(super) fn solve(&self) -> bool {
@@ -91,6 +97,23 @@ impl SolverState {
                         trace!("Failed to assert resolver {}, problem is inconsistent", resolver);
                         return false;
                     }
+                    let mut sat = self.sat.borrow_mut();
+                    while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
+                        match sat.lit_value(&lit) {
+                            LBool::True => continue,
+                            LBool::False => {
+                                trace!("Conflict detected when applying resolver {}, problem is inconsistent", resolver);
+                                return false;
+                            }
+                            LBool::Undef => {
+                                if let Err(_) = sat.add_clause(vec![lit]) {
+                                    trace!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                    self.set_current_resolver(None);
                 } else {
                     trace!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
                     return false;
