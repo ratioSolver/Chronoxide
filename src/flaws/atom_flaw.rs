@@ -5,22 +5,27 @@ use crate::{
     solver_state::SolverState,
 };
 use linarith::Rational;
+use riddle::env::AtomId;
 use serde_json::{Value, json};
-use std::rc::{Rc, Weak};
-use watchsat::{Lit, VarId};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
+use watchsat::VarId;
 
-pub(crate) struct ClauseFlaw {
+pub(crate) struct AtomFlaw {
     flw: FlawData,
-    lits: Vec<Lit>,
+    atom: AtomId,
+    sigma: VarId,
 }
 
-impl ClauseFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, lits: Vec<Lit>) -> Box<Self> {
-        Box::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), lits })
+impl AtomFlaw {
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, atom: AtomId, sigma: VarId) -> Box<Self> {
+        Box::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom, sigma })
     }
 }
 
-impl Flaw for ClauseFlaw {
+impl Flaw for AtomFlaw {
     fn solver(&self) -> Rc<SolverState> {
         self.flw.solver()
     }
@@ -44,11 +49,6 @@ impl Flaw for ClauseFlaw {
     }
 
     fn compute_resolvers(&mut self) {
-        for lit in self.lits.clone() {
-            let res_id = ResolverId(self.solver().get_resolvers_len());
-            let res = ClauseResolver::new(self.flw.slv.clone(), res_id, self.id(), lit);
-            self.solver().add_resolver(self, res);
-        }
         self.flw.set_expanded();
     }
 
@@ -64,27 +64,37 @@ impl Flaw for ClauseFlaw {
     }
 }
 
-impl ToJson for ClauseFlaw {
+impl ToJson for AtomFlaw {
     fn to_json(&self) -> Value {
         json!({
-            "kind": "clause",
-            "lits": self.lits.iter().map(|lit| lit.to_string()).collect::<Vec<_>>(),
+            "kind": "atom",
+            "atom": format!("{}", self.atom),
         })
     }
 }
 
-struct ClauseResolver {
+struct UnifyAtom {
     res: ResolverData,
-    lit: Lit,
+    atom: AtomId,
+    target: AtomId,
+    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
+    lin_guard: linarith::GuardId,
 }
 
-impl ClauseResolver {
-    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, lit: Lit) -> Box<Self> {
-        Box::new(Self { res: ResolverData::new(slv, id, flaw, lit.var(), Rational::from(1)), lit })
+impl UnifyAtom {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId, target: AtomId) -> Box<Self> {
+        let solver = slv.upgrade().expect("Solver has been dropped");
+        Box::new(Self {
+            res: ResolverData::new(slv, id, flaw, rho, Rational::from(1)),
+            atom,
+            target,
+            ac_constraints: RefCell::new(vec![]),
+            lin_guard: solver.lin.borrow_mut().add_guard(),
+        })
     }
 }
 
-impl Resolver for ClauseResolver {
+impl Resolver for UnifyAtom {
     fn solver(&self) -> Rc<SolverState> {
         self.res.solver()
     }
@@ -109,15 +119,16 @@ impl Resolver for ClauseResolver {
     }
 
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
-        None
+        Some(self.ac_constraints.borrow().clone())
     }
 }
 
-impl ToJson for ClauseResolver {
+impl ToJson for UnifyAtom {
     fn to_json(&self) -> Value {
         json!({
-            "kind": "lit",
-            "lit": self.lit.to_string(),
+            "kind": "unify",
+            "atom": format!("{}", self.atom),
+            "target": format!("{}", self.target),
         })
     }
 }

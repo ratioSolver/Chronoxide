@@ -8,6 +8,7 @@ use std::{
 };
 use watchsat::{LBool, VarId};
 
+pub(crate) mod atom_flaw;
 pub(crate) mod clause_flaw;
 pub(crate) mod enum_flaw;
 

@@ -151,6 +151,7 @@ impl Resolver for EnumResolver {
 impl ToJson for EnumResolver {
     fn to_json(&self) -> Value {
         json!({
+            "kind": "val",
             "val": self.val,
         })
     }
