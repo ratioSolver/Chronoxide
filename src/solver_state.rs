@@ -291,7 +291,7 @@ impl SolverState {
     }
 
     fn get_most_expensive_flaw(&self) -> Option<FlawId> {
-        self.flaws.borrow().iter().max_by_key(|flaw| flaw.cost()).map(|flaw| flaw.id())
+        self.active_flaws.borrow().iter().max_by_key(|flaw| self.flaws.borrow().get(***flaw).expect("Invalid flaw ID").cost()).copied()
     }
 
     fn get_least_expensive_resolver(&self, flaw: FlawId) -> Option<ResolverId> {
