@@ -8,7 +8,8 @@ use std::{
 };
 use watchsat::{LBool, VarId};
 
-pub(crate) mod clause;
+pub(crate) mod clause_flaw;
+pub(crate) mod enum_flaw;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);

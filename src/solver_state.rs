@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{Flaw, FlawId, Resolver, ResolverId, clause::ClauseFlaw},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, clause_flaw::ClauseFlaw, enum_flaw::EnumFlaw},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     solver::{SolverError, SolverEvent},
 };
@@ -682,6 +682,7 @@ impl Core for SolverState {
         let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.map(|res| res.id());
         let flaw_id = FlawId(self.flaws.borrow().len());
+        self.add_flaw(EnumFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, var.clone()));
         Ok(Slot::Primitive(var))
     }
 
