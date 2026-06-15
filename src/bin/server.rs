@@ -99,6 +99,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 let send_result = match event {
                     SolverEvent::NewFlaw{  flaw_id,  phi, causes, supports, status, cost, data } => {
                         let mut msg = json!({
+                            "msg_type": "new-flaw",
                             "id": format!("{}", flaw_id),
                             "phi": format!("{}", phi),
                             "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
@@ -134,6 +135,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     }
                     SolverEvent::NewResolver { resolver_id, rho, flaw_id, requirements, intrinsic_cost, status, data } => {
                         let mut msg = json!({
+                            "msg_type": "new-resolver",
                             "id": format!("{}", resolver_id),
                             "rho": format!("{}", rho),
                             "flaw_id": format!("{}", flaw_id),

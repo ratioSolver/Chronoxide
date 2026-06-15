@@ -107,7 +107,7 @@ impl SolverState {
             phi: flaw.phi(),
             causes: flaw.causes(),
             supports: flaw.supports(),
-            status: if self.sat.borrow().value(flaw.phi()) == LBool::True { LBool::True } else { LBool::False },
+            status: self.sat.borrow().value(flaw.phi()),
             cost: flaw.cost(),
             data: flaw.to_json(),
         });
@@ -147,7 +147,7 @@ impl SolverState {
             flaw_id: resolver.flaw(),
             requirements: resolver.requirements(),
             intrinsic_cost: resolver.intrinsic_cost(),
-            status: if self.sat.borrow().value(resolver.rho()) == LBool::True { LBool::True } else { LBool::False },
+            status: self.sat.borrow().value(resolver.rho()),
             data: resolver.to_json(),
         });
         if self.sat.borrow().value(resolver.rho()) == LBool::True {

@@ -47,7 +47,7 @@ export namespace solver {
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
               this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes, flaw_msg.supports, flaw_msg.status, flaw_msg.cost));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
-              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw, resolver_msg.intrinsic_cost, resolver_msg.requirements, resolver_msg.status));
+              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.requirements, resolver_msg.status));
 
             for (const listener of this.listeners) listener.initialized();
             break;
@@ -87,7 +87,7 @@ export namespace solver {
             break;
           }
           case 'new-resolver': {
-            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw, msg.intrinsic_cost, msg.requirements, msg.status);
+            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.requirements, msg.status);
             this.resolvers.set(msg.id, resolver);
             for (const listener of this.listeners) listener.new_resolver(resolver);
             break;
@@ -216,7 +216,7 @@ export namespace solver {
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
   type PartialFlawMessage = { phi: number, causes: string[], supports: string[], cost: Rational, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
-  type PartialResolverMessage = { rho: number, flaw: string, requirements: string[], intrinsic_cost: Rational, status: Status };
+  type PartialResolverMessage = { rho: number, flaw_id: string, requirements: string[], intrinsic_cost: Rational, status: Status };
   type ResolverMessage = ({ id: string } & PartialResolverMessage);
   type Rational = { num: number, den: number };
   export type Status = true | false | null;

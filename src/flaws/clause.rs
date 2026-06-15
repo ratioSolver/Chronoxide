@@ -104,6 +104,13 @@ impl Resolver for ClauseResolver {
     fn apply(&self) -> Result<(), SolverError> {
         Ok(())
     }
+    fn requirements(&self) -> Vec<FlawId> {
+        self.res.requirements()
+    }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        None
+    }
 }
 
 impl ToJson for ClauseResolver {
