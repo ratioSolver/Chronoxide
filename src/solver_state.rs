@@ -106,7 +106,7 @@ impl SolverState {
                                 return false;
                             }
                             LBool::Undef => {
-                                if let Err(_) = sat.add_clause(vec![lit]) {
+                                if let Err(_) = sat.assert(lit) {
                                     trace!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
                                     return false;
                                 }
@@ -189,14 +189,13 @@ impl SolverState {
         let resolver_flaw = resolver.flaw();
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         self.sat.borrow_mut().add_listener(resolver.rho(), {
-            let resolver_ac_constraints = resolver.ac_constraints();
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
             move |_var, val| {
                 match val {
                     LBool::True => {
-                        if let Some(constrs) = &resolver_ac_constraints {
-                            match solver.ac.borrow_mut().assert_batch(constrs) {
+                        if let Some(constrs) = solver.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").ac_constraints() {
+                            match solver.ac.borrow_mut().assert_batch(&constrs) {
                                 Ok(_) => {
                                     trace!("Applied AC constraints for resolver {} successfully.", resolver_id);
                                 }

@@ -62,6 +62,7 @@ impl Flaw for EnumFlaw {
             let rho = solver.sat.borrow_mut().add_var();
             let res = EnumResolver::new(self.flw.slv.clone(), res_id, self.id(), rho, self.var.clone(), val, Rational::new(1, num_vals as i64));
             solver.add_resolver(self, res);
+            self.rhos.borrow_mut().insert(val, rho);
         }
         let c_solver = self.solver().clone();
         solver.ac.borrow_mut().set_listener(self.var.var, {
