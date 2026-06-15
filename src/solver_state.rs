@@ -233,6 +233,7 @@ impl SolverState {
                     trace!("Failed to add causal constraint for flaw {}", flaw);
                     return false;
                 }
+                self.compute_flaw_cost(flaw);
             } else {
                 trace!("No more active flaws to expand, but some flaws have infinite cost. No solution found.");
                 return false;
@@ -253,14 +254,12 @@ impl SolverState {
         trace!("Computing cost for flaw: {}", flaw_id);
         let mut stack: Vec<(FlawId, HashSet<FlawId>)> = vec![(flaw_id, HashSet::new())];
 
-        let mut flaws = self.flaws.borrow_mut();
         let resolvers = self.resolvers.borrow();
         while let Some((flaw, mut visited)) = stack.pop() {
             let mut current_cost = Rational::POSITIVE_INFINITY;
 
-            let flaw = flaws.get_mut(*flaw).expect("Invalid flaw ID");
-            if self.sat.borrow().value(flaw.phi()) != LBool::False && visited.insert(flaw_id) {
-                for resolver_id in flaw.resolvers() {
+            if self.sat.borrow().value(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").phi()) != LBool::False && visited.insert(flaw_id) {
+                for resolver_id in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").resolvers() {
                     let resolver = resolvers.get(*resolver_id).expect("Invalid resolver ID");
                     if self.sat.borrow().value(resolver.rho()) != LBool::False {
                         let resolver_cost = self.compute_resolver_cost(resolver_id);
@@ -271,11 +270,11 @@ impl SolverState {
                 }
             }
 
-            if flaw.cost() != current_cost {
-                trace!("Updating cost for flaw {} from {} to {}", flaw_id, flaw.cost(), current_cost);
-                flaw.set_cost(current_cost);
+            if self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost() != current_cost {
+                trace!("Updating cost for flaw {} from {} to {}", flaw_id, self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost(), current_cost);
+                self.flaws.borrow_mut().get_mut(*flaw_id).expect("Invalid flaw ID").set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
-                for support in flaw.supports() {
+                for support in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").supports() {
                     let support = resolvers.get(*support).expect("Invalid flaw cause");
                     stack.push((support.flaw(), visited.clone()));
                 }
