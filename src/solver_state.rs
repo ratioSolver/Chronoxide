@@ -76,8 +76,13 @@ impl SolverState {
             let resolvers = self.resolvers.borrow();
             if let Some(flaw) = self.get_most_expensive_flaw() {
                 trace!("Best flaw to resolve: {}", flaw);
-                assert!(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").is_expanded(), "Most expensive flaw is not expanded, problem is inconsistent");
-                assert!(!self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost().is_infinite(), "Most expensive flaw has infinite cost, problem is inconsistent");
+                let (is_expanded, cost) = {
+                    let flaws = self.flaws.borrow();
+                    let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                    (f.is_expanded(), f.cost())
+                };
+                assert!(is_expanded, "Most expensive flaw is not expanded, problem is inconsistent");
+                assert!(!cost.is_infinite(), "Most expensive flaw has infinite cost, problem is inconsistent");
                 self.set_current_flaw(Some(flaw));
                 if let Some(resolver) = self.get_least_expensive_resolver(flaw) {
                     trace!("Best resolver to apply: {}", resolver);
@@ -216,10 +221,14 @@ impl SolverState {
             if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
                 trace!("Expanding flaw {}", flaw);
                 self.flaws.borrow_mut().get_mut(*flaw).expect("Invalid flaw ID").compute_resolvers();
-                let mut causal_constraint = Vec::new();
-                causal_constraint.push(neg(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").phi()));
+                let (flaw_phi, resolver_ids) = {
+                    let flaws = self.flaws.borrow();
+                    let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                    (f.phi(), f.resolvers())
+                };
+                let mut causal_constraint = vec![neg(flaw_phi)];
                 let resolvers = self.resolvers.borrow();
-                for res_id in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").resolvers() {
+                for res_id in resolver_ids {
                     let res = resolvers.get(*res_id).expect("Invalid resolver ID");
                     self.set_current_resolver(Some(res_id));
                     if let Err(_) = res.apply() {
@@ -296,7 +305,8 @@ impl SolverState {
     }
 
     fn get_most_expensive_flaw(&self) -> Option<FlawId> {
-        self.active_flaws.borrow().iter().max_by_key(|flaw| self.flaws.borrow().get(***flaw).expect("Invalid flaw ID").cost()).copied()
+        let flaws = self.flaws.borrow();
+        self.active_flaws.borrow().iter().max_by_key(|flaw| flaws.get(***flaw).expect("Invalid flaw ID").cost()).copied()
     }
 
     fn get_least_expensive_resolver(&self, flaw: FlawId) -> Option<ResolverId> {
