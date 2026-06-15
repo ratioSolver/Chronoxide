@@ -5,13 +5,18 @@ use crate::{
     solver_state::SolverState,
 };
 use linarith::Rational;
-use riddle::env::AtomId;
+use riddle::{
+    core::Core,
+    env::{AtomId, BoolExpr, Env},
+    scope::{Predicate, get_predicate_by_path},
+};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     rc::{Rc, Weak},
 };
-use watchsat::VarId;
+use watchsat::{VarId, neg, pos};
 
 pub(crate) struct AtomFlaw {
     flw: FlawData,
@@ -49,6 +54,13 @@ impl Flaw for AtomFlaw {
     }
 
     fn compute_resolvers(&mut self) {
+        let solver = self.solver();
+        let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
+        for atom in atom.predicate().atoms() {
+            if atom == self.atom {
+                continue; // No need to unify an atom with itself
+            }
+        }
         self.flw.set_expanded();
     }
 
@@ -112,6 +124,29 @@ impl Resolver for UnifyAtom {
     }
 
     fn apply(&self) -> Result<(), SolverError> {
+        let solver = self.solver();
+        let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
+        let target = solver.get_atom(self.target).expect("Target atom should exist");
+
+        let mut terms: Vec<Rc<BoolExpr>> = Vec::new();
+        let mut pred_q: VecDeque<Rc<Predicate>> = VecDeque::new();
+        pred_q.push_back(atom.predicate());
+        while let Some(pred) = pred_q.pop_front() {
+            for (_, name) in pred.args() {
+                terms.push(Rc::new(BoolExpr::Eq {
+                    var_type: Rc::downgrade(&solver.bool_type()),
+                    left: atom.get(name).expect("Atom should have the argument").into(),
+                    right: target.get(name).expect("Target atom should have the argument").into(),
+                }));
+            }
+            for super_pred in pred.parents() {
+                pred_q.push_back(get_predicate_by_path(pred.as_ref(), super_pred).expect("Predicate should exist"));
+            }
+        }
+
+        if !solver.assert(Rc::new(BoolExpr::And { var_type: Rc::downgrade(&solver.bool_type()), terms })) {
+            return Err(SolverError::RuntimeError("Failed to unify atoms due to a contradiction".into()));
+        }
         Ok(())
     }
     fn requirements(&self) -> Vec<FlawId> {
@@ -121,6 +156,9 @@ impl Resolver for UnifyAtom {
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         Some(self.ac_constraints.borrow().clone())
     }
+    fn lin_guard(&self) -> linarith::GuardId {
+        self.lin_guard
+    }
 }
 
 impl ToJson for UnifyAtom {
@@ -129,6 +167,114 @@ impl ToJson for UnifyAtom {
             "kind": "unify",
             "atom": format!("{}", self.atom),
             "target": format!("{}", self.target),
+        })
+    }
+}
+
+struct ActivateFact {
+    res: ResolverData,
+    atom: AtomId,
+}
+
+impl ActivateFact {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId) -> Box<Self> {
+        Box::new(Self { res: ResolverData::new(slv, id, flaw, rho, Rational::from(1)), atom })
+    }
+}
+
+impl Resolver for ActivateFact {
+    fn solver(&self) -> Rc<SolverState> {
+        self.res.solver()
+    }
+    fn id(&self) -> ResolverId {
+        self.res.id()
+    }
+    fn flaw(&self) -> FlawId {
+        self.res.flaw()
+    }
+    fn rho(&self) -> VarId {
+        self.res.rho()
+    }
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        // let solver = self.solver();
+        // let flaw = solver.atom_flaw(&self.atom).expect("Atom does not have a corresponding flaw");
+        // solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateFact resolver");
+        Ok(())
+    }
+    fn requirements(&self) -> Vec<FlawId> {
+        self.res.requirements()
+    }
+}
+
+impl ToJson for ActivateFact {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "fact",
+            "atom": format!("{}", self.atom),
+        })
+    }
+}
+
+struct ActivateGoal {
+    res: ResolverData,
+    atom: AtomId,
+    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
+    lin_guard: linarith::GuardId,
+}
+
+impl ActivateGoal {
+    fn new(slv: Weak<SolverState>, id: ResolverId, flaw: FlawId, rho: VarId, atom: AtomId) -> Box<Self> {
+        let solver = slv.upgrade().expect("Solver has been dropped");
+        Box::new(Self {
+            res: ResolverData::new(slv, id, flaw, rho, Rational::from(1)),
+            atom,
+            ac_constraints: RefCell::new(vec![]),
+            lin_guard: solver.lin.borrow_mut().add_guard(),
+        })
+    }
+}
+
+impl Resolver for ActivateGoal {
+    fn solver(&self) -> Rc<SolverState> {
+        self.res.solver()
+    }
+    fn id(&self) -> ResolverId {
+        self.res.id()
+    }
+    fn flaw(&self) -> FlawId {
+        self.res.flaw()
+    }
+    fn rho(&self) -> VarId {
+        self.res.rho()
+    }
+    fn intrinsic_cost(&self) -> Rational {
+        self.res.intrinsic_cost()
+    }
+
+    fn apply(&self) -> Result<(), SolverError> {
+        let solver = self.solver();
+        let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
+        atom.predicate().call(atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Failed to execute goal atom: {}", e)))?;
+
+        // let flaw = solver.atom_flaw(&self.atom).expect("Atom does not have a corresponding flaw");
+        // solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateGoal resolver");
+
+        Ok(())
+    }
+    fn requirements(&self) -> Vec<FlawId> {
+        self.res.requirements()
+    }
+}
+
+impl ToJson for ActivateGoal {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "goal",
+            "atom": format!("{}", self.atom),
         })
     }
 }

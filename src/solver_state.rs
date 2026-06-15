@@ -1,6 +1,6 @@
 use crate::{
     ToJson,
-    flaws::{Flaw, FlawId, Resolver, ResolverId, clause_flaw::ClauseFlaw, enum_flaw::EnumFlaw},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, atom_flaw::AtomFlaw, clause_flaw::ClauseFlaw, enum_flaw::EnumFlaw},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     solver::{SolverError, SolverEvent},
 };
@@ -726,6 +726,7 @@ impl Core for SolverState {
         let cause = c_res.map(|res| res.id());
         let flaw_id = FlawId(self.flaws.borrow().len());
         let sigma = self.sat.borrow_mut().add_var();
+        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone(), sigma));
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
