@@ -258,8 +258,14 @@ impl SolverState {
         while let Some((flaw, mut visited)) = stack.pop() {
             let mut current_cost = Rational::POSITIVE_INFINITY;
 
-            if self.sat.borrow().value(self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").phi()) != LBool::False && visited.insert(flaw_id) {
-                for resolver_id in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").resolvers() {
+            let (phi, resolver_ids, old_cost, supports) = {
+                let flaws = self.flaws.borrow();
+                let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                (f.phi(), f.resolvers(), f.cost(), f.supports())
+            };
+
+            if self.sat.borrow().value(phi) != LBool::False && visited.insert(flaw_id) {
+                for resolver_id in resolver_ids {
                     let resolver = resolvers.get(*resolver_id).expect("Invalid resolver ID");
                     if self.sat.borrow().value(resolver.rho()) != LBool::False {
                         let resolver_cost = self.compute_resolver_cost(resolver_id);
@@ -270,11 +276,11 @@ impl SolverState {
                 }
             }
 
-            if self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost() != current_cost {
-                trace!("Updating cost for flaw {} from {} to {}", flaw_id, self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").cost(), current_cost);
+            if old_cost != current_cost {
+                trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
                 self.flaws.borrow_mut().get_mut(*flaw_id).expect("Invalid flaw ID").set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
-                for support in self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").supports() {
+                for support in supports {
                     let support = resolvers.get(*support).expect("Invalid flaw cause");
                     stack.push((support.flaw(), visited.clone()));
                 }
