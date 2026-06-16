@@ -29,7 +29,7 @@ pub struct SolverState {
     prop_q: RefCell<VecDeque<Lit>>,
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
-    flaws: RefCell<Vec<Box<dyn Flaw>>>,
+    flaws: RefCell<Vec<Rc<RefCell<Box<dyn Flaw>>>>>,
     atom_flaws: RefCell<Vec<(FlawId, VarId)>>, // Maps AtomId to its corresponding FlawId and sigma variable
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
@@ -86,7 +86,7 @@ impl SolverState {
                 trace!("Best flaw to resolve: {}", flaw);
                 let (is_expanded, cost) = {
                     let flaws = self.flaws.borrow();
-                    let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                    let f = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
                     (f.is_expanded(), f.cost())
                 };
                 assert!(is_expanded, "Most expensive flaw is not expanded, problem is inconsistent");
@@ -161,12 +161,12 @@ impl SolverState {
             }
         });
         self.flaw_q.borrow_mut().push_back(flaw_id);
-        self.flaws.borrow_mut().push(flaw);
+        self.flaws.borrow_mut().push(Rc::new(RefCell::new(flaw)));
     }
 
     pub fn is_expanded(&self, atom_id: AtomId) -> bool {
         let flaw_id = self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").0;
-        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").is_expanded()
+        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow().is_expanded()
     }
 
     pub(crate) fn get_sigma(&self, atom_id: AtomId) -> VarId {
@@ -246,25 +246,24 @@ impl SolverState {
 
     fn build_graph(&self) -> bool {
         info!("Building graph...");
-        while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
+        while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").borrow().cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
                 trace!("Expanding flaw {}", flaw);
-                self.flaws.borrow_mut().get_mut(*flaw).expect("Invalid flaw ID").compute_resolvers();
+                let flaw_ref = self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").clone();
+                flaw_ref.borrow_mut().compute_resolvers();
                 let (flaw_phi, resolver_ids) = {
-                    let flaws = self.flaws.borrow();
-                    let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                    let f = flaw_ref.borrow();
                     (f.phi(), f.resolvers())
                 };
                 let mut causal_constraint = vec![neg(flaw_phi)];
-                let resolvers = self.resolvers.borrow();
                 for res_id in resolver_ids {
-                    let res = resolvers.get(*res_id).expect("Invalid resolver ID");
+                    trace!("Applying resolver {}", res_id);
                     self.set_current_resolver(Some(res_id));
-                    if let Err(_) = res.apply() {
-                        trace!("Failed to apply resolver {}", res.id());
+                    if let Err(_) = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").apply() {
+                        trace!("Failed to apply resolver {}", res_id);
                         return false;
                     }
-                    causal_constraint.push(pos(res.rho()));
+                    causal_constraint.push(pos(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()));
                 }
                 self.set_current_resolver(None);
                 if let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint) {
@@ -298,7 +297,7 @@ impl SolverState {
 
             let (phi, resolver_ids, old_cost, supports) = {
                 let flaws = self.flaws.borrow();
-                let f = flaws.get(*flaw).expect("Invalid flaw ID");
+                let f = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
                 (f.phi(), f.resolvers(), f.cost(), f.supports())
             };
 
@@ -316,7 +315,11 @@ impl SolverState {
 
             if old_cost != current_cost {
                 trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
-                self.flaws.borrow_mut().get_mut(*flaw_id).expect("Invalid flaw ID").set_cost(current_cost);
+                let flaw_ref = {
+                    let flaws = self.flaws.borrow();
+                    flaws.get(*flaw_id).expect("Invalid flaw ID").clone()
+                };
+                flaw_ref.borrow_mut().set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
                 for support in supports {
                     let support = resolvers.get(*support).expect("Invalid flaw cause");
@@ -327,31 +330,21 @@ impl SolverState {
     }
 
     fn compute_resolver_cost(&self, resolver: ResolverId) -> Rational {
-        let flaws = self.flaws.borrow();
         let resolvers = self.resolvers.borrow();
         let resolver = resolvers.get(*resolver).expect("Invalid resolver ID");
-        resolver.requirements().iter().map(|flaw| flaws.get(**flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid resolver requirement").borrow().cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
     }
 
     fn get_most_expensive_flaw(&self) -> Option<FlawId> {
         let flaws = self.flaws.borrow();
-        self.active_flaws.borrow().iter().max_by_key(|flaw| flaws.get(***flaw).expect("Invalid flaw ID").cost()).copied()
+        self.active_flaws.borrow().iter().max_by_key(|flaw| flaws.get(***flaw).expect("Invalid flaw ID").borrow().cost()).copied()
     }
 
     fn get_least_expensive_resolver(&self, flaw: FlawId) -> Option<ResolverId> {
         let resolvers = self.resolvers.borrow();
-        self.flaws
-            .borrow()
-            .get(*flaw)
-            .expect("Invalid flaw ID")
-            .resolvers()
-            .iter()
-            .filter_map(|res_id| {
-                let res = resolvers.get(**res_id).expect("Invalid resolver ID");
-                if self.sat.borrow().value(res.rho()) != LBool::False { Some((res_id, self.compute_resolver_cost(*res_id))) } else { None }
-            })
-            .min_by_key(|(_, cost)| *cost)
-            .map(|(res_id, _)| *res_id)
+        let flaws = self.flaws.borrow();
+        let flaw = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
+        flaw.resolvers().iter().filter_map(|res_id| if self.sat.borrow().value(resolvers.get(**res_id).expect("Invalid resolver ID").rho()) != LBool::False { Some((res_id, self.compute_resolver_cost(*res_id))) } else { None }).min_by_key(|(_, cost)| *cost).map(|(res_id, _)| *res_id)
     }
 }
 
@@ -745,7 +738,7 @@ impl Core for SolverState {
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
         let mut slv = json!({
-            "flaws": self.flaws.borrow().iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+            "flaws": self.flaws.borrow().iter().map(|f| f.borrow().to_json()).collect::<Vec<_>>(),
             "resolvers": self.resolvers.borrow().iter().map(|r| r.to_json()).collect::<Vec<_>>(),
         });
         if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {

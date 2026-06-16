@@ -288,6 +288,13 @@ impl Resolver for ActivateGoal {
     fn requirements(&self) -> Vec<FlawId> {
         self.res.requirements()
     }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        Some(self.ac_constraints.borrow().clone())
+    }
+    fn lin_guard(&self) -> linarith::GuardId {
+        self.lin_guard
+    }
 }
 
 impl ToJson for ActivateGoal {
