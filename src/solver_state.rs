@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tracing::{info, trace, warn};
-use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, neg, pos};
+use watchsat::{FALSE_LIT, LBool, Lit, TRUE_LIT, VarId, neg, pos};
 
 pub struct SolverState {
     core: Rc<CommonCore>,
@@ -30,6 +30,7 @@ pub struct SolverState {
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
     flaws: RefCell<Vec<Box<dyn Flaw>>>,
+    atom_flaws: RefCell<Vec<(FlawId, VarId)>>, // Maps AtomId to its corresponding FlawId and sigma variable
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
     c_res: RefCell<Option<ResolverId>>,
@@ -52,6 +53,7 @@ impl SolverState {
             ac: RefCell::new(ac3rm::Engine::new()),
             lin: RefCell::new(linarith::Engine::new()),
             flaws: RefCell::new(Vec::new()),
+            atom_flaws: RefCell::new(Vec::new()),
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
@@ -162,8 +164,13 @@ impl SolverState {
         self.flaws.borrow_mut().push(flaw);
     }
 
-    pub fn get_flaws_len(&self) -> usize {
-        self.flaws.borrow().len()
+    pub fn is_expanded(&self, atom_id: AtomId) -> bool {
+        let flaw_id = self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").0;
+        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").is_expanded()
+    }
+
+    pub(crate) fn get_sigma(&self, atom_id: AtomId) -> VarId {
+        self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").1
     }
 
     pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
@@ -600,7 +607,7 @@ impl Core for SolverState {
                     })
                     .collect();
                 let (phi, cause) = if let Some(res) = self.c_res.borrow().and_then(|res_id| resolvers.get(*res_id)) { (pos(res.rho()), Some(res.id())) } else { (TRUE_LIT, None) };
-                let flaw_id = FlawId(self.get_flaws_len());
+                let flaw_id = FlawId(self.flaws.borrow().len());
                 self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, phi.var(), cause, lits));
                 true
             }
@@ -726,7 +733,8 @@ impl Core for SolverState {
         let cause = c_res.map(|res| res.id());
         let flaw_id = FlawId(self.flaws.borrow().len());
         let sigma = self.sat.borrow_mut().add_var();
-        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone(), sigma));
+        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone()));
+        self.atom_flaws.borrow_mut().push((flaw_id, sigma));
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {

@@ -16,17 +16,16 @@ use std::{
     collections::VecDeque,
     rc::{Rc, Weak},
 };
-use watchsat::{VarId, neg, pos};
+use watchsat::{LBool, VarId};
 
 pub(crate) struct AtomFlaw {
     flw: FlawData,
-    atom: AtomId,
-    sigma: VarId,
+    atom_id: AtomId,
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, atom: AtomId, sigma: VarId) -> Box<Self> {
-        Box::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom, sigma })
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: VarId, cause: Option<ResolverId>, atom: AtomId) -> Box<Self> {
+        Box::new(Self { flw: FlawData::new(slv, id, phi, cause.into_iter().collect()), atom_id: atom })
     }
 }
 
@@ -55,11 +54,32 @@ impl Flaw for AtomFlaw {
 
     fn compute_resolvers(&mut self) {
         let solver = self.solver();
-        let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
-        for atom in atom.predicate().atoms() {
-            if atom == self.atom {
+        let atom = solver.get_atom(self.atom_id).expect("Flaw's atom should exist");
+        for atom_id in atom.predicate().atoms() {
+            if atom_id == self.atom_id {
                 continue; // No need to unify an atom with itself
             }
+            if !solver.is_expanded(atom_id) {
+                continue; // Only unify with expanded atoms
+            }
+            let sigma = solver.get_sigma(atom_id);
+            if solver.sat.borrow().value(sigma) == LBool::False {
+                continue; // Can't unify with an atom that is already unified with another atom
+            }
+
+            let rho = solver.sat.borrow_mut().add_var();
+            let res_id = ResolverId(solver.get_resolvers_len());
+            let res = UnifyAtom::new(self.flw.slv.clone(), res_id, self.id(), rho, self.atom_id, atom_id);
+            solver.add_resolver(self, res);
+        }
+        let rho = if self.resolvers().is_empty() { self.phi() } else { self.solver().sat.borrow_mut().add_var() };
+        let res_id = ResolverId(self.solver().get_resolvers_len());
+        if atom.is_fact() {
+            let res = ActivateFact::new(self.flw.slv.clone(), res_id, self.id(), rho, self.atom_id);
+            self.solver().add_resolver(self, res);
+        } else {
+            let res = ActivateGoal::new(self.flw.slv.clone(), res_id, self.id(), rho, self.atom_id);
+            self.solver().add_resolver(self, res);
         }
         self.flw.set_expanded();
     }
@@ -80,7 +100,7 @@ impl ToJson for AtomFlaw {
     fn to_json(&self) -> Value {
         json!({
             "kind": "atom",
-            "atom": format!("{}", self.atom),
+            "atom": format!("{}", self.atom_id),
         })
     }
 }
