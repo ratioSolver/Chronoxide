@@ -45,6 +45,9 @@ impl Flaw for AtomFlaw {
     fn supports(&self) -> Vec<ResolverId> {
         self.flw.supports()
     }
+    fn add_support(&mut self, support_id: ResolverId) {
+        self.flw.add_support(support_id);
+    }
     fn resolvers(&self) -> Vec<ResolverId> {
         self.flw.resolvers()
     }

@@ -52,6 +52,7 @@ pub trait Flaw: ToJson {
     fn phi(&self) -> VarId;
     fn causes(&self) -> Vec<ResolverId>;
     fn supports(&self) -> Vec<ResolverId>;
+    fn add_support(&mut self, support_id: ResolverId);
     fn resolvers(&self) -> Vec<ResolverId>;
     fn cost(&self) -> Rational;
     fn set_cost(&mut self, cost: Rational);

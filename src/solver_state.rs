@@ -234,6 +234,12 @@ impl SolverState {
         self.resolvers.borrow().len()
     }
 
+    pub(crate) fn add_causal_link(&self, flaw_id: FlawId, resolver_id: ResolverId) {
+        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow_mut().add_support(resolver_id);
+        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").rho()), pos(self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow().phi())]).expect("Failed to add clause for causal link");
+        let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id, resolver_id });
+    }
+
     fn set_current_flaw(&self, flaw: Option<FlawId>) {
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(flaw));
         self.c_flaw.replace(flaw);

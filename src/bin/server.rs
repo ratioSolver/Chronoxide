@@ -161,6 +161,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
+                    SolverEvent::NewCausalLink { flaw_id, resolver_id } => {
+                        let msg = json!({
+                            "msg_type": "new-causal-link",
+                            "flaw_id": format!("{}", flaw_id),
+                            "resolver_id": format!("{}", resolver_id),
+                        });
+                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                    }
                 };
                 if send_result.is_err() {
                     break;

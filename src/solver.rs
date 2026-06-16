@@ -29,6 +29,7 @@ pub enum SolverEvent {
     NewResolver { resolver_id: ResolverId, rho: VarId, flaw_id: FlawId, requirements: Vec<FlawId>, intrinsic_cost: Rational, status: LBool, data: Value },
     ResolverStatusUpdate { resolver_id: ResolverId, status: LBool },
     CurrentResolver(Option<ResolverId>),
+    NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
 }
 
 #[derive(Clone)]
