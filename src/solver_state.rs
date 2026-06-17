@@ -260,6 +260,7 @@ impl SolverState {
         info!("Building graph...");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
             if let Some(flaw_id) = self.flaw_q.borrow_mut().pop_front() {
+                self.set_current_flaw(Some(flaw_id));
                 let mut flaw = {
                     let mut flaws = self.flaws.borrow_mut();
                     let flaw = flaws.get_mut(*flaw_id).expect("Invalid flaw ID");
@@ -287,7 +288,14 @@ impl SolverState {
                     };
 
                     trace!("Applying resolver {} ({})", res_id, resolver.rho());
-                    resolver.apply()?;
+                    if let Err(_) = resolver.apply() {
+                        trace!("Resolver {} is not applicable, deactivating.", res_id);
+                        if let Err(_) = self.sat.borrow_mut().add_clause(vec![neg(resolver.rho())]) {
+                            warn!("Failed to add clause for resolver {}, problem is inconsistent", res_id);
+                            return Err(SolverError::Inconsistent);
+                        }
+                        continue;
+                    }
                     let rho = resolver.rho();
                     if rho != phi {
                         causal_constraint.push(pos(rho));
@@ -306,15 +314,16 @@ impl SolverState {
                         }
                         *ctx_res = resolver;
                     }
+                    self.set_current_resolver(None);
                 }
 
-                self.set_current_resolver(None);
                 if causal_constraint.len() > 1
                     && let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint)
                 {
                     return Err(SolverError::RuntimeError(format!("Failed to add causal constraint for flaw {}", flaw_id)));
                 }
                 self.compute_flaw_cost(flaw_id);
+                self.set_current_flaw(None);
             } else {
                 return Err(SolverError::RuntimeError("No more active flaws to expand, but some flaws have infinite cost. No solution found.".into()));
             }
