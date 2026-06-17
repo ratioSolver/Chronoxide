@@ -195,7 +195,7 @@ impl SolverState {
         if self.sat.borrow().value(resolver.rho()) == LBool::True {
             let mut active_flaws = self.active_flaws.borrow_mut();
             if active_flaws.remove(&resolver.flaw()) {
-                trace!("Flaw {} resolved by resolver {}.", resolver.flaw(), resolver_id);
+                trace!("Flaw {} resolved by resolver {}", resolver.flaw(), resolver_id);
                 trace!("Active flaws count: {}", active_flaws.len());
             }
         }
@@ -218,7 +218,7 @@ impl SolverState {
                         }
                         let mut active_flaws = active_flaws.borrow_mut();
                         if active_flaws.remove(&resolver_flaw) {
-                            trace!("Flaw {} resolved by resolver {}.", resolver_flaw, resolver_id);
+                            trace!("Flaw {} resolved by resolver {}", resolver_flaw, resolver_id);
                             trace!("Active flaws count: {}", active_flaws.len());
                         }
                         to_recompute.borrow_mut().remove(&resolver_flaw);
