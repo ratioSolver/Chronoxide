@@ -67,8 +67,11 @@ pub trait Resolver: ToJson {
     fn flaw(&self) -> FlawId;
     fn rho(&self) -> VarId;
     fn intrinsic_cost(&self) -> Rational;
-    fn apply(&self) -> Result<(), SolverError>;
+    fn apply(&mut self) -> Result<(), SolverError>;
     fn requirements(&self) -> Vec<FlawId> {
+        unimplemented!()
+    }
+    fn add_requirement(&mut self, _flaw_id: FlawId) {
         unimplemented!()
     }
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {

@@ -146,7 +146,7 @@ impl Resolver for UnifyAtom {
         self.res.intrinsic_cost()
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
+    fn apply(&mut self) -> Result<(), SolverError> {
         let solver = self.solver();
         let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
         let target = solver.get_atom(self.target).expect("Target atom should exist");
@@ -222,7 +222,7 @@ impl Resolver for ActivateFact {
         self.res.intrinsic_cost()
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
+    fn apply(&mut self) -> Result<(), SolverError> {
         // let solver = self.solver();
         // let flaw = solver.atom_flaw(&self.atom).expect("Atom does not have a corresponding flaw");
         // solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateFact resolver");
@@ -278,7 +278,7 @@ impl Resolver for ActivateGoal {
         self.res.intrinsic_cost()
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
+    fn apply(&mut self) -> Result<(), SolverError> {
         let solver = self.solver();
         let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
         atom.predicate().call(atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Failed to execute goal atom: {}", e)))?;
@@ -290,6 +290,9 @@ impl Resolver for ActivateGoal {
     }
     fn requirements(&self) -> Vec<FlawId> {
         self.res.requirements()
+    }
+    fn add_requirement(&mut self, flaw_id: FlawId) {
+        self.res.add_requirement(flaw_id);
     }
 
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {

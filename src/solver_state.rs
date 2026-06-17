@@ -265,11 +265,16 @@ impl SolverState {
                 for res_id in resolver_ids {
                     trace!("Applying resolver {}", res_id);
                     self.set_current_resolver(Some(res_id));
-                    if let Err(_) = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").apply() {
-                        trace!("Failed to apply resolver {}", res_id);
-                        return false;
-                    }
-                    causal_constraint.push(pos(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()));
+                    let rho = {
+                        let mut resolvers = self.resolvers.borrow_mut();
+                        let resolver = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        if let Err(_) = resolver.apply() {
+                            trace!("Failed to apply resolver {}", res_id);
+                            return false;
+                        }
+                        resolver.rho()
+                    };
+                    causal_constraint.push(pos(rho));
                 }
                 self.set_current_resolver(None);
                 if let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint) {
@@ -734,6 +739,9 @@ impl Core for SolverState {
         let sigma = self.sat.borrow_mut().add_var();
         self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone()));
         self.atom_flaws.borrow_mut().push((flaw_id, sigma));
+        if let Some(res) = c_res {
+            // resolvers.get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
+        }
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {

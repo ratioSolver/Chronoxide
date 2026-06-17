@@ -107,7 +107,7 @@ struct EnumResolver {
     res: ResolverData,
     var: Rc<EnumVar>,
     val: i32,
-    ac_constraints: RefCell<Vec<ac3rm::ConstraintId>>,
+    ac_constraints: Vec<ac3rm::ConstraintId>,
 }
 
 impl EnumResolver {
@@ -116,7 +116,7 @@ impl EnumResolver {
             res: ResolverData::new(slv, id, flaw, rho, intrinsic_cost),
             var,
             val,
-            ac_constraints: RefCell::new(vec![]),
+            ac_constraints: Vec::new(),
         })
     }
 }
@@ -138,8 +138,8 @@ impl Resolver for EnumResolver {
         self.res.intrinsic_cost()
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
-        self.ac_constraints.borrow_mut().push(self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val)));
+    fn apply(&mut self) -> Result<(), SolverError> {
+        self.ac_constraints.push(self.solver().ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(self.var.var, self.val)));
         Ok(())
     }
     fn requirements(&self) -> Vec<FlawId> {
@@ -147,7 +147,7 @@ impl Resolver for EnumResolver {
     }
 
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
-        Some(self.ac_constraints.borrow().clone())
+        Some(self.ac_constraints.clone())
     }
 }
 

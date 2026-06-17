@@ -104,7 +104,7 @@ impl Resolver for ClauseResolver {
         self.res.intrinsic_cost()
     }
 
-    fn apply(&self) -> Result<(), SolverError> {
+    fn apply(&mut self) -> Result<(), SolverError> {
         Ok(())
     }
     fn requirements(&self) -> Vec<FlawId> {
