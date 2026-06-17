@@ -150,11 +150,11 @@ impl SolverState {
             let active_flaws = self.active_flaws.clone();
             move |_var, val| {
                 if val == LBool::True {
+                    trace!("Flaw {} became active.", flaw_id);
                     let mut active_flaws = active_flaws.borrow_mut();
-                    if active_flaws.insert(flaw_id) {
-                        trace!("Flaw {} became active.", flaw_id);
-                        trace!("Active flaws count: {}", active_flaws.len());
-                    }
+                    assert!(!active_flaws.contains(&flaw_id), "Flaw {} is already active", flaw_id);
+                    active_flaws.insert(flaw_id);
+                    trace!("Active flaws count: {}", active_flaws.len());
                 }
                 let _ = tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id, status: val });
             }
@@ -206,6 +206,7 @@ impl SolverState {
             move |_var, val| {
                 match val {
                     LBool::True => {
+                        trace!("Resolver {} became active.", resolver_id);
                         if let Some(constrs) = solver.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").ac_constraints() {
                             match solver.ac.borrow_mut().assert_batch(&constrs) {
                                 Ok(_) => {
