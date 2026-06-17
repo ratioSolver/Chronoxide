@@ -16,7 +16,7 @@ use std::{
     collections::VecDeque,
     rc::{Rc, Weak},
 };
-use watchsat::{LBool, VarId};
+use watchsat::{LBool, VarId, neg, pos};
 
 pub(crate) struct AtomFlaw {
     flw: FlawData,
@@ -150,6 +150,11 @@ impl Resolver for UnifyAtom {
         let solver = self.solver();
         let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
         let target = solver.get_atom(self.target).expect("Target atom should exist");
+        solver.add_causal_link(solver.get_atom_flaw(target.id()), self.id());
+        // If rho is true, then the source atom must be unified
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), neg(solver.get_sigma(self.atom))]).expect("Failed to add clause for UnifyAtom resolver");
+        // If rho is true, then the target atom must be active
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(solver.get_sigma(self.target))]).expect("Failed to add clause for UnifyAtom resolver");
 
         let mut terms: Vec<Rc<BoolExpr>> = Vec::new();
         let mut pred_q: VecDeque<Rc<Predicate>> = VecDeque::new();
@@ -223,9 +228,8 @@ impl Resolver for ActivateFact {
     }
 
     fn apply(&mut self) -> Result<(), SolverError> {
-        // let solver = self.solver();
-        // let flaw = solver.atom_flaw(&self.atom).expect("Atom does not have a corresponding flaw");
-        // solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateFact resolver");
+        let solver = self.solver();
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(solver.get_sigma(self.atom))]).expect("Failed to add clause for ActivateFact resolver");
         Ok(())
     }
     fn requirements(&self) -> Vec<FlawId> {
@@ -282,10 +286,8 @@ impl Resolver for ActivateGoal {
         let solver = self.solver();
         let atom = solver.get_atom(self.atom).expect("Flaw's atom should exist");
         atom.predicate().call(atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Failed to execute goal atom: {}", e)))?;
-
-        // let flaw = solver.atom_flaw(&self.atom).expect("Atom does not have a corresponding flaw");
-        // solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(flaw.sigma)]).expect("Failed to add clause for ActivateGoal resolver");
-
+        let solver = self.solver();
+        solver.sat.borrow_mut().add_clause(vec![neg(self.rho()), pos(solver.get_sigma(self.atom))]).expect("Failed to add clause for ActivateGoal resolver");
         Ok(())
     }
     fn requirements(&self) -> Vec<FlawId> {

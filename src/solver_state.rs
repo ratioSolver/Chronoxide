@@ -30,7 +30,8 @@ pub struct SolverState {
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
     flaws: RefCell<Vec<Rc<RefCell<Box<dyn Flaw>>>>>,
-    atom_flaws: RefCell<Vec<(FlawId, VarId)>>, // Maps AtomId to its corresponding FlawId and sigma variable
+    atom_flaws: RefCell<Vec<FlawId>>,
+    atom_sigmas: RefCell<Vec<VarId>>,
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
     c_res: RefCell<Option<ResolverId>>,
@@ -54,6 +55,7 @@ impl SolverState {
             lin: RefCell::new(linarith::Engine::new()),
             flaws: RefCell::new(Vec::new()),
             atom_flaws: RefCell::new(Vec::new()),
+            atom_sigmas: RefCell::new(Vec::new()),
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
@@ -165,12 +167,17 @@ impl SolverState {
     }
 
     pub fn is_expanded(&self, atom_id: AtomId) -> bool {
-        let flaw_id = self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").0;
-        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow().is_expanded()
+        let atom_flaws = self.atom_flaws.borrow();
+        let flaw_id = atom_flaws.get(*atom_id).expect("Atom should have a corresponding flaw");
+        self.flaws.borrow().get(**flaw_id).expect("Invalid flaw ID").borrow().is_expanded()
+    }
+
+    pub(crate) fn get_atom_flaw(&self, atom_id: AtomId) -> FlawId {
+        self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").clone()
     }
 
     pub(crate) fn get_sigma(&self, atom_id: AtomId) -> VarId {
-        self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").1
+        self.atom_sigmas.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").clone()
     }
 
     pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
@@ -265,15 +272,36 @@ impl SolverState {
                 for res_id in resolver_ids {
                     trace!("Applying resolver {}", res_id);
                     self.set_current_resolver(Some(res_id));
-                    let rho = {
+                    let (mut resolver, rho) = {
                         let mut resolvers = self.resolvers.borrow_mut();
-                        let resolver = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
-                        if let Err(_) = resolver.apply() {
-                            trace!("Failed to apply resolver {}", res_id);
-                            return false;
-                        }
-                        resolver.rho()
+                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        let rho = slot.rho();
+                        let placeholder = Box::new(Context::new(slot.id(), slot.flaw(), rho, slot.lin_guard()));
+                        (std::mem::replace(slot, placeholder), rho)
                     };
+
+                    if let Err(_) = resolver.apply() {
+                        let mut resolvers = self.resolvers.borrow_mut();
+                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        *slot = resolver;
+                        trace!("Failed to apply resolver {}", res_id);
+                        return false;
+                    }
+
+                    {
+                        let mut resolvers = self.resolvers.borrow_mut();
+                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        if let Some(constraints) = slot.ac_constraints() {
+                            for constraint in constraints {
+                                resolver.add_ac_constraint(constraint);
+                            }
+                        }
+                        for requirement in resolver.requirements() {
+                            resolver.add_requirement(requirement);
+                        }
+                        *slot = resolver;
+                    }
+
                     causal_constraint.push(pos(rho));
                 }
                 self.set_current_resolver(None);
@@ -356,6 +384,67 @@ impl SolverState {
         let flaws = self.flaws.borrow();
         let flaw = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
         flaw.resolvers().iter().filter_map(|res_id| if self.sat.borrow().value(resolvers.get(**res_id).expect("Invalid resolver ID").rho()) != LBool::False { Some((res_id, self.compute_resolver_cost(*res_id))) } else { None }).min_by_key(|(_, cost)| *cost).map(|(res_id, _)| *res_id)
+    }
+}
+
+struct Context {
+    id: ResolverId,
+    flaw: FlawId,
+    rho: VarId,
+    lin_guard: linarith::GuardId,
+    ac_constraints: Vec<ac3rm::ConstraintId>,
+}
+
+impl Context {
+    fn new(id: ResolverId, flaw: FlawId, rho: VarId, lin_guard: linarith::GuardId) -> Self {
+        Self { id, flaw, rho, lin_guard, ac_constraints: Vec::new() }
+    }
+}
+
+impl Resolver for Context {
+    fn solver(&self) -> Rc<SolverState> {
+        panic!("ResolverPlaceholder::solver should not be called")
+    }
+
+    fn id(&self) -> ResolverId {
+        self.id
+    }
+
+    fn flaw(&self) -> FlawId {
+        self.flaw
+    }
+
+    fn rho(&self) -> VarId {
+        self.rho
+    }
+
+    fn intrinsic_cost(&self) -> Rational {
+        Rational::POSITIVE_INFINITY
+    }
+
+    fn apply(&mut self) -> Result<(), SolverError> {
+        panic!("ResolverPlaceholder::apply should not be called")
+    }
+
+    fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
+        Some(self.ac_constraints.clone())
+    }
+
+    fn add_ac_constraint(&mut self, constraint: ac3rm::ConstraintId) {
+        self.ac_constraints.push(constraint);
+    }
+
+    fn lin_guard(&self) -> linarith::GuardId {
+        self.lin_guard
+    }
+}
+
+impl ToJson for Context {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "placeholder",
+            "resolver": self.id.0,
+        })
     }
 }
 
@@ -613,13 +702,7 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let (phi, cause) = if let Some(res_id) = c_res() {
-                    let resolvers = self.resolvers.borrow();
-                    let res = resolvers.get(*res_id).expect("Invalid resolver ID");
-                    (pos(res.rho()), Some(res.id()))
-                } else {
-                    (TRUE_LIT, None)
-                };
+                let (phi, cause) = if let Some(res_id) = c_res() { (pos(c_rho().expect("Current resolver rho should be set")), Some(res_id)) } else { (TRUE_LIT, None) };
                 let flaw_id = FlawId(self.flaws.borrow().len());
                 self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, phi.var(), cause, lits));
                 true
@@ -745,11 +828,12 @@ impl Core for SolverState {
         let rho = c_res.map_or(watchsat::TRUE_LIT, |res| pos(res.rho()));
         let cause = c_res.map(|res| res.id());
         let flaw_id = FlawId(self.flaws.borrow().len());
+        self.atom_flaws.borrow_mut().push(flaw_id);
         let sigma = self.sat.borrow_mut().add_var();
+        self.atom_sigmas.borrow_mut().push(sigma);
         self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone()));
-        self.atom_flaws.borrow_mut().push((flaw_id, sigma));
         if let Some(res) = c_res {
-            // resolvers.get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
+            self.resolvers.borrow_mut().get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
         }
         atm
     }
