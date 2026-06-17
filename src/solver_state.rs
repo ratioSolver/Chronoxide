@@ -338,15 +338,21 @@ impl SolverState {
     }
 
     fn propagate(&self) -> Result<(), SolverError> {
-        while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
-            match self.sat.borrow().lit_value(&lit) {
+        loop {
+            let next = self.prop_q.borrow_mut().pop_front();
+            let next_lit = match next {
+                Some(lit) => lit,
+                None => break,
+            };
+            let lit_val = self.sat.borrow().lit_value(&next_lit);
+            match lit_val {
                 LBool::True => continue,
                 LBool::False => {
                     warn!("Conflict detected during propagation, problem is inconsistent");
                     return Err(SolverError::Inconsistent);
                 }
                 LBool::Undef => {
-                    if self.sat.borrow_mut().assert(lit).is_err() {
+                    if self.sat.borrow_mut().assert(next_lit).is_err() {
                         warn!("Failed to assert literal during propagation, problem is inconsistent");
                         return Err(SolverError::Inconsistent);
                     }
