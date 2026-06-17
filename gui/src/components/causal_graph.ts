@@ -61,6 +61,13 @@ export function causal_graph(slv: solver.Solver): VNode {
       target: resolver.get_flaw(),
       lineStyle: edge_style(resolver.get_status()),
     }));
+    for (const flaw of flaws)
+      for (const support_id of flaw.get_supports())
+        links.push({
+          source: flaw.get_id(),
+          target: support_id,
+          lineStyle: edge_style(flaw.get_status()),
+        });
 
     return {
       series: [
@@ -96,6 +103,7 @@ export function causal_graph(slv: solver.Solver): VNode {
     new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     resolver_status_update: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     current_resolver: (_resolver: solver.Resolver | null) => { if (chart) chart.setOption(get_option()); },
+    new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); }
   };
 
   let resize_handler: () => void;

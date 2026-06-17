@@ -111,6 +111,19 @@ export namespace solver {
             }
             break;
           }
+          case 'new-causal-link': {
+            const flaw = this.flaws.get(msg.flaw_id);
+            const resolver = this.resolvers.get(msg.resolver_id);
+            if (flaw && resolver) {
+              for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
+            } else {
+              if (!flaw)
+                console.warn(`Received new causal link for unknown flaw with id ${msg.flaw_id}`);
+              if (!resolver)
+                console.warn(`Received new causal link for unknown resolver with id ${msg.resolver_id}`);
+            }
+            break;
+          }
           default:
             console.warn('Received unknown message type from solver:', msg);
         }
@@ -147,6 +160,7 @@ export namespace solver {
     new_resolver(resolver: Resolver): void;
     resolver_status_update(resolver: Resolver): void;
     current_resolver(resolver: Resolver | null): void;
+    new_causal_link(flaw: Flaw, resolver: Resolver): void;
   }
 
   export class Flaw {
@@ -173,6 +187,7 @@ export namespace solver {
     get_phi(): number { return this.phi; }
     get_causes(): string[] { return this.causes; }
     get_supports(): string[] { return this.supports; }
+    _add_support(support_id: string) { this.supports.push(support_id); }
     get_status(): Status { return this.status; }
     _set_status(status: Status) { this.status = status; }
     get_cost(): number { return this.cost.den === 0 ? Infinity : this.cost.num / this.cost.den; }
@@ -229,5 +244,6 @@ export namespace solver {
     | ({ msg_type: 'current-flaw' } & { id: string | undefined })
     | ({ msg_type: 'new-resolver' } & ResolverMessage)
     | ({ msg_type: 'resolver-status-update' } & { id: string, status: Status })
-    | ({ msg_type: 'current-resolver' } & { id: string | undefined });
+    | ({ msg_type: 'current-resolver' } & { id: string | undefined })
+    | ({ msg_type: 'new-causal-link' } & { flaw_id: string, resolver_id: string })
 }

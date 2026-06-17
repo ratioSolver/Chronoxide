@@ -283,7 +283,7 @@ impl SolverState {
                     let mut resolver = {
                         let mut resolvers = self.resolvers.borrow_mut();
                         let resolver = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
-                        std::mem::replace(resolver, Box::new(ContextRes::new(resolver.lin_guard())))
+                        std::mem::replace(resolver, Box::new(ContextRes::new(resolver.rho(), resolver.lin_guard())))
                     };
 
                     trace!("Applying resolver {} ({})", res_id, resolver.rho());
@@ -292,18 +292,18 @@ impl SolverState {
                     if rho != phi {
                         causal_constraint.push(pos(rho));
                     }
-                    if let Some(constraints) = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").ac_constraints() {
-                        for constraint in constraints {
-                            resolver.add_ac_constraint(constraint);
-                        }
-                    }
-                    for requirement in self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").requirements() {
-                        resolver.add_requirement(requirement);
-                    }
 
                     {
                         let mut resolvers = self.resolvers.borrow_mut();
                         let ctx_res = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        if let Some(constraints) = ctx_res.ac_constraints() {
+                            for constraint in constraints {
+                                resolver.add_ac_constraint(constraint);
+                            }
+                        }
+                        for requirement in resolver.requirements() {
+                            resolver.add_requirement(requirement);
+                        }
                         *ctx_res = resolver;
                     }
                 }
@@ -438,13 +438,14 @@ impl ToJson for ContextFlaw {
 }
 
 struct ContextRes {
+    rho: VarId,
     lin_guard: linarith::GuardId,
     ac_constraints: Vec<ac3rm::ConstraintId>,
 }
 
 impl ContextRes {
-    fn new(lin_guard: linarith::GuardId) -> Self {
-        Self { lin_guard, ac_constraints: Vec::new() }
+    fn new(rho: VarId, lin_guard: linarith::GuardId) -> Self {
+        Self { rho, lin_guard, ac_constraints: Vec::new() }
     }
 }
 
@@ -462,7 +463,7 @@ impl Resolver for ContextRes {
     }
 
     fn rho(&self) -> VarId {
-        panic!("ResolverPlaceholder::rho should not be called")
+        self.rho
     }
 
     fn intrinsic_cost(&self) -> Rational {

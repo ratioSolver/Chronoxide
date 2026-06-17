@@ -13,6 +13,7 @@ const app_listener: solver.SolverListener = {
   new_resolver: (_resolver: solver.Resolver) => { },
   resolver_status_update: (_resolver: solver.Resolver) => { },
   current_resolver: (_resolver: solver.Resolver | null) => { },
+  new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { }
 };
 
 const landing_page = () => h('div.container.mt-5', [
