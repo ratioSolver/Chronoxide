@@ -184,8 +184,8 @@ impl Resolver for UnifyAtom {
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         Some(self.ac_constraints.borrow().clone())
     }
-    fn lin_guard(&self) -> linarith::GuardId {
-        self.lin_guard
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        Some(self.lin_guard)
     }
 }
 
@@ -300,8 +300,8 @@ impl Resolver for ActivateGoal {
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
         Some(self.ac_constraints.borrow().clone())
     }
-    fn lin_guard(&self) -> linarith::GuardId {
-        self.lin_guard
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        Some(self.lin_guard)
     }
 }
 

@@ -75,13 +75,13 @@ pub trait Resolver: ToJson {
         unimplemented!()
     }
     fn ac_constraints(&self) -> Option<Vec<ac3rm::ConstraintId>> {
-        unimplemented!()
+        None
     }
     fn add_ac_constraint(&mut self, _constraint: ac3rm::ConstraintId) {
         unimplemented!()
     }
-    fn lin_guard(&self) -> linarith::GuardId {
-        unimplemented!()
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
+        None
     }
 }
 

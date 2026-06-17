@@ -449,12 +449,12 @@ impl ToJson for ContextFlaw {
 
 struct ContextRes {
     rho: VarId,
-    lin_guard: linarith::GuardId,
+    lin_guard: Option<linarith::GuardId>,
     ac_constraints: Vec<ac3rm::ConstraintId>,
 }
 
 impl ContextRes {
-    fn new(rho: VarId, lin_guard: linarith::GuardId) -> Self {
+    fn new(rho: VarId, lin_guard: Option<linarith::GuardId>) -> Self {
         Self { rho, lin_guard, ac_constraints: Vec::new() }
     }
 }
@@ -492,7 +492,7 @@ impl Resolver for ContextRes {
         self.ac_constraints.push(constraint);
     }
 
-    fn lin_guard(&self) -> linarith::GuardId {
+    fn lin_guard(&self) -> Option<linarith::GuardId> {
         self.lin_guard
     }
 }
@@ -649,15 +649,15 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let c_res = || *self.c_res.borrow();
-        let c_rho = || c_res().map(|res_id| self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho());
-        let c_lin_guard = || c_res().map(|res_id| self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard());
+        // let c_res = || *self.c_res.borrow();
+        // let c_rho = || c_res().map(|res_id| self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho());
+        // let c_lin_guard = || c_res().map(|res_id| self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard());
 
         match term.as_ref() {
             BoolExpr::Term { term, .. } => {
                 let lit = bool_lit(term);
-                if let Some(rho) = c_rho() {
-                    return self.sat.borrow_mut().add_clause(vec![neg(rho), lit]).is_ok();
+                if let Some(res_id) = *self.c_res.borrow() {
+                    return self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), lit]).is_ok();
                 } else {
                     return self.sat.borrow_mut().add_clause(vec![lit]).is_ok();
                 }
@@ -667,28 +667,32 @@ impl Core for SolverState {
                     if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
                         let left_lit = left.lit;
                         let right_lit = right.lit;
-                        if let Some(rho) = c_rho() {
-                            self.sat.borrow_mut().add_clause(vec![neg(rho), left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, right_lit]).is_ok()
+                        if let Some(res_id) = *self.c_res.borrow() {
+                            self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), !left_lit, right_lit]).is_ok()
                         } else {
                             self.sat.borrow_mut().add_clause(vec![left_lit, !right_lit]).is_ok() && self.sat.borrow_mut().add_clause(vec![!left_lit, right_lit]).is_ok()
                         }
                     } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
                         let left_lin = &left.lin;
                         let right_lin = &right.lin;
-                        let lin_cnstr = c_lin_guard();
-                        self.lin.borrow_mut().new_eq(left_lin, right_lin, lin_cnstr).is_ok()
+                        if let Some(res_id) = *self.c_res.borrow() {
+                            let lin_guard = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard().expect("Current resolver should have a linear guard");
+                            self.lin.borrow_mut().new_eq(left_lin, right_lin, Some(lin_guard)).is_ok()
+                        } else {
+                            self.lin.borrow_mut().new_eq(left_lin, right_lin, None).is_ok()
+                        }
                     } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
-                        if let Some(rho) = c_rho() { self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok() } else { left.value == right.value }
+                        if let Some(res_id) = *self.c_res.borrow() { self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok() } else { left.value == right.value }
                     } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
                         let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Equality(left.var, right.var));
-                        if let Some(res_id) = c_res() {
+                        if let Some(res_id) = *self.c_res.borrow() {
                             self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                             true
                         } else {
                             self.ac.borrow_mut().assert(constraint_id).is_ok()
                         }
-                    } else if let Some(rho) = c_rho() {
-                        self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                    } else if let Some(res_id) = *self.c_res.borrow() {
+                        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                     } else {
                         false
                     }
@@ -696,14 +700,14 @@ impl Core for SolverState {
                 (Slot::Primitive(left), Slot::ObjectRef(right)) => {
                     if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
                         let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(left.var, **right as i32));
-                        if let Some(res_id) = c_res() {
+                        if let Some(res_id) = *self.c_res.borrow() {
                             self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                             true
                         } else {
                             self.ac.borrow_mut().assert(constraint_id).is_ok()
                         }
-                    } else if let Some(rho) = c_rho() {
-                        self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                    } else if let Some(res_id) = *self.c_res.borrow() {
+                        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                     } else {
                         false
                     }
@@ -711,21 +715,21 @@ impl Core for SolverState {
                 (Slot::ObjectRef(left), Slot::Primitive(right)) => {
                     if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
                         let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Set(right.var, **left as i32));
-                        if let Some(res_id) = c_res() {
+                        if let Some(res_id) = *self.c_res.borrow() {
                             self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                             true
                         } else {
                             self.ac.borrow_mut().assert(constraint_id).is_ok()
                         }
-                    } else if let Some(rho) = c_rho() {
-                        self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                    } else if let Some(res_id) = *self.c_res.borrow() {
+                        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                     } else {
                         false
                     }
                 }
                 _ => {
-                    if let Some(rho) = c_rho() {
-                        self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                    if let Some(res_id) = *self.c_res.borrow() {
+                        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                     } else {
                         false
                     }
@@ -734,14 +738,22 @@ impl Core for SolverState {
             BoolExpr::Lt { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_lin_guard();
-                return self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
+                if let Some(res_id) = *self.c_res.borrow() {
+                    let lin_guard = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard().expect("Current resolver should have a linear guard");
+                    self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, Some(lin_guard)).is_ok()
+                } else {
+                    self.lin.borrow_mut().new_lt(&left_lin, &right_lin, true, None).is_ok()
+                }
             }
             BoolExpr::Leq { left, right, .. } => {
                 let left_lin = numeric_lin(left);
                 let right_lin = numeric_lin(right);
-                let lin_cnstr = c_lin_guard();
-                return self.lin.borrow_mut().new_le(&left_lin, &right_lin, lin_cnstr).is_ok();
+                if let Some(res_id) = *self.c_res.borrow() {
+                    let lin_guard = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard().expect("Current resolver should have a linear guard");
+                    self.lin.borrow_mut().new_le(&left_lin, &right_lin, Some(lin_guard)).is_ok()
+                } else {
+                    self.lin.borrow_mut().new_le(&left_lin, &right_lin, None).is_ok()
+                }
             }
             BoolExpr::Or { terms, .. } => {
                 let lits: Vec<Lit> = terms
@@ -760,7 +772,7 @@ impl Core for SolverState {
                         _ => panic!("Expected BoolExpr::Term"),
                     })
                     .collect();
-                let (phi, cause) = if let Some(res_id) = c_res() { (pos(c_rho().expect("Current resolver rho should be set")), Some(res_id)) } else { (TRUE_LIT, None) };
+                let (phi, cause) = if let Some(res_id) = *self.c_res.borrow() { (pos(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), Some(res_id)) } else { (TRUE_LIT, None) };
                 let flaw_id = FlawId(self.flaws.borrow().len());
                 self.add_flaw(ClauseFlaw::new(self.slv.clone(), flaw_id, phi.var(), cause, lits));
                 true
@@ -776,8 +788,8 @@ impl Core for SolverState {
             BoolExpr::Not { term, .. } => match term.as_ref() {
                 BoolExpr::Term { term, .. } => {
                     let lit = bool_lit(term);
-                    if let Some(rho) = c_rho() {
-                        return self.sat.borrow_mut().add_clause(vec![neg(rho), !lit]).is_ok();
+                    if let Some(res_id) = *self.c_res.borrow() {
+                        return self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), !lit]).is_ok();
                     } else {
                         return self.sat.borrow_mut().add_clause(vec![!lit]).is_ok();
                     }
@@ -787,17 +799,21 @@ impl Core for SolverState {
                         if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<BoolVar>(), right_v.clone().as_any().downcast_ref::<BoolVar>()) {
                             let left_lit = left.lit;
                             let right_lit = right.lit;
-                            if let Some(rho) = c_rho() { self.sat.borrow_mut().add_clause(vec![neg(rho), !left_lit, !right_lit]).is_ok() } else { self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]).is_ok() }
+                            if let Some(res_id) = *self.c_res.borrow() {
+                                self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho()), !left_lit, !right_lit]).is_ok()
+                            } else {
+                                self.sat.borrow_mut().add_clause(vec![!left_lit, !right_lit]).is_ok()
+                            }
                         } else if let (Some(_left), Some(_right)) = (left_v.clone().as_any().downcast_ref::<ArithVar>(), right_v.clone().as_any().downcast_ref::<ArithVar>()) {
                             self.assert(Rc::new(BoolExpr::Or {
                                 var_type: Rc::downgrade(&self.bool_type()),
                                 terms: vec![Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() }), Rc::new(BoolExpr::Lt { var_type: Rc::downgrade(&self.bool_type()), left: left.clone(), right: right.clone() })],
                             }))
                         } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<StringVar>(), right_v.clone().as_any().downcast_ref::<StringVar>()) {
-                            if let Some(rho) = c_rho() { self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok() } else { left.value != right.value }
+                            if let Some(res_id) = *self.c_res.borrow() { self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok() } else { left.value != right.value }
                         } else if let (Some(left), Some(right)) = (left_v.clone().as_any().downcast_ref::<EnumVar>(), right_v.clone().as_any().downcast_ref::<EnumVar>()) {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Inequality(left.var, right.var));
-                            if let Some(res_id) = c_res() {
+                            if let Some(res_id) = *self.c_res.borrow() {
                                 self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                                 true
                             } else {
@@ -810,14 +826,14 @@ impl Core for SolverState {
                     (Slot::Primitive(left), Slot::ObjectRef(right)) => {
                         if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(left.var, **right as i32));
-                            if let Some(res_id) = c_res() {
+                            if let Some(res_id) = *self.c_res.borrow() {
                                 self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                                 true
                             } else {
                                 self.ac.borrow_mut().assert(constraint_id).is_ok()
                             }
-                        } else if let Some(rho) = c_rho() {
-                            self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                        } else if let Some(res_id) = *self.c_res.borrow() {
+                            self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                         } else {
                             false
                         }
@@ -825,14 +841,14 @@ impl Core for SolverState {
                     (Slot::ObjectRef(left), Slot::Primitive(right)) => {
                         if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
                             let constraint_id = self.ac.borrow_mut().new_constraint(ac3rm::Constraint::Forbid(right.var, **left as i32));
-                            if let Some(res_id) = c_res() {
+                            if let Some(res_id) = *self.c_res.borrow() {
                                 self.resolvers.borrow_mut().get_mut(*res_id).expect("Invalid resolver ID").add_ac_constraint(constraint_id);
                                 true
                             } else {
                                 self.ac.borrow_mut().assert(constraint_id).is_ok()
                             }
-                        } else if let Some(rho) = c_rho() {
-                            self.sat.borrow_mut().add_clause(vec![neg(rho)]).is_ok()
+                        } else if let Some(res_id) = *self.c_res.borrow() {
+                            self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").rho())]).is_ok()
                         } else {
                             false
                         }
@@ -842,14 +858,22 @@ impl Core for SolverState {
                 BoolExpr::Lt { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_lin_guard();
-                    return self.lin.borrow_mut().new_ge(&left_lin, &right_lin, lin_cnstr).is_ok();
+                    if let Some(res_id) = *self.c_res.borrow() {
+                        let lin_guard = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard().expect("Current resolver should have a linear guard");
+                        self.lin.borrow_mut().new_ge(&left_lin, &right_lin, Some(lin_guard)).is_ok()
+                    } else {
+                        self.lin.borrow_mut().new_ge(&left_lin, &right_lin, None).is_ok()
+                    }
                 }
                 BoolExpr::Leq { left, right, .. } => {
                     let left_lin = numeric_lin(left);
                     let right_lin = numeric_lin(right);
-                    let lin_cnstr = c_lin_guard();
-                    return self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, lin_cnstr).is_ok();
+                    if let Some(res_id) = *self.c_res.borrow() {
+                        let lin_guard = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").lin_guard().expect("Current resolver should have a linear guard");
+                        self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, Some(lin_guard)).is_ok()
+                    } else {
+                        self.lin.borrow_mut().new_gt(&left_lin, &right_lin, true, None).is_ok()
+                    }
                 }
                 _ => panic!("Expected BoolExpr::Term, BoolExpr::Eq, BoolExpr::Lt, or BoolExpr::Leq"),
             },
