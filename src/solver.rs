@@ -63,11 +63,11 @@ impl Solver {
                         }
                     },
                     SolverCommand::Solve(responder) => match state.solve() {
-                        true => {
+                        Ok(_) => {
                             let _ = responder.send(Ok(()));
                         }
-                        false => {
-                            let _ = responder.send(Err(SolverError::Inconsistent));
+                        Err(e) => {
+                            let _ = responder.send(Err(e));
                         }
                     },
                     SolverCommand::ToJson(responder) => {

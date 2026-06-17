@@ -29,7 +29,7 @@ pub struct SolverState {
     prop_q: RefCell<VecDeque<Lit>>,
     pub ac: RefCell<ac3rm::Engine>,
     pub lin: RefCell<linarith::Engine>,
-    flaws: RefCell<Vec<Rc<RefCell<Box<dyn Flaw>>>>>,
+    flaws: RefCell<Vec<Box<dyn Flaw>>>,
     atom_flaws: RefCell<Vec<FlawId>>,
     atom_sigmas: RefCell<Vec<VarId>>,
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
@@ -75,12 +75,9 @@ impl SolverState {
         self.prop_q.borrow_mut().push_back(lit);
     }
 
-    pub(super) fn solve(&self) -> bool {
+    pub(super) fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
-        if !self.build_graph() {
-            trace!("No solution found during graph building");
-            return false;
-        }
+        self.build_graph()?;
 
         loop {
             let resolvers = self.resolvers.borrow();
@@ -88,7 +85,7 @@ impl SolverState {
                 trace!("Best flaw to resolve: {}", flaw);
                 let (is_expanded, cost) = {
                     let flaws = self.flaws.borrow();
-                    let f = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
+                    let f = flaws.get(*flaw).expect("Invalid flaw ID");
                     (f.is_expanded(), f.cost())
                 };
                 assert!(is_expanded, "Most expensive flaw is not expanded, problem is inconsistent");
@@ -99,7 +96,7 @@ impl SolverState {
                     self.set_current_resolver(Some(resolver));
                     if let Err(_) = self.sat.borrow_mut().assert(pos(resolvers.get(*resolver).expect("Invalid resolver ID").rho())) {
                         warn!("Failed to assert resolver {}, problem is inconsistent", resolver);
-                        return false;
+                        return Err(SolverError::Inconsistent);
                     }
                     let mut sat = self.sat.borrow_mut();
                     while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
@@ -107,12 +104,12 @@ impl SolverState {
                             LBool::True => continue,
                             LBool::False => {
                                 warn!("Conflict detected when applying resolver {}, problem is inconsistent", resolver);
-                                return false;
+                                return Err(SolverError::Inconsistent);
                             }
                             LBool::Undef => {
                                 if sat.assert(lit).is_err() {
                                     warn!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
-                                    return false;
+                                    return Err(SolverError::Inconsistent);
                                 }
                             }
                         }
@@ -120,13 +117,13 @@ impl SolverState {
                     self.set_current_resolver(None);
                 } else {
                     warn!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
-                    return false;
+                    return Err(SolverError::Inconsistent);
                 }
                 self.set_current_flaw(None);
                 self.update_costs();
             } else {
                 info!("Hurray! No more flaws to resolve. Problem is consistent.");
-                return true;
+                return Ok(());
             };
         }
     }
@@ -163,13 +160,13 @@ impl SolverState {
             }
         });
         self.flaw_q.borrow_mut().push_back(flaw_id);
-        self.flaws.borrow_mut().push(Rc::new(RefCell::new(flaw)));
+        self.flaws.borrow_mut().push(flaw);
     }
 
     pub fn is_expanded(&self, atom_id: AtomId) -> bool {
         let atom_flaws = self.atom_flaws.borrow();
         let flaw_id = atom_flaws.get(*atom_id).expect("Atom should have a corresponding flaw");
-        self.flaws.borrow().get(**flaw_id).expect("Invalid flaw ID").borrow().is_expanded()
+        self.flaws.borrow().get(**flaw_id).expect("Invalid flaw ID").is_expanded()
     }
 
     pub(crate) fn get_atom_flaw(&self, atom_id: AtomId) -> FlawId {
@@ -244,8 +241,8 @@ impl SolverState {
     }
 
     pub(crate) fn add_causal_link(&self, flaw_id: FlawId, resolver_id: ResolverId) {
-        self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow_mut().add_support(resolver_id);
-        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").rho()), pos(self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").borrow().phi())]).expect("Failed to add clause for causal link");
+        self.flaws.borrow_mut().get_mut(*flaw_id).expect("Invalid flaw ID").add_support(resolver_id);
+        self.sat.borrow_mut().add_clause(vec![neg(self.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").rho()), pos(self.flaws.borrow().get(*flaw_id).expect("Invalid flaw ID").phi())]).expect("Failed to add clause for causal link");
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id, resolver_id });
     }
 
@@ -259,69 +256,70 @@ impl SolverState {
         self.c_res.replace(resolver);
     }
 
-    fn build_graph(&self) -> bool {
+    fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
-        while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").borrow().cost().is_infinite()) {
-            if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
-                let flaw_ref = self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").clone();
-                trace!("Expanding flaw {} ({})", flaw, flaw_ref.borrow().phi());
-                flaw_ref.borrow_mut().compute_resolvers();
-                let (flaw_phi, resolver_ids) = {
-                    let f = flaw_ref.borrow();
-                    (f.phi(), f.resolvers())
+        while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").cost().is_infinite()) {
+            if let Some(flaw_id) = self.flaw_q.borrow_mut().pop_front() {
+                let mut flaw = {
+                    let mut flaws = self.flaws.borrow_mut();
+                    let flaw = flaws.get_mut(*flaw_id).expect("Invalid flaw ID");
+                    std::mem::replace(flaw, Box::new(ContextFlaw {}))
                 };
-                let mut causal_constraint = vec![neg(flaw_phi)];
-                for res_id in resolver_ids {
-                    trace!("Applying resolver {}", res_id);
+
+                trace!("Expanding flaw {} ({})", flaw_id, flaw.phi());
+                flaw.compute_resolvers();
+                let phi = flaw.phi();
+                let resolvers = flaw.resolvers();
+
+                {
+                    let mut flaws = self.flaws.borrow_mut();
+                    let ctx_flaw = flaws.get_mut(*flaw_id).expect("Invalid flaw ID");
+                    *ctx_flaw = flaw;
+                }
+
+                let mut causal_constraint = vec![neg(phi)];
+                for res_id in resolvers {
                     self.set_current_resolver(Some(res_id));
-                    let (mut resolver, rho) = {
+                    let mut resolver = {
                         let mut resolvers = self.resolvers.borrow_mut();
-                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
-                        let rho = slot.rho();
-                        let placeholder = Box::new(Context::new(slot.id(), slot.flaw(), rho, slot.lin_guard()));
-                        (std::mem::replace(slot, placeholder), rho)
+                        let resolver = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        std::mem::replace(resolver, Box::new(ContextRes::new(resolver.lin_guard())))
                     };
 
-                    if resolver.apply().is_err() {
-                        let mut resolvers = self.resolvers.borrow_mut();
-                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
-                        *slot = resolver;
-                        trace!("Failed to apply resolver {}", res_id);
-                        return false;
+                    trace!("Applying resolver {} ({})", res_id, resolver.rho());
+                    resolver.apply()?;
+                    let rho = resolver.rho();
+                    if rho != phi {
+                        causal_constraint.push(pos(rho));
+                    }
+                    if let Some(constraints) = self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").ac_constraints() {
+                        for constraint in constraints {
+                            resolver.add_ac_constraint(constraint);
+                        }
+                    }
+                    for requirement in self.resolvers.borrow().get(*res_id).expect("Invalid resolver ID").requirements() {
+                        resolver.add_requirement(requirement);
                     }
 
                     {
                         let mut resolvers = self.resolvers.borrow_mut();
-                        let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
-                        if let Some(constraints) = slot.ac_constraints() {
-                            for constraint in constraints {
-                                resolver.add_ac_constraint(constraint);
-                            }
-                        }
-                        for requirement in resolver.requirements() {
-                            resolver.add_requirement(requirement);
-                        }
-                        *slot = resolver;
-                    }
-
-                    if rho != flaw_phi {
-                        causal_constraint.push(pos(rho));
+                        let ctx_res = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
+                        *ctx_res = resolver;
                     }
                 }
+
                 self.set_current_resolver(None);
                 if causal_constraint.len() > 1
                     && let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint)
                 {
-                    trace!("Failed to add causal constraint for flaw {}", flaw);
-                    return false;
+                    return Err(SolverError::RuntimeError(format!("Failed to add causal constraint for flaw {}", flaw_id)));
                 }
-                self.compute_flaw_cost(flaw);
+                self.compute_flaw_cost(flaw_id);
             } else {
-                trace!("No more active flaws to expand, but some flaws have infinite cost. No solution found.");
-                return false;
+                return Err(SolverError::RuntimeError("No more active flaws to expand, but some flaws have infinite cost. No solution found.".into()));
             }
         }
-        true
+        Ok(())
     }
 
     fn update_costs(&self) {
@@ -342,8 +340,8 @@ impl SolverState {
 
             let (phi, resolver_ids, old_cost, supports) = {
                 let flaws = self.flaws.borrow();
-                let f = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
-                (f.phi(), f.resolvers(), f.cost(), f.supports())
+                let flaw = flaws.get(*flaw).expect("Invalid flaw ID");
+                (flaw.phi(), flaw.resolvers(), flaw.cost(), flaw.supports())
             };
 
             if self.sat.borrow().value(phi) != LBool::False && visited.insert(flaw_id) {
@@ -360,11 +358,7 @@ impl SolverState {
 
             if old_cost != current_cost {
                 trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
-                let flaw_ref = {
-                    let flaws = self.flaws.borrow();
-                    flaws.get(*flaw_id).expect("Invalid flaw ID").clone()
-                };
-                flaw_ref.borrow_mut().set_cost(current_cost);
+                self.flaws.borrow_mut().get_mut(*flaw_id).expect("Invalid flaw ID").set_cost(current_cost);
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
                 for support in supports {
                     let support = resolvers.get(*support).expect("Invalid flaw cause");
@@ -377,55 +371,102 @@ impl SolverState {
     fn compute_resolver_cost(&self, resolver: ResolverId) -> Rational {
         let resolvers = self.resolvers.borrow();
         let resolver = resolvers.get(*resolver).expect("Invalid resolver ID");
-        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid resolver requirement").borrow().cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
+        resolver.requirements().iter().map(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid resolver requirement").cost()).fold(resolver.intrinsic_cost(), |max_cost, c| if c > max_cost { c } else { max_cost })
     }
 
     fn get_most_expensive_flaw(&self) -> Option<FlawId> {
         let flaws = self.flaws.borrow();
-        self.active_flaws.borrow().iter().max_by_key(|flaw| flaws.get(***flaw).expect("Invalid flaw ID").borrow().cost()).copied()
+        self.active_flaws.borrow().iter().max_by_key(|flaw| flaws.get(***flaw).expect("Invalid flaw ID").cost()).copied()
     }
 
-    fn get_least_expensive_resolver(&self, flaw: FlawId) -> Option<ResolverId> {
+    fn get_least_expensive_resolver(&self, flaw_id: FlawId) -> Option<ResolverId> {
         let resolvers = self.resolvers.borrow();
         let flaws = self.flaws.borrow();
-        let flaw = flaws.get(*flaw).expect("Invalid flaw ID").borrow();
+        let flaw = flaws.get(*flaw_id).expect("Invalid flaw ID");
         flaw.resolvers().iter().filter_map(|res_id| if self.sat.borrow().value(resolvers.get(**res_id).expect("Invalid resolver ID").rho()) != LBool::False { Some((res_id, self.compute_resolver_cost(*res_id))) } else { None }).min_by_key(|(_, cost)| *cost).map(|(res_id, _)| *res_id)
     }
 }
 
-struct Context {
-    id: ResolverId,
-    flaw: FlawId,
-    rho: VarId,
+struct ContextFlaw {}
+
+impl Flaw for ContextFlaw {
+    fn solver(&self) -> Rc<SolverState> {
+        panic!("ContextFlaw::solver should not be called")
+    }
+    fn id(&self) -> FlawId {
+        panic!("ContextFlaw::id should not be called")
+    }
+    fn phi(&self) -> VarId {
+        panic!("ContextFlaw::phi should not be called")
+    }
+    fn causes(&self) -> Vec<ResolverId> {
+        panic!("ContextFlaw::causes should not be called")
+    }
+    fn supports(&self) -> Vec<ResolverId> {
+        panic!("ContextFlaw::supports should not be called")
+    }
+    fn add_support(&mut self, _support_id: ResolverId) {
+        panic!("ContextFlaw::add_support should not be called")
+    }
+    fn resolvers(&self) -> Vec<ResolverId> {
+        panic!("ContextFlaw::resolvers should not be called")
+    }
+    fn cost(&self) -> Rational {
+        panic!("ContextFlaw::cost should not be called")
+    }
+    fn set_cost(&mut self, _cost: Rational) {
+        panic!("ContextFlaw::set_cost should not be called")
+    }
+    fn is_expanded(&self) -> bool {
+        panic!("ContextFlaw::is_expanded should not be called")
+    }
+    fn compute_resolvers(&mut self) {
+        panic!("ContextFlaw::compute_resolvers should not be called")
+    }
+    fn add_resolver(&mut self, _resolver_id: ResolverId) {
+        panic!("ContextFlaw::add_resolver should not be called")
+    }
+}
+
+impl ToJson for ContextFlaw {
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "placeholder",
+            "flaw": "context",
+        })
+    }
+}
+
+struct ContextRes {
     lin_guard: linarith::GuardId,
     ac_constraints: Vec<ac3rm::ConstraintId>,
 }
 
-impl Context {
-    fn new(id: ResolverId, flaw: FlawId, rho: VarId, lin_guard: linarith::GuardId) -> Self {
-        Self { id, flaw, rho, lin_guard, ac_constraints: Vec::new() }
+impl ContextRes {
+    fn new(lin_guard: linarith::GuardId) -> Self {
+        Self { lin_guard, ac_constraints: Vec::new() }
     }
 }
 
-impl Resolver for Context {
+impl Resolver for ContextRes {
     fn solver(&self) -> Rc<SolverState> {
         panic!("ResolverPlaceholder::solver should not be called")
     }
 
     fn id(&self) -> ResolverId {
-        self.id
+        panic!("ResolverPlaceholder::id should not be called")
     }
 
     fn flaw(&self) -> FlawId {
-        self.flaw
+        panic!("ResolverPlaceholder::flaw should not be called")
     }
 
     fn rho(&self) -> VarId {
-        self.rho
+        panic!("ResolverPlaceholder::rho should not be called")
     }
 
     fn intrinsic_cost(&self) -> Rational {
-        Rational::POSITIVE_INFINITY
+        panic!("ResolverPlaceholder::intrinsic_cost should not be called")
     }
 
     fn apply(&mut self) -> Result<(), SolverError> {
@@ -445,11 +486,11 @@ impl Resolver for Context {
     }
 }
 
-impl ToJson for Context {
+impl ToJson for ContextRes {
     fn to_json(&self) -> Value {
         json!({
             "kind": "placeholder",
-            "resolver": self.id.0,
+            "resolver": "context",
         })
     }
 }
@@ -851,7 +892,7 @@ impl Core for SolverState {
 impl ToJson for SolverState {
     fn to_json(&self) -> Value {
         let mut slv = json!({
-            "flaws": self.flaws.borrow().iter().map(|f| f.borrow().to_json()).collect::<Vec<_>>(),
+            "flaws": self.flaws.borrow().iter().map(|f| f.to_json()).collect::<Vec<_>>(),
             "resolvers": self.resolvers.borrow().iter().map(|r| r.to_json()).collect::<Vec<_>>(),
         });
         if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
