@@ -98,22 +98,7 @@ impl SolverState {
                         warn!("Failed to assert resolver {}, problem is inconsistent", resolver);
                         return Err(SolverError::Inconsistent);
                     }
-                    let mut sat = self.sat.borrow_mut();
-                    while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
-                        match sat.lit_value(&lit) {
-                            LBool::True => continue,
-                            LBool::False => {
-                                warn!("Conflict detected when applying resolver {}, problem is inconsistent", resolver);
-                                return Err(SolverError::Inconsistent);
-                            }
-                            LBool::Undef => {
-                                if sat.assert(lit).is_err() {
-                                    warn!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
-                                    return Err(SolverError::Inconsistent);
-                                }
-                            }
-                        }
-                    }
+                    self.propagate()?;
                     self.set_current_resolver(None);
                 } else {
                     warn!("No applicable resolver for flaw {}, problem is inconsistent", flaw);
@@ -332,6 +317,8 @@ impl SolverState {
                         }
                         *ctx_res = resolver;
                     }
+
+                    self.propagate()?;
                     self.set_current_resolver(None);
                 }
 
@@ -340,10 +327,30 @@ impl SolverState {
                 {
                     return Err(SolverError::RuntimeError(format!("Failed to add causal constraint for flaw {}", flaw_id)));
                 }
+                self.propagate()?;
                 self.compute_flaw_cost(flaw_id);
                 self.set_current_flaw(None);
             } else {
                 return Err(SolverError::RuntimeError("No more active flaws to expand, but some flaws have infinite cost. No solution found.".into()));
+            }
+        }
+        Ok(())
+    }
+
+    fn propagate(&self) -> Result<(), SolverError> {
+        while let Some(lit) = self.prop_q.borrow_mut().pop_front() {
+            match self.sat.borrow().lit_value(&lit) {
+                LBool::True => continue,
+                LBool::False => {
+                    warn!("Conflict detected during propagation, problem is inconsistent");
+                    return Err(SolverError::Inconsistent);
+                }
+                LBool::Undef => {
+                    if self.sat.borrow_mut().assert(lit).is_err() {
+                        warn!("Failed to assert literal during propagation, problem is inconsistent");
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
             }
         }
         Ok(())
