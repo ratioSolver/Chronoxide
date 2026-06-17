@@ -163,8 +163,8 @@ impl Resolver for UnifyAtom {
             for (_, name) in pred.args() {
                 terms.push(Rc::new(BoolExpr::Eq {
                     var_type: Rc::downgrade(&solver.bool_type()),
-                    left: atom.get(name).expect("Atom should have the argument").into(),
-                    right: target.get(name).expect("Target atom should have the argument").into(),
+                    left: atom.get(name).expect("Atom should have the argument"),
+                    right: target.get(name).expect("Target atom should have the argument"),
                 }));
             }
             for super_pred in pred.parents() {

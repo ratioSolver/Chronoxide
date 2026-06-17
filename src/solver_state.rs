@@ -110,7 +110,7 @@ impl SolverState {
                                 return false;
                             }
                             LBool::Undef => {
-                                if let Err(_) = sat.assert(lit) {
+                                if sat.assert(lit).is_err() {
                                     warn!("Failed to add clause for resolver {}, problem is inconsistent", resolver);
                                     return false;
                                 }
@@ -173,11 +173,11 @@ impl SolverState {
     }
 
     pub(crate) fn get_atom_flaw(&self, atom_id: AtomId) -> FlawId {
-        self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").clone()
+        *self.atom_flaws.borrow().get(*atom_id).expect("Atom should have a corresponding flaw")
     }
 
     pub(crate) fn get_sigma(&self, atom_id: AtomId) -> VarId {
-        self.atom_sigmas.borrow().get(*atom_id).expect("Atom should have a corresponding flaw").clone()
+        *self.atom_sigmas.borrow().get(*atom_id).expect("Atom should have a corresponding flaw")
     }
 
     pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
@@ -282,7 +282,7 @@ impl SolverState {
                         (std::mem::replace(slot, placeholder), rho)
                     };
 
-                    if let Err(_) = resolver.apply() {
+                    if resolver.apply().is_err() {
                         let mut resolvers = self.resolvers.borrow_mut();
                         let slot = resolvers.get_mut(*res_id).expect("Invalid resolver ID");
                         *slot = resolver;
@@ -837,7 +837,7 @@ impl Core for SolverState {
         self.atom_flaws.borrow_mut().push(flaw_id);
         let sigma = self.sat.borrow_mut().add_var();
         self.atom_sigmas.borrow_mut().push(sigma);
-        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm.clone()));
+        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho.var(), cause, atm));
         if let Some(res) = c_res {
             self.resolvers.borrow_mut().get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
         }
