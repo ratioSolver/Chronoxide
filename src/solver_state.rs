@@ -178,12 +178,14 @@ impl SolverState {
     }
 
     pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
+        assert!(flaw.id() == resolver.flaw(), "Resolver {} does not resolve flaw {}", resolver.id(), flaw.id());
+        let flaw_id = flaw.id();
         let resolver_id = resolver.id();
         trace!("Adding resolver: {} ({})", resolver_id, resolver.rho());
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id,
             rho: resolver.rho(),
-            flaw_id: resolver.flaw(),
+            flaw_id,
             requirements: resolver.requirements(),
             intrinsic_cost: resolver.intrinsic_cost(),
             status: self.sat.borrow().value(resolver.rho()),
@@ -197,7 +199,6 @@ impl SolverState {
             }
         }
         let active_flaws = self.active_flaws.clone();
-        let resolver_flaw = resolver.flaw();
         let solver = self.slv.upgrade().expect("SolverState has been dropped");
         self.sat.borrow_mut().add_listener(resolver.rho(), {
             let tx_event = self.tx_event.clone();
@@ -214,14 +215,14 @@ impl SolverState {
                             }
                         }
                         let mut active_flaws = active_flaws.borrow_mut();
-                        if active_flaws.remove(&resolver_flaw) {
-                            trace!("Flaw {} resolved by resolver {}", resolver_flaw, resolver_id);
+                        if active_flaws.remove(&flaw_id) {
+                            trace!("Flaw {} resolved by resolver {}", flaw_id, resolver_id);
                             trace!("Active flaws count: {}", active_flaws.len());
                         }
-                        to_recompute.borrow_mut().remove(&resolver_flaw);
+                        to_recompute.borrow_mut().remove(&flaw_id);
                     }
                     LBool::False => {
-                        to_recompute.borrow_mut().insert(resolver_flaw);
+                        to_recompute.borrow_mut().insert(flaw_id);
                     }
                     LBool::Undef => {}
                 }
