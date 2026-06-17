@@ -133,7 +133,7 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let flaw_id = flaw.id();
-        trace!("Adding flaw: {}", flaw_id);
+        trace!("Adding flaw: {} ({})", flaw_id, flaw.phi());
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id,
             phi: flaw.phi(),
@@ -182,7 +182,7 @@ impl SolverState {
 
     pub fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
         let resolver_id = resolver.id();
-        trace!("Adding resolver: {}", resolver_id);
+        trace!("Adding resolver: {} ({})", resolver_id, resolver.rho());
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id,
             rho: resolver.rho(),
@@ -232,8 +232,10 @@ impl SolverState {
             }
         });
 
+        if resolver.rho() != flaw.phi() {
+            self.sat.borrow_mut().add_clause(vec![neg(resolver.rho()), pos(flaw.phi())]).expect("Failed to add clause for OR flaw resolver");
+        }
         flaw.add_resolver(resolver_id);
-        self.sat.borrow_mut().add_clause(vec![neg(resolver.rho()), pos(flaw.phi())]).expect("Failed to add clause for OR flaw resolver");
         self.resolvers.borrow_mut().push(resolver);
     }
 
@@ -261,8 +263,8 @@ impl SolverState {
         info!("Building graph...");
         while self.active_flaws.borrow().iter().any(|flaw| self.flaws.borrow().get(**flaw).expect("Invalid flaw ID").borrow().cost().is_infinite()) {
             if let Some(flaw) = self.flaw_q.borrow_mut().pop_front() {
-                trace!("Expanding flaw {}", flaw);
                 let flaw_ref = self.flaws.borrow().get(*flaw).expect("Invalid flaw ID").clone();
+                trace!("Expanding flaw {} ({})", flaw, flaw_ref.borrow().phi());
                 flaw_ref.borrow_mut().compute_resolvers();
                 let (flaw_phi, resolver_ids) = {
                     let f = flaw_ref.borrow();
@@ -302,10 +304,14 @@ impl SolverState {
                         *slot = resolver;
                     }
 
-                    causal_constraint.push(pos(rho));
+                    if rho != flaw_phi {
+                        causal_constraint.push(pos(rho));
+                    }
                 }
                 self.set_current_resolver(None);
-                if let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint) {
+                if causal_constraint.len() > 1
+                    && let Err(_) = self.sat.borrow_mut().add_clause(causal_constraint)
+                {
                     trace!("Failed to add causal constraint for flaw {}", flaw);
                     return false;
                 }

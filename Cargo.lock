@@ -343,7 +343,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 [[package]]
 name = "linarith"
 version = "0.1.0"
-source = "git+https://github.com/pstlab/LinArith#955ef65e1cc727bbc9bc882351180aa593853c42"
+source = "git+https://github.com/pstlab/LinArith#dce7fe01bea16709cb51b02b8136ff3aceb2c9e9"
 dependencies = [
  "tracing",
 ]
@@ -931,7 +931,7 @@ dependencies = [
 [[package]]
 name = "watchsat"
 version = "0.1.0"
-source = "git+https://github.com/pstlab/WatchSAT#1e67b9087050f9fb2de74a339bb3c769a83d107a"
+source = "git+https://github.com/pstlab/WatchSAT#5ca543029977d60818d452deca2c8129868f31d7"
 dependencies = [
  "tracing",
 ]
