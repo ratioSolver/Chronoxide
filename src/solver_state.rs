@@ -203,7 +203,7 @@ impl SolverState {
         self.sat.borrow_mut().add_listener(resolver.rho(), {
             let tx_event = self.tx_event.clone();
             let to_recompute = self.to_recompute.clone();
-            move |_var, val| {
+            move |var, val| {
                 match val {
                     LBool::True => {
                         trace!("Resolver {} became active", resolver_id);
@@ -212,7 +212,11 @@ impl SolverState {
                                 Ok(_) => {
                                     trace!("Applied AC constraints for resolver {} successfully.", resolver_id);
                                 }
-                                Err(e) => trace!("Failed to apply AC constraints for resolver {} with error: {:?}. Problem might be inconsistent.", resolver_id, e),
+                                Err(e) => {
+                                    trace!("Failed to apply AC constraints for resolver {} with error: {:?}. Problem might be inconsistent.", resolver_id, e);
+                                    solver.enqueue(neg(var));
+                                    return;
+                                }
                             }
                         }
                         if let Some(lin_guard) = solver.resolvers.borrow().get(*resolver_id).expect("Invalid resolver ID").lin_guard() {
@@ -220,7 +224,11 @@ impl SolverState {
                                 Ok(_) => {
                                     trace!("Applied linear constraint for resolver {} successfully.", resolver_id);
                                 }
-                                Err(e) => trace!("Failed to apply linear constraint for resolver {} with error: {:?}. Problem might be inconsistent.", resolver_id, e),
+                                Err(e) => {
+                                    trace!("Failed to apply linear constraint for resolver {} with error: {:?}. Problem might be inconsistent.", resolver_id, e);
+                                    solver.enqueue(neg(var));
+                                    return;
+                                }
                             }
                         }
                         let mut active_flaws = active_flaws.borrow_mut();
