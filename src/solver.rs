@@ -3,7 +3,7 @@ use riddle::{
     core::{CommonCore, Core},
     env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot},
     language::Disjunction,
-    scope::{Class, Field, Function, Predicate, Scope, Type},
+    scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
 use serde_json::{Value, json};
 use std::{
@@ -12,6 +12,12 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace, warn};
+use z3::{
+    Goal,
+    ast::{Bool, Int, Real},
+};
+
+use crate::objects::{BoolVar, IntVar, RealVar, StringVar};
 
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
@@ -109,6 +115,7 @@ impl Solver {
 pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
+    constrs: Goal,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -120,6 +127,7 @@ impl SolverState {
                 CommonCore::new(core)
             },
             slv: core.clone(),
+            constrs: Goal::new(false, false, false),
             tx_event,
         })
     }
@@ -190,41 +198,151 @@ impl Env for SolverState {
 
 impl Core for SolverState {
     fn new_bool(&self, value: bool) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), Bool::from_bool(value))))
     }
     fn new_bool_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), Bool::fresh_const("b"))))
     }
     fn new_int(&self, value: i64) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::from_i64(value))))
     }
     fn new_int_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::fresh_const("i"))))
     }
     fn new_real(&self, num: i64, den: i64) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::from_rational(num, den))))
     }
     fn new_real_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::fresh_const("r"))))
     }
     fn new_string(&self, value: &str) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(StringVar::new(self.string_type(), z3::ast::String::from(value))))
     }
     fn new_string_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(StringVar::new(self.string_type(), z3::ast::String::fresh_const("s"))))
     }
 
     fn sum(&self, sum: &[Slot]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let tp = arith_type(self, sum)?;
+        match tp.name() {
+            "int" => {
+                let ints = sum
+                    .iter()
+                    .map(|s| match s {
+                        Slot::Primitive(var) => {
+                            if let Some(var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                                Ok(var.lit.clone())
+                            } else {
+                                Err(RiddleError::RuntimeError("Expected int".to_string()))
+                            }
+                        }
+                        _ => return Err(RiddleError::TypeError("Expected int".to_string())),
+                    })
+                    .collect::<Result<Vec<_>, RiddleError>>()?;
+                Ok(Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::add(&ints)))))
+            }
+            "real" => {
+                let reals = sum
+                    .iter()
+                    .map(|s| match s {
+                        Slot::Primitive(var) => {
+                            if let Some(var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                                Ok(var.lit.to_real())
+                            } else if let Some(var) = var.clone().as_any().downcast_ref::<RealVar>() {
+                                Ok(var.lit.clone())
+                            } else {
+                                Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                            }
+                        }
+                        _ => return Err(RiddleError::TypeError("Expected real".to_string())),
+                    })
+                    .collect::<Result<Vec<_>, RiddleError>>()?;
+                Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::add(&reals)))))
+            }
+            _ => Err(RiddleError::TypeError("Expected int or real".to_string())),
+        }
     }
     fn opposite(&self, term: Slot) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        match term {
+            Slot::Primitive(var) => {
+                if let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>() {
+                    Ok(Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var.lit.not()))))
+                } else if let Some(var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                    Ok(Slot::Primitive(Rc::new(IntVar::new(self.int_type(), var.lit.unary_minus()))))
+                } else if let Some(var) = var.clone().as_any().downcast_ref::<RealVar>() {
+                    Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), var.lit.unary_minus()))))
+                } else {
+                    Err(RiddleError::RuntimeError("Expected bool, int or real".to_string()))
+                }
+            }
+            _ => Err(RiddleError::TypeError("Expected bool, int or real".to_string())),
+        }
     }
     fn mul(&self, mul: &[Slot]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let tp = arith_type(self, mul)?;
+        match tp.name() {
+            "int" => {
+                let ints = mul
+                    .iter()
+                    .map(|s| match s {
+                        Slot::Primitive(var) => {
+                            if let Some(var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                                Ok(var.lit.clone())
+                            } else {
+                                Err(RiddleError::RuntimeError("Expected int".to_string()))
+                            }
+                        }
+                        _ => return Err(RiddleError::TypeError("Expected int".to_string())),
+                    })
+                    .collect::<Result<Vec<_>, RiddleError>>()?;
+                Ok(Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::mul(&ints)))))
+            }
+            "real" => {
+                let reals = mul
+                    .iter()
+                    .map(|s| match s {
+                        Slot::Primitive(var) => {
+                            if let Some(var) = var.clone().as_any().downcast_ref::<IntVar>() {
+                                Ok(var.lit.to_real())
+                            } else if let Some(var) = var.clone().as_any().downcast_ref::<RealVar>() {
+                                Ok(var.lit.clone())
+                            } else {
+                                Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                            }
+                        }
+                        _ => return Err(RiddleError::TypeError("Expected real".to_string())),
+                    })
+                    .collect::<Result<Vec<_>, RiddleError>>()?;
+                Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::mul(&reals)))))
+            }
+            _ => Err(RiddleError::TypeError("Expected int or real".to_string())),
+        }
     }
     fn div(&self, left: Slot, right: Slot) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        match (left, right) {
+            (Slot::Primitive(left_var), Slot::Primitive(right_var)) => {
+                if let Some(left_var) = left_var.clone().as_any().downcast_ref::<IntVar>() {
+                    if let Some(right_var) = right_var.clone().as_any().downcast_ref::<IntVar>() {
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.to_real().div(&right_var.lit.to_real())))))
+                    } else if let Some(right_var) = right_var.clone().as_any().downcast_ref::<RealVar>() {
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.to_real().div(&right_var.lit)))))
+                    } else {
+                        Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                    }
+                } else if let Some(left_var) = left_var.clone().as_any().downcast_ref::<RealVar>() {
+                    if let Some(right_var) = right_var.clone().as_any().downcast_ref::<IntVar>() {
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.div(&right_var.lit.to_real())))))
+                    } else if let Some(right_var) = right_var.clone().as_any().downcast_ref::<RealVar>() {
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.div(&right_var.lit)))))
+                    } else {
+                        Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                    }
+                } else {
+                    Err(RiddleError::RuntimeError("Expected int or real".to_string()))
+                }
+            }
+            _ => Err(RiddleError::TypeError("Expected int or real".to_string())),
+        }
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
