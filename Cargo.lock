@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "ac3rm"
-version = "0.1.1"
-source = "git+https://github.com/pstlab/AC-3rm#ab9c4cf72b925e5a23d7b8ad4fb5ee91e039077d"
-dependencies = [
- "tracing",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,16 +100,14 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 name = "chronoxide"
 version = "0.1.0"
 dependencies = [
- "ac3rm",
  "axum",
- "linarith",
  "riddle-lang",
  "serde_json",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "watchsat",
+ "z3",
 ]
 
 [[package]]
@@ -341,14 +331,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "linarith"
-version = "0.1.0"
-source = "git+https://github.com/pstlab/LinArith#dce7fe01bea16709cb51b02b8136ff3aceb2c9e9"
-dependencies = [
- "tracing",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -453,6 +435,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,7 +514,8 @@ dependencies = [
 [[package]]
 name = "riddle-lang"
 version = "0.2.0"
-source = "git+https://github.com/pstlab/RiDDLe#973fa123661784874bfcc9b73c4d037775e84403"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2429645eb822c0a0de9fd8f8b4b3cabf531b6ca0dd57ed89e6c8a4093ed215d"
 
 [[package]]
 name = "ryu"
@@ -774,9 +763,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.11"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
+checksum = "b11f75e912b0c2be01b63d8cf8057b8c3f97cf34abb3d431a3a4c8675498e233"
 dependencies = [
  "bitflags",
  "bytes",
@@ -929,14 +918,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "watchsat"
-version = "0.1.0"
-source = "git+https://github.com/pstlab/WatchSAT#5ca543029977d60818d452deca2c8129868f31d7"
-dependencies = [
- "tracing",
-]
-
-[[package]]
 name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -956,6 +937,25 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "z3"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80c4de445f5c9e3013703a6b8a40c80b4a64c925f0a19e7d0a23a7a9b70e854d"
+dependencies = [
+ "log",
+ "z3-sys",
+]
+
+[[package]]
+name = "z3-sys"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c18b0a91a13522d21b3414847667de2b2056a721a3edcb5b6ee6858352d58db4"
+dependencies = [
+ "pkg-config",
+]
 
 [[package]]
 name = "zerocopy"
