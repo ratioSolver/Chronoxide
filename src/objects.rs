@@ -1,5 +1,5 @@
 use riddle::{
-    env::Var,
+    env::{ObjectId, Var},
     scope::{BoolType, IntType, RealType, StringType, Type},
 };
 use std::{
@@ -87,6 +87,28 @@ impl StringVar {
 }
 
 impl Var for StringVar {
+    fn var_type(&self) -> Rc<dyn Type> {
+        self.var_type.upgrade().expect("Type has been dropped").clone()
+    }
+
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
+    }
+}
+
+#[derive(Debug)]
+pub struct EnumVar {
+    var_type: Weak<dyn Type>,
+    pub(crate) var: Int,
+}
+
+impl EnumVar {
+    pub(crate) fn new(var_type: Rc<dyn Type>, var: Int) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), var }
+    }
+}
+
+impl Var for EnumVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped").clone()
     }

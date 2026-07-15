@@ -1,3 +1,4 @@
+use crate::objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar};
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
@@ -13,11 +14,9 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace, warn};
 use z3::{
-    DatatypeBuilder, DatatypeSort, Goal,
+    Goal,
     ast::{Bool, Int, Real},
 };
-
-use crate::objects::{BoolVar, IntVar, RealVar, StringVar};
 
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
@@ -349,7 +348,13 @@ impl Core for SolverState {
         unimplemented!()
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let var = Int::fresh_const("e");
+        for id in instances {
+            let instance_var = Int::from_i64(**id as i64);
+            let eq = var.eq(&instance_var);
+            self.constrs.assert(&eq);
+        }
+        Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
         unimplemented!()
@@ -362,9 +367,10 @@ impl Core for SolverState {
         self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
-        unimplemented!()
+        let atm = self.core.new_atom(predicate, fact, args);
+        atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
-        unimplemented!()
+        self.core.get_atom(id)
     }
 }
