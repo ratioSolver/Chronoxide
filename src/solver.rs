@@ -13,7 +13,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace, warn};
 use z3::{
-    Goal,
+    DatatypeBuilder, DatatypeSort, Goal,
     ast::{Bool, Int, Real},
 };
 
@@ -356,10 +356,10 @@ impl Core for SolverState {
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
-        unimplemented!()
+        self.core.new_object(class)
     }
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
-        unimplemented!()
+        self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         unimplemented!()
