@@ -403,17 +403,174 @@ impl Core for SolverState {
                         self.assert(&left.lit.eq(&right.lit.to_real()));
                     } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
                         self.assert(&left.val.eq(&right.val));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
+                        self.assert(&left.var.eq(&right.var));
                     } else {
-                        panic!("Expected same type for equality");
+                        panic!("Expected compatible primitive types for equality");
                     }
                 }
-                (Slot::Primitive(left), Slot::ObjectRef(right)) => {}
-                (Slot::ObjectRef(left), Slot::Primitive(right)) => {}
-                _ => {}
+                (Slot::Primitive(left), Slot::ObjectRef(right)) => {
+                    if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                        self.assert(&left.var.eq(&Int::from_i64(**right as i64)));
+                    } else {
+                        panic!("Expected EnumVar on the left side of equality");
+                    }
+                }
+                (Slot::ObjectRef(left), Slot::Primitive(right)) => {
+                    if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                        self.assert(&Int::from_i64(**left as i64).eq(&right.var));
+                    } else {
+                        panic!("Expected EnumVar on the right side of equality");
+                    }
+                }
+                _ => {
+                    panic!("Expected compatible types for equality");
+                }
             },
-            _ => {
-                return false;
+            BoolExpr::Lt { left, right, .. } => {
+                if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right) {
+                    if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.lt(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.lt(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.to_real().lt(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.lt(&right.lit.to_real()));
+                    } else {
+                        panic!("Expected compatible primitive types for less than");
+                    }
+                } else {
+                    panic!("Expected primitive types for less than");
+                }
             }
+            BoolExpr::Leq { left, right, .. } => {
+                if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right) {
+                    if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.le(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.le(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.to_real().le(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.le(&right.lit.to_real()));
+                    } else {
+                        panic!("Expected compatible primitive types for less than or equal");
+                    }
+                } else {
+                    panic!("Expected primitive types for less than or equal");
+                }
+            }
+            BoolExpr::Or { terms, .. } => {
+                self.assert(&Bool::or(
+                    &terms
+                        .iter()
+                        .map(|t| {
+                            if let BoolExpr::Term { term, .. } = t.as_ref() {
+                                if let Slot::Primitive(var) = term {
+                                    if let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>() {
+                                        return var.lit.clone();
+                                    }
+                                }
+                            }
+                            panic!("Expected BoolExpr::Term with BoolVar in disjunction");
+                        })
+                        .collect::<Vec<_>>(),
+                ));
+            }
+            BoolExpr::And { terms, .. } => {
+                self.assert(&Bool::and(
+                    &terms
+                        .iter()
+                        .map(|t| {
+                            if let BoolExpr::Term { term, .. } = t.as_ref() {
+                                if let Slot::Primitive(var) = term {
+                                    if let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>() {
+                                        return var.lit.clone();
+                                    }
+                                }
+                            }
+                            panic!("Expected BoolExpr::Term with BoolVar in conjunction");
+                        })
+                        .collect::<Vec<_>>(),
+                ));
+            }
+            BoolExpr::Not { term, .. } => match term.as_ref() {
+                BoolExpr::Term { term, .. } => {
+                    if let Slot::Primitive(var) = term {
+                        if let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>() {
+                            self.assert(&var.lit.not());
+                        } else {
+                            panic!("Expected BoolVar in negation");
+                        }
+                    } else {
+                        panic!("Expected BoolVar in negation");
+                    }
+                }
+                BoolExpr::Eq { left, right, .. } => match (left, right) {
+                    (Slot::Primitive(left), Slot::Primitive(right)) => {
+                        if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
+                            self.assert(&left.lit.ne(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.ne(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.ne(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.to_real().ne(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.ne(&right.lit.to_real()));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
+                            self.assert(&left.val.ne(&right.val));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
+                            self.assert(&left.var.ne(&right.var));
+                        } else {
+                            panic!("Expected compatible primitive types in negated equality");
+                        }
+                    }
+                    _ => {
+                        panic!("Expected primitive types in negated equality");
+                    }
+                },
+                BoolExpr::Lt { left, right, .. } => match (left, right) {
+                    (Slot::Primitive(left), Slot::Primitive(right)) => {
+                        if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.ge(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.ge(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.to_real().ge(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.ge(&right.lit.to_real()));
+                        } else {
+                            panic!("Expected compatible primitive types in negated less than");
+                        }
+                    }
+                    _ => {
+                        panic!("Expected primitive types in negated less than");
+                    }
+                },
+                BoolExpr::Leq { left, right, .. } => match (left, right) {
+                    (Slot::Primitive(left), Slot::Primitive(right)) => {
+                        if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.gt(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.gt(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                            self.assert(&left.lit.to_real().gt(&right.lit));
+                        } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                            self.assert(&left.lit.gt(&right.lit.to_real()));
+                        } else {
+                            panic!("Expected compatible primitive types in negated less than or equal");
+                        }
+                    }
+                    _ => {
+                        panic!("Expected primitive types in negated less than or equal");
+                    }
+                },
+                _ => {
+                    panic!("Expected term, equality, less than, or less than or equal in negation");
+                }
+            },
         }
         true
     }

@@ -1,5 +1,5 @@
 use riddle::{
-    env::{ObjectId, Var},
+    env::Var,
     scope::{BoolType, IntType, RealType, StringType, Type},
 };
 use std::{
