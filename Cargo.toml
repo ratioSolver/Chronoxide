@@ -21,7 +21,7 @@ path = "src/bin/server.rs"
 required-features = ["server"]
 
 [dependencies]
-riddle-lang = "0.2.0"
+riddle-lang = "0.2.1"
 z3 = { version = "0.20.2", features = ["vendored"] }
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.0", features = ["fs"], optional = true }
