@@ -19,7 +19,7 @@ jobs:
     - name: Install Z3 (Latest Release)
       run: |
         # Download a recent pre-compiled Z3 for Ubuntu
-        wget https://github.com/Z3Prover/z3/releases/download/z3-4.13.0/z3-4.13.0-x64-glibc-2.39.zip -O z3.zip
+        wget https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-glibc-2.39.zip -O z3.zip
         unzip z3.zip
         
         # Move binaries, headers, and libraries to system paths
