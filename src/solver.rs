@@ -1,5 +1,5 @@
 use crate::{
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    graph::{AtomFlaw, Flaw, FlawId, Resolver, ResolverId},
     objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar},
 };
 use riddle::{
@@ -38,11 +38,11 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw { flaw_id: FlawId },
+    NewFlaw { flaw_id: FlawId, causes: Vec<ResolverId>, supports: Vec<ResolverId>, data: Value },
     FlawCostUpdate { flaw_id: FlawId },
     FlawStatusUpdate { flaw_id: FlawId },
     CurrentFlaw(Option<FlawId>),
-    NewResolver { resolver_id: ResolverId },
+    NewResolver { resolver_id: ResolverId, data: Value },
     ResolverStatusUpdate { resolver_id: ResolverId },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
@@ -119,6 +119,7 @@ pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     constrs: Goal,
+    atom_flaws: RefCell<Vec<FlawId>>,
     flaws: RefCell<Vec<Box<dyn Flaw>>>,
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
@@ -134,6 +135,7 @@ impl SolverState {
                 CommonCore::new(core)
             },
             slv: core.clone(),
+            atom_flaws: RefCell::new(Vec::new()),
             flaws: RefCell::new(Vec::new()),
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
@@ -156,6 +158,7 @@ impl SolverState {
     pub(crate) fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let flaw_id = flaw.id();
         trace!("Adding flaw: {} ({})", flaw_id, flaw.phi());
+        let _ = self.tx_event.send(SolverEvent::NewFlaw { flaw_id, causes: flaw.causes(), supports: flaw.supports(), data: flaw.to_json() });
         self.flaws.borrow_mut().push(flaw);
     }
 
@@ -401,6 +404,17 @@ impl Core for SolverState {
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let atm = self.core.new_atom(predicate, fact, args);
+        let resolvers = self.resolvers.borrow();
+        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
+        let rho = c_res.map_or(Bool::from_bool(true), |res| res.rho().clone());
+        let cause = c_res.map(|res| res.id());
+        let flaw_id = FlawId(self.flaws.borrow().len());
+        self.atom_flaws.borrow_mut().push(flaw_id);
+        let sigma = Bool::fresh_const("σ");
+        self.add_flaw(AtomFlaw::new(self.slv.clone(), flaw_id, rho, cause, atm, sigma));
+        if let Some(res) = c_res {
+            self.resolvers.borrow_mut().get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
+        }
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
