@@ -386,9 +386,7 @@ impl Core for SolverState {
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         let var = Int::fresh_const("e");
         for id in instances {
-            let instance_var = Int::from_i64(**id as i64);
-            let eq = var.eq(&instance_var);
-            self.constrs.assert(&eq);
+            self.constrs.assert(&var.eq(Int::from_u64(**id as u64)));
         }
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
@@ -496,12 +494,12 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> Bool {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
-                return left.var.eq(Int::from_i64(**right as i64));
+                return left.var.eq(Int::from_u64(**right as u64));
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                return Int::from_i64(**left as i64).eq(&right.var);
+                return Int::from_u64(**left as u64).eq(&right.var);
             }
         }
         _ => {
