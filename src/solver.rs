@@ -264,7 +264,7 @@ impl Core for SolverState {
                                 Err(RiddleError::RuntimeError("Expected int".to_string()))
                             }
                         }
-                        _ => return Err(RiddleError::TypeError("Expected int".to_string())),
+                        _ => Err(RiddleError::TypeError("Expected int".to_string())),
                     })
                     .collect::<Result<Vec<_>, RiddleError>>()?;
                 Ok(Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::add(&ints)))))
@@ -282,7 +282,7 @@ impl Core for SolverState {
                                 Err(RiddleError::RuntimeError("Expected int or real".to_string()))
                             }
                         }
-                        _ => return Err(RiddleError::TypeError("Expected real".to_string())),
+                        _ => Err(RiddleError::TypeError("Expected real".to_string())),
                     })
                     .collect::<Result<Vec<_>, RiddleError>>()?;
                 Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::add(&reals)))))
@@ -320,7 +320,7 @@ impl Core for SolverState {
                                 Err(RiddleError::RuntimeError("Expected int".to_string()))
                             }
                         }
-                        _ => return Err(RiddleError::TypeError("Expected int".to_string())),
+                        _ => Err(RiddleError::TypeError("Expected int".to_string())),
                     })
                     .collect::<Result<Vec<_>, RiddleError>>()?;
                 Ok(Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::mul(&ints)))))
@@ -338,7 +338,7 @@ impl Core for SolverState {
                                 Err(RiddleError::RuntimeError("Expected int or real".to_string()))
                             }
                         }
-                        _ => return Err(RiddleError::TypeError("Expected real".to_string())),
+                        _ => Err(RiddleError::TypeError("Expected real".to_string())),
                     })
                     .collect::<Result<Vec<_>, RiddleError>>()?;
                 Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::mul(&reals)))))
@@ -351,7 +351,7 @@ impl Core for SolverState {
             (Slot::Primitive(left_var), Slot::Primitive(right_var)) => {
                 if let Some(left_var) = left_var.clone().as_any().downcast_ref::<IntVar>() {
                     if let Some(right_var) = right_var.clone().as_any().downcast_ref::<IntVar>() {
-                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.to_real().div(&right_var.lit.to_real())))))
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.to_real().div(right_var.lit.to_real())))))
                     } else if let Some(right_var) = right_var.clone().as_any().downcast_ref::<RealVar>() {
                         Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.to_real().div(&right_var.lit)))))
                     } else {
@@ -359,7 +359,7 @@ impl Core for SolverState {
                     }
                 } else if let Some(left_var) = left_var.clone().as_any().downcast_ref::<RealVar>() {
                     if let Some(right_var) = right_var.clone().as_any().downcast_ref::<IntVar>() {
-                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.div(&right_var.lit.to_real())))))
+                        Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.div(right_var.lit.to_real())))))
                     } else if let Some(right_var) = right_var.clone().as_any().downcast_ref::<RealVar>() {
                         Ok(Slot::Primitive(Rc::new(RealVar::new(self.real_type(), left_var.lit.div(&right_var.lit)))))
                     } else {
@@ -377,7 +377,7 @@ impl Core for SolverState {
         let resolvers = self.resolvers.borrow();
         let rho = self.c_res.borrow().map(|res_id| resolvers[*res_id].rho());
         if let Some(rho) = rho {
-            self.constrs.assert(&rho.implies(&expr_to_bool(&term)));
+            self.constrs.assert(&rho.implies(expr_to_bool(&term)));
         } else {
             self.constrs.assert(&expr_to_bool(&term));
         }
@@ -425,10 +425,10 @@ impl Core for SolverState {
 fn expr_to_bool(expr: &BoolExpr) -> Bool {
     match expr {
         BoolExpr::Term { term, .. } => {
-            if let Slot::Primitive(var) = term {
-                if let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>() {
-                    return var.lit.clone();
-                }
+            if let Slot::Primitive(var) = term
+                && let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>()
+            {
+                return var.lit.clone();
             }
             panic!("Expected BoolVar in BoolExpr::Term");
         }
@@ -442,7 +442,7 @@ fn expr_to_bool(expr: &BoolExpr) -> Bool {
                 } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
                     return left.lit.to_real().lt(&right.lit);
                 } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
-                    return left.lit.lt(&right.lit.to_real());
+                    return left.lit.lt(right.lit.to_real());
                 }
             }
             panic!("Expected compatible primitive types in BoolExpr::Lt");
@@ -456,23 +456,14 @@ fn expr_to_bool(expr: &BoolExpr) -> Bool {
                 } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
                     return left.lit.to_real().le(&right.lit);
                 } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
-                    return left.lit.le(&right.lit.to_real());
+                    return left.lit.le(right.lit.to_real());
                 }
             }
             panic!("Expected compatible primitive types in BoolExpr::Leq");
         }
-        BoolExpr::Or { terms, .. } => {
-            let bools = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-            Bool::or(&bools)
-        }
-        BoolExpr::And { terms, .. } => {
-            let bools = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-            Bool::and(&bools)
-        }
-        BoolExpr::Not { term, .. } => {
-            let bool_term = expr_to_bool(term);
-            bool_term.not()
-        }
+        BoolExpr::Or { terms, .. } => Bool::or(&terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::And { terms, .. } => Bool::and(&terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::Not { term, .. } => expr_to_bool(term).not(),
     }
 }
 
@@ -488,7 +479,7 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> Bool {
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
                 return left.lit.to_real().eq(&right.lit);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
-                return left.lit.eq(&right.lit.to_real());
+                return left.lit.eq(right.lit.to_real());
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
                 return left.val.eq(&right.val);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
@@ -497,7 +488,7 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> Bool {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
-                return left.var.eq(&Int::from_i64(**right as i64));
+                return left.var.eq(Int::from_i64(**right as i64));
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
