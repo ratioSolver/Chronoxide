@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::{fmt, ops::Deref, rc::Weak};
 use z3::ast::Bool;
 
-use crate::solver::SolverState;
+use crate::solver::{SolverError, SolverState};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);
@@ -44,6 +44,7 @@ pub trait Flaw {
     fn phi(&self) -> &Bool;
     fn causes(&self) -> Vec<ResolverId>;
     fn supports(&self) -> Vec<ResolverId>;
+    fn compute_resolvers(&mut self);
     fn to_json(&self) -> Value;
 }
 
@@ -51,6 +52,8 @@ pub trait Resolver {
     fn id(&self) -> ResolverId;
     fn rho(&self) -> &Bool;
     fn flaw(&self) -> FlawId;
+    fn intrinsic_cost(&self) -> f32;
+    fn apply(&mut self) -> Result<(), SolverError>;
     fn requirements(&self) -> Vec<FlawId>;
     fn add_requirement(&mut self, flaw_id: FlawId);
     fn to_json(&self) -> Value;
@@ -64,6 +67,7 @@ pub(crate) struct AtomFlaw {
     supports: Vec<ResolverId>,
     atom_id: AtomId,
     sigma: Bool,
+    resolvers: Vec<ResolverId>,
 }
 
 impl AtomFlaw {
@@ -76,6 +80,7 @@ impl AtomFlaw {
             supports: Vec::new(),
             atom_id: atom,
             sigma,
+            resolvers: Vec::new(),
         })
     }
 }
@@ -93,6 +98,9 @@ impl Flaw for AtomFlaw {
     fn supports(&self) -> Vec<ResolverId> {
         self.supports.clone()
     }
+    fn compute_resolvers(&mut self) {
+        unimplemented!()
+    }
     fn to_json(&self) -> Value {
         json!({
             "kind": "atom",
@@ -108,11 +116,20 @@ pub(crate) struct DisjunctionFlaw {
     causes: Vec<ResolverId>,
     supports: Vec<ResolverId>,
     disjunction: Disjunction,
+    resolvers: Vec<ResolverId>,
 }
 
 impl DisjunctionFlaw {
     pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: Bool, cause: Option<ResolverId>, disjunction: Disjunction) -> Box<Self> {
-        Box::new(Self { slv, id, phi, causes: cause.into_iter().collect(), supports: Vec::new(), disjunction })
+        Box::new(Self {
+            slv,
+            id,
+            phi,
+            causes: cause.into_iter().collect(),
+            supports: Vec::new(),
+            disjunction,
+            resolvers: Vec::new(),
+        })
     }
 }
 
@@ -128,6 +145,9 @@ impl Flaw for DisjunctionFlaw {
     }
     fn supports(&self) -> Vec<ResolverId> {
         self.supports.clone()
+    }
+    fn compute_resolvers(&mut self) {
+        unimplemented!()
     }
     fn to_json(&self) -> Value {
         json!({
