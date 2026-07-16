@@ -1,4 +1,4 @@
-use riddle::env::AtomId;
+use riddle::{env::AtomId, language::Disjunction};
 use serde_json::{Value, json};
 use std::{fmt, ops::Deref, rc::Weak};
 use z3::ast::Bool;
@@ -97,6 +97,41 @@ impl Flaw for AtomFlaw {
         json!({
             "kind": "atom",
             "atom": format!("{}", self.atom_id),
+        })
+    }
+}
+
+pub(crate) struct DisjunctionFlaw {
+    slv: Weak<SolverState>,
+    id: FlawId,
+    phi: Bool,
+    causes: Vec<ResolverId>,
+    supports: Vec<ResolverId>,
+    disjunction: Disjunction,
+}
+
+impl DisjunctionFlaw {
+    pub(crate) fn new(slv: Weak<SolverState>, id: FlawId, phi: Bool, cause: Option<ResolverId>, disjunction: Disjunction) -> Box<Self> {
+        Box::new(Self { slv, id, phi, causes: cause.into_iter().collect(), supports: Vec::new(), disjunction })
+    }
+}
+
+impl Flaw for DisjunctionFlaw {
+    fn id(&self) -> FlawId {
+        self.id
+    }
+    fn phi(&self) -> &Bool {
+        &self.phi
+    }
+    fn causes(&self) -> Vec<ResolverId> {
+        self.causes.clone()
+    }
+    fn supports(&self) -> Vec<ResolverId> {
+        self.supports.clone()
+    }
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "disjunction",
         })
     }
 }

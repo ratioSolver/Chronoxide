@@ -1,5 +1,5 @@
 use crate::{
-    graph::{AtomFlaw, Flaw, FlawId, Resolver, ResolverId},
+    graph::{AtomFlaw, DisjunctionFlaw, Flaw, FlawId, Resolver, ResolverId},
     objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar},
 };
 use riddle::{
@@ -392,8 +392,16 @@ impl Core for SolverState {
         }
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
-    fn new_disjunction(&self, _disjunction: Disjunction) {
-        unimplemented!()
+    fn new_disjunction(&self, disjunction: Disjunction) {
+        let resolvers = self.resolvers.borrow();
+        let c_res = self.c_res.borrow().map_or(None, |res_id| resolvers.get(*res_id).map(|res| res.as_ref()));
+        let rho = c_res.map_or(Bool::from_bool(true), |res| res.rho().clone());
+        let cause = c_res.map(|res| res.id());
+        let flaw_id = FlawId(self.flaws.borrow().len());
+        self.add_flaw(DisjunctionFlaw::new(self.slv.clone(), flaw_id, rho, cause, disjunction));
+        if let Some(res) = c_res {
+            self.resolvers.borrow_mut().get_mut(*res.id()).expect("Invalid resolver ID").add_requirement(flaw_id);
+        }
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
