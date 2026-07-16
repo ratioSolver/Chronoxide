@@ -16,21 +16,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Install Z3 (Latest Release)
-      run: |
-        # Download a recent pre-compiled Z3 for Ubuntu
-        wget https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-glibc-2.39.zip -O z3.zip
-        unzip z3.zip
-        
-        # Move binaries, headers, and libraries to system paths
-        sudo cp z3-*/bin/z3 /usr/local/bin/
-        sudo cp z3-*/bin/libz3.* /usr/local/lib/
-        sudo cp -r z3-*/include/* /usr/local/include/
-        
-        # Fix permissions and update linker cache
-        sudo chmod +x /usr/local/bin/z3
-        sudo chmod 755 /usr/local/lib/libz3.*
-        sudo ldconfig
     - name: Build
       run: cargo build --verbose
     - name: Run tests

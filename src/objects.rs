@@ -77,12 +77,12 @@ impl Var for RealVar {
 #[derive(Debug)]
 pub struct StringVar {
     var_type: Weak<StringType>,
-    pub(crate) lit: z3::ast::String,
+    pub(crate) val: z3::ast::String,
 }
 
 impl StringVar {
-    pub(crate) fn new(var_type: Rc<StringType>, lit: z3::ast::String) -> Self {
-        Self { var_type: Rc::downgrade(&var_type), lit }
+    pub(crate) fn new(var_type: Rc<StringType>, val: z3::ast::String) -> Self {
+        Self { var_type: Rc::downgrade(&var_type), val }
     }
 }
 

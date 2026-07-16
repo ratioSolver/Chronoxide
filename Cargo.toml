@@ -22,7 +22,7 @@ required-features = ["server"]
 
 [dependencies]
 riddle-lang = "0.2.0"
-z3 = "0.20.2"
+z3 = { version = "0.20.2", features = ["vendored"] }
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.0", features = ["fs"], optional = true }
 tokio = { version = "1.52.3", features = ["full"] }

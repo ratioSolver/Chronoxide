@@ -16,7 +16,7 @@ use std::{
     rc::{Rc, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tracing::{info, trace, warn};
+use tracing::{info, trace};
 use z3::{
     Goal,
     ast::{Bool, Int, Real},
@@ -165,6 +165,16 @@ impl SolverState {
         let flaw_id = flaw.id();
         assert!(flaw_id == resolver.flaw(), "Resolver {} does not resolve flaw {}", resolver.id(), flaw_id);
         self.resolvers.borrow_mut().push(resolver);
+    }
+
+    fn assert(&self, constraint: &Bool) {
+        let resolvers = self.resolvers.borrow();
+        let rho = self.c_res.borrow().map(|res_id| resolvers[*res_id].rho());
+        if let Some(rho) = rho {
+            self.constrs.assert(&rho.implies(constraint));
+        } else {
+            self.constrs.assert(constraint);
+        }
     }
 
     fn to_json(&self) -> Value {
@@ -371,7 +381,41 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        unimplemented!()
+        match term.as_ref() {
+            BoolExpr::Term { term, .. } => {
+                if let Slot::Primitive(var) = term {
+                    self.assert(&var.clone().as_any().downcast_ref::<BoolVar>().expect("Expected BoolVar").lit);
+                } else {
+                    panic!("Expected BoolVar");
+                }
+            }
+            BoolExpr::Eq { left, right, .. } => match (left, right) {
+                (Slot::Primitive(left), Slot::Primitive(right)) => {
+                    if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
+                        self.assert(&left.lit.eq(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.eq(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.eq(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<IntVar>(), right.clone().as_any().downcast_ref::<RealVar>()) {
+                        self.assert(&left.lit.to_real().eq(&right.lit));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<RealVar>(), right.clone().as_any().downcast_ref::<IntVar>()) {
+                        self.assert(&left.lit.eq(&right.lit.to_real()));
+                    } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<StringVar>(), right.clone().as_any().downcast_ref::<StringVar>()) {
+                        self.assert(&left.val.eq(&right.val));
+                    } else {
+                        panic!("Expected same type for equality");
+                    }
+                }
+                (Slot::Primitive(left), Slot::ObjectRef(right)) => {}
+                (Slot::ObjectRef(left), Slot::Primitive(right)) => {}
+                _ => {}
+            },
+            _ => {
+                return false;
+            }
+        }
+        true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         let var = Int::fresh_const("e");
@@ -382,7 +426,7 @@ impl Core for SolverState {
         }
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
-    fn new_disjunction(&self, disjunction: Disjunction) {
+    fn new_disjunction(&self, _disjunction: Disjunction) {
         unimplemented!()
     }
 
