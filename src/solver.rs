@@ -1,4 +1,7 @@
-use crate::objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar};
+use crate::{
+    graph::{Flaw, FlawId, Resolver, ResolverId},
+    objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar},
+};
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
@@ -8,6 +11,7 @@ use riddle::{
 };
 use serde_json::{Value, json};
 use std::{
+    cell::RefCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
@@ -34,14 +38,14 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw {},
-    FlawCostUpdate {},
-    FlawStatusUpdate {},
-    CurrentFlaw(),
-    NewResolver {},
-    ResolverStatusUpdate {},
-    CurrentResolver(),
-    NewCausalLink {},
+    NewFlaw { flaw_id: FlawId },
+    FlawCostUpdate { flaw_id: FlawId },
+    FlawStatusUpdate { flaw_id: FlawId },
+    CurrentFlaw(Option<FlawId>),
+    NewResolver { resolver_id: ResolverId },
+    ResolverStatusUpdate { resolver_id: ResolverId },
+    CurrentResolver(Option<ResolverId>),
+    NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
 }
 
 #[derive(Clone)]
@@ -115,6 +119,10 @@ pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     constrs: Goal,
+    flaws: RefCell<Vec<Box<dyn Flaw>>>,
+    resolvers: RefCell<Vec<Box<dyn Resolver>>>,
+    c_flaw: RefCell<Option<FlawId>>,
+    c_res: RefCell<Option<ResolverId>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -126,6 +134,10 @@ impl SolverState {
                 CommonCore::new(core)
             },
             slv: core.clone(),
+            flaws: RefCell::new(Vec::new()),
+            resolvers: RefCell::new(Vec::new()),
+            c_flaw: RefCell::new(None),
+            c_res: RefCell::new(None),
             constrs: Goal::new(false, false, false),
             tx_event,
         })
@@ -137,21 +149,35 @@ impl SolverState {
     }
 
     fn solve(&self) -> Result<(), SolverError> {
-        trace!("Solving");
+        info!("Solving problem...");
         unimplemented!()
+    }
+
+    pub(crate) fn add_flaw(&self, flaw: Box<dyn Flaw>) {
+        let flaw_id = flaw.id();
+        trace!("Adding flaw: {} ({})", flaw_id, flaw.phi());
+        self.flaws.borrow_mut().push(flaw);
+    }
+
+    pub(crate) fn add_resolver(&self, flaw: &mut impl Flaw, resolver: Box<dyn Resolver>) {
+        let resolver_id = resolver.id();
+        trace!("Adding resolver: {} ({})", resolver_id, resolver.rho());
+        let flaw_id = flaw.id();
+        assert!(flaw_id == resolver.flaw(), "Resolver {} does not resolve flaw {}", resolver.id(), flaw_id);
+        self.resolvers.borrow_mut().push(resolver);
     }
 
     fn to_json(&self) -> Value {
         let mut slv = json!({
-            // "flaws": self.flaws.borrow().iter().map(|f| f.to_json()).collect::<Vec<_>>(),
-            // "resolvers": self.resolvers.borrow().iter().map(|r| r.to_json()).collect::<Vec<_>>(),
+            "flaws": self.flaws.borrow().iter().map(|f| f.to_json()).collect::<Vec<_>>(),
+            "resolvers": self.resolvers.borrow().iter().map(|r| r.to_json()).collect::<Vec<_>>(),
         });
-        // if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
-        //     slv["current_flaw"] = json!(current_flaw.0);
-        // }
-        // if let Some(current_resolver) = self.c_res.borrow().as_ref() {
-        //     slv["current_resolver"] = json!(current_resolver.0);
-        // }
+        if let Some(current_flaw) = self.c_flaw.borrow().as_ref() {
+            slv["current_flaw"] = json!(current_flaw.0);
+        }
+        if let Some(current_resolver) = self.c_res.borrow().as_ref() {
+            slv["current_resolver"] = json!(current_resolver.0);
+        }
         slv
     }
 }
@@ -372,5 +398,29 @@ impl Core for SolverState {
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_state() -> Rc<SolverState> {
+        let (tx_event, _) = broadcast::channel(100);
+        SolverState::new(tx_event)
+    }
+
+    #[test]
+    fn test_variables() {
+        let state = new_state();
+        let bool_var = state.new_bool_var();
+        let int_var = state.new_int_var();
+        let real_var = state.new_real_var();
+        let string_var = state.new_string_var();
+
+        assert!(matches!(bool_var, Slot::Primitive(_)));
+        assert!(matches!(int_var, Slot::Primitive(_)));
+        assert!(matches!(real_var, Slot::Primitive(_)));
+        assert!(matches!(string_var, Slot::Primitive(_)));
     }
 }
