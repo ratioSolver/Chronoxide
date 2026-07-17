@@ -18,7 +18,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
 use z3::{
-    Goal,
+    Goal, Tactic,
     ast::{Bool, Int, Real},
 };
 
@@ -158,6 +158,8 @@ impl SolverState {
 
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
+        let base = Tactic::new("propagate-values").and_then(&Tactic::new("simplify")).and_then(&Tactic::new("propagate-ineqs"));
+        let result = base.apply(&self.constrs, None).map_err(|e| SolverError::RuntimeError(format!("Failed to apply tactics: {:?}", e)))?;
         Ok(())
     }
 
