@@ -1,9 +1,9 @@
+use crate::solver::{SolverError, SolverState};
 use riddle::{env::AtomId, language::Disjunction};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::{fmt, ops::Deref, rc::Weak};
 use z3::ast::Bool;
-
-use crate::solver::{SolverError, SolverState};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlawId(pub(crate) usize);
@@ -39,12 +39,26 @@ impl fmt::Display for ResolverId {
     }
 }
 
+#[derive(Clone, Copy, Serialize)]
+pub enum State {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "inactive")]
+    Inactive,
+    #[serde(rename = "forbidden")]
+    Forbidden,
+}
+
 pub trait Flaw {
     fn id(&self) -> FlawId;
     fn phi(&self) -> &Bool;
     fn causes(&self) -> Vec<ResolverId>;
     fn supports(&self) -> Vec<ResolverId>;
     fn compute_resolvers(&mut self);
+    fn get_state(&self) -> State;
+    fn set_state(&mut self, state: State);
+    fn get_cost(&self) -> f32;
+    fn set_cost(&mut self, cost: f32);
     fn to_json(&self) -> Value;
 }
 
@@ -56,6 +70,8 @@ pub trait Resolver {
     fn apply(&mut self) -> Result<(), SolverError>;
     fn requirements(&self) -> Vec<FlawId>;
     fn add_requirement(&mut self, flaw_id: FlawId);
+    fn get_state(&self) -> State;
+    fn set_state(&mut self, state: State);
     fn to_json(&self) -> Value;
 }
 
@@ -65,6 +81,8 @@ pub(crate) struct AtomFlaw {
     phi: Bool,
     causes: Vec<ResolverId>,
     supports: Vec<ResolverId>,
+    state: State,
+    cost: f32,
     atom_id: AtomId,
     sigma: Bool,
     resolvers: Vec<ResolverId>,
@@ -78,6 +96,8 @@ impl AtomFlaw {
             phi,
             causes: cause.into_iter().collect(),
             supports: Vec::new(),
+            state: cause.map_or(State::Active, |_| State::Inactive),
+            cost: f32::INFINITY,
             atom_id: atom,
             sigma,
             resolvers: Vec::new(),
@@ -101,6 +121,18 @@ impl Flaw for AtomFlaw {
     fn compute_resolvers(&mut self) {
         unimplemented!()
     }
+    fn get_cost(&self) -> f32 {
+        self.cost
+    }
+    fn set_cost(&mut self, cost: f32) {
+        self.cost = cost;
+    }
+    fn get_state(&self) -> State {
+        self.state
+    }
+    fn set_state(&mut self, state: State) {
+        self.state = state;
+    }
     fn to_json(&self) -> Value {
         json!({
             "kind": "atom",
@@ -115,6 +147,8 @@ pub(crate) struct DisjunctionFlaw {
     phi: Bool,
     causes: Vec<ResolverId>,
     supports: Vec<ResolverId>,
+    state: State,
+    cost: f32,
     disjunction: Disjunction,
     resolvers: Vec<ResolverId>,
 }
@@ -127,6 +161,8 @@ impl DisjunctionFlaw {
             phi,
             causes: cause.into_iter().collect(),
             supports: Vec::new(),
+            state: cause.map_or(State::Active, |_| State::Inactive),
+            cost: f32::INFINITY,
             disjunction,
             resolvers: Vec::new(),
         })
@@ -148,6 +184,18 @@ impl Flaw for DisjunctionFlaw {
     }
     fn compute_resolvers(&mut self) {
         unimplemented!()
+    }
+    fn get_cost(&self) -> f32 {
+        self.cost
+    }
+    fn set_cost(&mut self, cost: f32) {
+        self.cost = cost;
+    }
+    fn get_state(&self) -> State {
+        self.state
+    }
+    fn set_state(&mut self, state: State) {
+        self.state = state;
     }
     fn to_json(&self) -> Value {
         json!({

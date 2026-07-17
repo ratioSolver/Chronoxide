@@ -94,12 +94,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 };
 
                 let send_result = match event {
-                    SolverEvent::NewFlaw{ flaw_id, data, causes, supports } => {
+                    SolverEvent::NewFlaw{ flaw_id, causes, supports, state, cost, data } => {
                         let mut msg = json!({
                             "msg_type": "new-flaw",
                             "id": format!("{}", flaw_id),
                             "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                             "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                            "state": state,
+                            "cost": cost,
                         });
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
@@ -125,10 +127,12 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::NewResolver { resolver_id, data } => {
+                    SolverEvent::NewResolver { resolver_id, intrinsic_cost, state, data } => {
                         let mut msg = json!({
                             "msg_type": "new-resolver",
                             "id": format!("{}", resolver_id),
+                            "intrinsic_cost": intrinsic_cost,
+                            "state": state,
                         });
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await

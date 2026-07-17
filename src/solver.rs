@@ -1,5 +1,5 @@
 use crate::{
-    graph::{AtomFlaw, DisjunctionFlaw, Flaw, FlawId, Resolver, ResolverId},
+    graph::{AtomFlaw, DisjunctionFlaw, Flaw, FlawId, Resolver, ResolverId, State},
     objects::{BoolVar, EnumVar, IntVar, RealVar, StringVar},
 };
 use riddle::{
@@ -38,11 +38,11 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw { flaw_id: FlawId, causes: Vec<ResolverId>, supports: Vec<ResolverId>, data: Value },
+    NewFlaw { flaw_id: FlawId, causes: Vec<ResolverId>, supports: Vec<ResolverId>, state: State, cost: f32, data: Value },
     FlawCostUpdate { flaw_id: FlawId },
     FlawStatusUpdate { flaw_id: FlawId },
     CurrentFlaw(Option<FlawId>),
-    NewResolver { resolver_id: ResolverId, data: Value },
+    NewResolver { resolver_id: ResolverId, intrinsic_cost: f32, state: State, data: Value },
     ResolverStatusUpdate { resolver_id: ResolverId },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
@@ -152,13 +152,26 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
-        unimplemented!()
+        self.build_graph()?;
+        Ok(())
+    }
+
+    fn build_graph(&self) -> Result<(), SolverError> {
+        info!("Building graph...");
+        Ok(())
     }
 
     pub(crate) fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let flaw_id = flaw.id();
         trace!("Adding flaw: {} ({})", flaw_id, flaw.phi());
-        let _ = self.tx_event.send(SolverEvent::NewFlaw { flaw_id, causes: flaw.causes(), supports: flaw.supports(), data: flaw.to_json() });
+        let _ = self.tx_event.send(SolverEvent::NewFlaw {
+            flaw_id,
+            causes: flaw.causes(),
+            supports: flaw.supports(),
+            state: flaw.get_state(),
+            cost: flaw.get_cost(),
+            data: flaw.to_json(),
+        });
         self.flaws.borrow_mut().push(flaw);
     }
 
@@ -167,6 +180,12 @@ impl SolverState {
         trace!("Adding resolver: {} ({})", resolver_id, resolver.rho());
         let flaw_id = flaw.id();
         assert!(flaw_id == resolver.flaw(), "Resolver {} does not resolve flaw {}", resolver.id(), flaw_id);
+        let _ = self.tx_event.send(SolverEvent::NewResolver {
+            resolver_id,
+            intrinsic_cost: resolver.intrinsic_cost(),
+            state: resolver.get_state(),
+            data: resolver.to_json(),
+        });
         self.resolvers.borrow_mut().push(resolver);
     }
 
