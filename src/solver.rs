@@ -39,11 +39,11 @@ pub enum SolverError {
 #[derive(Clone)]
 pub enum SolverEvent {
     NewFlaw { flaw_id: FlawId, causes: Vec<ResolverId>, supports: Vec<ResolverId>, state: State, cost: f32, data: Value },
-    FlawCostUpdate { flaw_id: FlawId },
-    FlawStatusUpdate { flaw_id: FlawId },
+    FlawCostUpdate { flaw_id: FlawId, cost: f32 },
+    FlawStateUpdate { flaw_id: FlawId, state: State },
     CurrentFlaw(Option<FlawId>),
     NewResolver { resolver_id: ResolverId, intrinsic_cost: f32, state: State, data: Value },
-    ResolverStatusUpdate { resolver_id: ResolverId },
+    ResolverStateUpdate { resolver_id: ResolverId, state: State },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
 }

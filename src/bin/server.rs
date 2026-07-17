@@ -106,17 +106,19 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::FlawCostUpdate { flaw_id } => {
+                    SolverEvent::FlawCostUpdate { flaw_id, cost } => {
                         let msg = json!({
                             "msg_type": "flaw-cost-update",
                             "id": format!("{}", flaw_id),
+                            "cost": cost,
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::FlawStatusUpdate { flaw_id } => {
+                    SolverEvent::FlawStateUpdate { flaw_id, state } => {
                         let msg = json!({
-                            "msg_type": "flaw-status-update",
+                            "msg_type": "flaw-state-update",
                             "id": format!("{}", flaw_id),
+                            "state": state,
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
@@ -137,10 +139,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
-                    SolverEvent::ResolverStatusUpdate { resolver_id } => {
+                    SolverEvent::ResolverStateUpdate { resolver_id, state } => {
                         let msg = json!({
-                            "msg_type": "resolver-status-update",
+                            "msg_type": "resolver-state-update",
                             "id": format!("{}", resolver_id),
+                            "state": state,
                         });
                         socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                     }
