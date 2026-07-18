@@ -17,10 +17,7 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
-use z3::{
-    Goal, Tactic,
-    ast::{Bool, Int, Real},
-};
+use z3::ast::{Bool, Int, Real};
 
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
@@ -118,7 +115,7 @@ impl Solver {
 pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
-    constrs: Goal,
+    smt: z3::Solver,
     atom_flaws: RefCell<Vec<FlawId>>,
     flaws: RefCell<Vec<Box<dyn Flaw>>>,
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
@@ -140,7 +137,7 @@ impl SolverState {
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
             c_res: RefCell::new(None),
-            constrs: Goal::new(false, false, false),
+            smt: z3::Solver::new(),
             tx_event,
         })
     }
@@ -158,8 +155,6 @@ impl SolverState {
 
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
-        let base = Tactic::new("propagate-values").and_then(&Tactic::new("simplify")).and_then(&Tactic::new("propagate-ineqs"));
-        let result = base.apply(&self.constrs, None).map_err(|e| SolverError::RuntimeError(format!("Failed to apply tactics: {:?}", e)))?;
         Ok(())
     }
 
@@ -398,16 +393,16 @@ impl Core for SolverState {
         let resolvers = self.resolvers.borrow();
         let rho = self.c_res.borrow().map(|res_id| resolvers[*res_id].rho());
         if let Some(rho) = rho {
-            self.constrs.assert(&rho.implies(expr_to_bool(&term)));
+            self.smt.assert(&rho.implies(expr_to_bool(&term)));
         } else {
-            self.constrs.assert(&expr_to_bool(&term));
+            self.smt.assert(&expr_to_bool(&term));
         }
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         let var = Int::fresh_const("e");
         for id in instances {
-            self.constrs.assert(&var.eq(Int::from_u64(**id as u64)));
+            self.smt.assert(&var.eq(Int::from_u64(**id as u64)));
         }
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
@@ -537,6 +532,36 @@ mod tests {
     fn new_state() -> Rc<SolverState> {
         let (tx_event, _) = broadcast::channel(100);
         SolverState::new(tx_event)
+    }
+
+    #[test]
+    fn test_smt() {
+        let slv = z3::Solver::new();
+        let b0 = Bool::fresh_const("b0");
+        let b1 = Bool::fresh_const("b1");
+        let b2 = Bool::fresh_const("b2");
+        let b3 = Bool::fresh_const("b3");
+        let b4 = Bool::fresh_const("b4");
+        slv.assert(&b0.implies(&Bool::or(&[&b1, &b2])));
+        slv.assert(&b1.implies(&b3));
+        slv.assert(&b2.implies(&b4));
+        match slv.check_assumptions(&[b0.clone(), b1.clone()]) {
+            z3::SatResult::Sat => {
+                let model = slv.get_model().unwrap();
+                println!("Model: {:?}", model);
+                assert!(model.eval(&b0, true).unwrap().as_bool().unwrap());
+                assert!(model.eval(&b1, true).unwrap().as_bool().unwrap());
+                assert!(model.eval(&b3, true).unwrap().as_bool().unwrap());
+            }
+            _ => panic!("Expected SAT"),
+        }
+        match slv.check() {
+            z3::SatResult::Sat => {
+                let model = slv.get_model().unwrap();
+                println!("Model: {:?}", model);
+            }
+            _ => panic!("Expected SAT"),
+        }
     }
 
     #[test]
