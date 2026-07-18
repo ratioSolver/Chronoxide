@@ -57,7 +57,10 @@ impl SMT {
     pub fn eval(&self, expr: &Expr) -> Expr {
         match expr {
             Expr::Bool(b) => Expr::Bool(BoolExpr::Lit(self.eval_bool(b))),
-            Expr::Arith(a) => Expr::Arith(ArithExpr::Lit(self.eval_arith(a))),
+            Expr::Arith(a) => {
+                let (lb, val, ub) = self.eval_arith(a);
+                Expr::Arith(ArithExpr::Val { lb, val, ub })
+            }
         }
     }
 
@@ -95,74 +98,112 @@ impl SMT {
                 result
             }
             BoolExpr::Lt(e1, e2) => {
-                if self.eval_arith(e1) < self.eval_arith(e2) {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if ub1 < lb2 {
                     LBool::True
-                } else {
+                } else if lb1 >= ub2 {
                     LBool::False
+                } else {
+                    LBool::Undef
                 }
             }
             BoolExpr::Le(e1, e2) => {
-                if self.eval_arith(e1) <= self.eval_arith(e2) {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if ub1 <= lb2 {
                     LBool::True
-                } else {
+                } else if lb1 > ub2 {
                     LBool::False
+                } else {
+                    LBool::Undef
                 }
             }
             BoolExpr::Eq(e1, e2) => match (self.eval(e1), self.eval(e2)) {
-                (Expr::Bool(a1), Expr::Bool(a2)) => {
-                    if self.eval_bool(&a1) == self.eval_bool(&a2) {
-                        LBool::True
-                    } else {
-                        LBool::False
-                    }
-                }
+                (Expr::Bool(a1), Expr::Bool(a2)) => match (self.eval_bool(&a1), self.eval_bool(&a2)) {
+                    (LBool::True, LBool::True) => LBool::True,
+                    (LBool::False, LBool::False) => LBool::True,
+                    (LBool::Undef, _) | (_, LBool::Undef) => LBool::Undef,
+                    _ => LBool::False,
+                },
                 (Expr::Arith(a1), Expr::Arith(a2)) => {
-                    if self.eval_arith(&a1) == self.eval_arith(&a2) {
+                    let (lb1, _, ub1) = self.eval_arith(&a1);
+                    let (lb2, _, ub2) = self.eval_arith(&a2);
+                    if ub1 < lb2 || lb1 > ub2 {
+                        LBool::False
+                    } else if lb1 == ub1 && lb2 == ub2 && lb1 == lb2 {
                         LBool::True
                     } else {
-                        LBool::False
+                        LBool::Undef
                     }
                 }
                 _ => LBool::False, // Different types cannot be equal
             },
             BoolExpr::Ge(e1, e2) => {
-                if self.eval_arith(e1) >= self.eval_arith(e2) {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if lb1 > ub2 {
                     LBool::True
-                } else {
+                } else if ub1 < lb2 {
                     LBool::False
+                } else {
+                    LBool::Undef
                 }
             }
             BoolExpr::Gt(e1, e2) => {
-                if self.eval_arith(e1) > self.eval_arith(e2) {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if lb1 > ub2 {
                     LBool::True
-                } else {
+                } else if ub1 <= lb2 {
                     LBool::False
+                } else {
+                    LBool::Undef
                 }
             }
         }
     }
 
-    pub fn eval_arith(&self, expr: &ArithExpr) -> Rational {
+    pub fn eval_arith(&self, expr: &ArithExpr) -> (Rational, Rational, Rational) {
         match expr {
-            ArithExpr::Lit(r) => r.clone(),
-            ArithExpr::Int(v) => self.reals[*v].clone(),
-            ArithExpr::Real(v) => self.reals[*v].clone(),
+            ArithExpr::Lit(r) => (r.clone(), r.clone(), r.clone()),
+            ArithExpr::Val { lb, val, ub } => (lb.clone(), val.clone(), ub.clone()),
+            ArithExpr::Int(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
+            ArithExpr::Real(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
             ArithExpr::Add(add) => {
-                let mut sum = Rational::Finite(rug::Rational::from(0));
+                let mut lb = Rational::Finite(rug::Rational::from(0));
+                let mut res = Rational::Finite(rug::Rational::from(0));
+                let mut ub = Rational::Finite(rug::Rational::from(0));
                 for sub_expr in add {
-                    sum += self.eval_arith(sub_expr);
+                    let (sub_lb, sub_res, sub_ub) = self.eval_arith(sub_expr);
+                    lb += sub_lb;
+                    res += sub_res;
+                    ub += sub_ub;
                 }
-                sum
+                (lb, res, ub)
             }
-            ArithExpr::Sub(e1, e2) => self.eval_arith(e1) - self.eval_arith(e2),
+            ArithExpr::Sub(e1, e2) => {
+                let (lb1, res1, ub1) = self.eval_arith(e1);
+                let (lb2, res2, ub2) = self.eval_arith(e2);
+                (lb1 - ub2, res1 - res2, ub1 - lb2)
+            }
             ArithExpr::Mul(mul) => {
-                let mut product = Rational::Finite(rug::Rational::from(1));
+                let mut lb = Rational::Finite(rug::Rational::from(1));
+                let mut res = Rational::Finite(rug::Rational::from(1));
+                let mut ub = Rational::Finite(rug::Rational::from(1));
                 for sub_expr in mul {
-                    product *= self.eval_arith(sub_expr);
+                    let (sub_lb, sub_res, sub_ub) = self.eval_arith(sub_expr);
+                    lb *= sub_lb;
+                    res *= sub_res;
+                    ub *= sub_ub;
                 }
-                product
+                (lb, res, ub)
             }
-            ArithExpr::Div(e1, e2) => self.eval_arith(e1) / self.eval_arith(e2),
+            ArithExpr::Div(e1, e2) => {
+                let (lb1, res1, ub1) = self.eval_arith(e1);
+                let (lb2, res2, ub2) = self.eval_arith(e2);
+                (lb1 / ub2, res1 / res2, ub1 / lb2)
+            }
         }
     }
 

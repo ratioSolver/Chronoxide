@@ -187,6 +187,7 @@ pub enum BoolExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArithExpr {
     Lit(Rational),
+    Val { lb: Rational, val: Rational, ub: Rational }, // Represents a value with lower and upper bounds
     Int(usize),
     Real(usize),
     Add(Vec<ArithExpr>),
@@ -231,6 +232,7 @@ impl fmt::Display for ArithExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ArithExpr::Lit(r) => write!(f, "{}", r),
+            ArithExpr::Val { lb, val, ub } => write!(f, "{} ∈ [{} , {}]", val, lb, ub),
             ArithExpr::Int(n) => write!(f, "{}", n),
             ArithExpr::Real(n) => write!(f, "{}", n),
             ArithExpr::Add(es) => {
