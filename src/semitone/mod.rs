@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::semitone::ast::Bool;
+use crate::semitone::ast::{Bool, BoolVar};
 
 pub mod ast;
 
@@ -41,15 +41,33 @@ impl SeMiTONE {
         SeMiTONE { assigns: Vec::new() }
     }
 
-    pub fn add_var(&mut self) -> usize {
+    pub fn add_var(&mut self) -> BoolVar {
         let var_index = self.assigns.len();
         self.assigns.push(LBool::Undef);
-        var_index
+        BoolVar::new(var_index)
     }
 
-    pub fn assign(&mut self, expr: &dyn Bool) {
+    pub fn assert(&mut self, expr: &dyn Bool, propagate: bool) {
+        if let Some(_var) = expr.as_var() {
+            self.enqueue(expr); // Assign the variable to true
+        } else if let Some(not) = expr.as_not()
+            && let Some(_var) = not.as_var()
+        {
+            self.enqueue(expr); // Assign the negated variable to false
+        } else {
+            panic!("Unsupported expression type for assignment: {}", expr);
+        }
+    }
+
+    fn enqueue(&mut self, expr: &dyn Bool) {
         if let Some(var) = expr.as_var() {
-            self.assigns[**var] = LBool::True; // Assign the variable to true
+            self.assigns[**var] = LBool::True; // Enqueue the variable to true
+        } else if let Some(not) = expr.as_not() {
+            if let Some(var) = not.as_var() {
+                self.assigns[**var] = LBool::False; // Enqueue the negated variable to false
+            }
+        } else {
+            panic!("Unsupported expression type for enqueueing: {}", expr);
         }
     }
 }

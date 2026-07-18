@@ -53,6 +53,12 @@ pub struct Not {
     expr: Box<dyn Bool>,
 }
 
+impl Not {
+    pub fn new(expr: Box<dyn Bool>) -> Self {
+        Not { expr }
+    }
+}
+
 impl Node for Not {}
 
 impl Bool for Not {
@@ -71,6 +77,14 @@ pub struct And {
     exprs: Vec<Box<dyn Bool>>,
 }
 
+impl And {
+    pub fn new(exprs: impl IntoIterator<Item = Box<dyn Bool>>) -> Self {
+        let exprs: Vec<Box<dyn Bool>> = exprs.into_iter().collect();
+        assert!(!exprs.is_empty(), "And expression must have at least one operand");
+        And { exprs }
+    }
+}
+
 impl Node for And {}
 
 impl Bool for And {
@@ -87,6 +101,14 @@ impl fmt::Display for And {
 
 pub struct Or {
     exprs: Vec<Box<dyn Bool>>,
+}
+
+impl Or {
+    pub fn new(exprs: impl IntoIterator<Item = Box<dyn Bool>>) -> Self {
+        let exprs: Vec<Box<dyn Bool>> = exprs.into_iter().collect();
+        assert!(!exprs.is_empty(), "Or expression must have at least one operand");
+        Or { exprs }
+    }
 }
 
 impl Node for Or {}
