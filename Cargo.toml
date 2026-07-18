@@ -9,8 +9,9 @@ repository = "https://github.com/ratioSolver/Chronoxide"
 license-file = "LICENSE.txt"
 
 [features]
-default = ["server"]
+default = ["server", "semitone"]
 server = ["dep:axum", "dep:tower-http"]
+semitone = ["dep:rug"]
 
 [lib]
 name = "chronoxide"
@@ -30,3 +31,4 @@ tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+rug = { version = "1.30.0", optional = true }

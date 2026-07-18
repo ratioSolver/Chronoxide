@@ -1,32 +1,17 @@
-use crate::semitone::ast::{Bool, BoolExpr, Int, Real};
-use std::fmt;
-
 pub mod ast;
+pub mod values;
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-#[repr(u8)]
-pub enum LBool {
-    /// The variable is assigned to true.
-    True,
-    /// The variable is assigned to false.
-    False,
-    /// The variable is currently unassigned.
-    #[default]
-    Undef,
-}
-
-impl fmt::Display for LBool {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LBool::True => write!(f, "true"),
-            LBool::False => write!(f, "false"),
-            LBool::Undef => write!(f, "undef"),
-        }
-    }
-}
+use crate::semitone::{
+    ast::{Bool, BoolExpr, Int, Real},
+    values::{LBool, Rational},
+};
 
 pub struct SeMiTONE {
-    bools: Vec<LBool>, // Current assignments of variables
+    bools: Vec<LBool>,    // Current assignments of boolean variables
+    ints: Vec<bool>,      // Distinguish between integer and real variables
+    reals: Vec<Rational>, // Current assignments of real variables
+    lbs: Vec<Rational>,   // Current assignments of lower bounds
+    ubs: Vec<Rational>,   // Current assignments of upper bounds
 }
 
 impl Default for SeMiTONE {
@@ -37,7 +22,7 @@ impl Default for SeMiTONE {
 
 impl SeMiTONE {
     pub fn new() -> Self {
-        SeMiTONE { bools: Vec::new() }
+        SeMiTONE { bools: Vec::new(), ints: Vec::new(), reals: Vec::new(), lbs: Vec::new(), ubs: Vec::new() }
     }
 
     pub fn add_var(&mut self) -> Bool {
@@ -47,14 +32,20 @@ impl SeMiTONE {
     }
 
     pub fn add_int_var(&mut self) -> Int {
-        let var_index = self.bools.len();
-        self.bools.push(LBool::Undef);
+        let var_index = self.ints.len();
+        self.ints.push(true);
+        self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
+        self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
+        self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
         Int::new(var_index)
     }
 
     pub fn add_real_var(&mut self) -> Real {
-        let var_index = self.bools.len();
-        self.bools.push(LBool::Undef);
+        let var_index = self.reals.len();
+        self.ints.push(false);
+        self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
+        self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
+        self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
         Real::new(var_index)
     }
 
