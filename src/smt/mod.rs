@@ -2,7 +2,7 @@ pub mod ast;
 
 use crate::smt::ast::{ArithExpr, BoolExpr, LBool, Rational};
 
-pub struct SeMiTONE {
+pub struct SMT {
     bools: Vec<LBool>,    // Current assignments of boolean variables
     ints: Vec<bool>,      // Distinguish between integer and real variables
     reals: Vec<Rational>, // Current assignments of real variables
@@ -10,15 +10,15 @@ pub struct SeMiTONE {
     ubs: Vec<Rational>,   // Current assignments of upper bounds
 }
 
-impl Default for SeMiTONE {
+impl Default for SMT {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SeMiTONE {
+impl SMT {
     pub fn new() -> Self {
-        SeMiTONE { bools: Vec::new(), ints: Vec::new(), reals: Vec::new(), lbs: Vec::new(), ubs: Vec::new() }
+        SMT { bools: Vec::new(), ints: Vec::new(), reals: Vec::new(), lbs: Vec::new(), ubs: Vec::new() }
     }
 
     pub fn add_var(&mut self) -> BoolExpr {
