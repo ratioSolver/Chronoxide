@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops};
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
@@ -22,11 +22,136 @@ impl fmt::Display for LBool {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Eq)]
 pub enum Rational {
     NegativeInf,
     Finite(rug::Rational),
     PositiveInf,
+}
+
+impl Default for Rational {
+    fn default() -> Self {
+        Rational::Finite(rug::Rational::from(0))
+    }
+}
+
+impl ops::Neg for Rational {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Rational::NegativeInf => Rational::PositiveInf,
+            Rational::Finite(r) => Rational::Finite(-r),
+            Rational::PositiveInf => Rational::NegativeInf,
+        }
+    }
+}
+
+impl ops::Add for Rational {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
+                panic!("undefined operation: -inf + +inf")
+            }
+            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
+            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
+            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 + r2),
+        }
+    }
+}
+
+impl ops::AddAssign for Rational {
+    fn add_assign(&mut self, other: Self) {
+        *self = std::mem::take(self) + other;
+    }
+}
+
+impl ops::Sub for Rational {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        self + (-other)
+    }
+}
+
+impl ops::Mul for Rational {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (Rational::NegativeInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::NegativeInf) => {
+                if r > rug::Rational::from(0) {
+                    Rational::NegativeInf
+                } else if r < rug::Rational::from(0) {
+                    Rational::PositiveInf
+                } else {
+                    panic!("undefined operation: -inf * 0")
+                }
+            }
+            (Rational::PositiveInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::PositiveInf) => {
+                if r > rug::Rational::from(0) {
+                    Rational::PositiveInf
+                } else if r < rug::Rational::from(0) {
+                    Rational::NegativeInf
+                } else {
+                    panic!("undefined operation: +inf * 0")
+                }
+            }
+            (Rational::NegativeInf, Rational::NegativeInf) | (Rational::PositiveInf, Rational::PositiveInf) => Rational::PositiveInf,
+            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => Rational::NegativeInf,
+            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 * r2),
+        }
+    }
+}
+
+impl ops::MulAssign for Rational {
+    fn mul_assign(&mut self, other: Self) {
+        *self = std::mem::take(self) * other;
+    }
+}
+
+impl ops::Div for Rational {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (Rational::NegativeInf, Rational::Finite(r)) => {
+                if r > rug::Rational::from(0) {
+                    Rational::NegativeInf
+                } else if r < rug::Rational::from(0) {
+                    Rational::PositiveInf
+                } else {
+                    panic!("undefined operation: -inf / 0")
+                }
+            }
+            (Rational::PositiveInf, Rational::Finite(r)) => {
+                if r > rug::Rational::from(0) {
+                    Rational::PositiveInf
+                } else if r < rug::Rational::from(0) {
+                    Rational::NegativeInf
+                } else {
+                    panic!("undefined operation: +inf / 0")
+                }
+            }
+            (Rational::Finite(_), Rational::NegativeInf) | (Rational::Finite(_), Rational::PositiveInf) => Rational::Finite(rug::Rational::from(0)),
+            (Rational::NegativeInf, Rational::NegativeInf) | (Rational::PositiveInf, Rational::PositiveInf) | (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => panic!("undefined operation: ±inf / ±inf"),
+            (Rational::Finite(r1), Rational::Finite(r2)) => {
+                if r2 == rug::Rational::from(0) {
+                    if r1 > rug::Rational::from(0) {
+                        Rational::PositiveInf
+                    } else if r1 < rug::Rational::from(0) {
+                        Rational::NegativeInf
+                    } else {
+                        panic!("undefined operation: 0 / 0")
+                    }
+                } else {
+                    Rational::Finite(r1 / r2)
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for Rational {
@@ -65,7 +190,7 @@ pub enum ArithExpr {
     Int(usize),
     Real(usize),
     Add(Vec<ArithExpr>),
-    Sub(Vec<ArithExpr>),
+    Sub(Box<ArithExpr>, Box<ArithExpr>),
     Mul(Vec<ArithExpr>),
     Div(Box<ArithExpr>, Box<ArithExpr>),
 }
@@ -112,10 +237,7 @@ impl fmt::Display for ArithExpr {
                 let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", es_str.join(" + "))
             }
-            ArithExpr::Sub(es) => {
-                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
-                write!(f, "({})", es_str.join(" - "))
-            }
+            ArithExpr::Sub(e1, e2) => write!(f, "({} - {})", e1, e2),
             ArithExpr::Mul(es) => {
                 let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", es_str.join(" * "))
