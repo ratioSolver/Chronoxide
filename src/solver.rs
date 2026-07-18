@@ -12,7 +12,7 @@ use riddle::{
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     rc::{Rc, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -117,6 +117,8 @@ pub struct SolverState {
     slv: Weak<SolverState>,
     smt: z3::Solver,
     atom_flaws: RefCell<Vec<FlawId>>,
+    root_flaws: Rc<RefCell<HashSet<FlawId>>>,
+    flaw_q: RefCell<VecDeque<FlawId>>,
     flaws: RefCell<Vec<Box<dyn Flaw>>>,
     resolvers: RefCell<Vec<Box<dyn Resolver>>>,
     c_flaw: RefCell<Option<FlawId>>,
@@ -133,6 +135,8 @@ impl SolverState {
             },
             slv: core.clone(),
             atom_flaws: RefCell::new(Vec::new()),
+            root_flaws: Rc::new(RefCell::new(HashSet::new())),
+            flaw_q: RefCell::new(VecDeque::new()),
             flaws: RefCell::new(Vec::new()),
             resolvers: RefCell::new(Vec::new()),
             c_flaw: RefCell::new(None),
@@ -149,12 +153,59 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
+        if self.root_flaws.borrow().is_empty() {
+            return match self.smt.check() {
+                z3::SatResult::Sat => {
+                    info!("Problem is consistent");
+                    Ok(())
+                }
+                z3::SatResult::Unsat => {
+                    info!("Problem is inconsistent");
+                    Err(SolverError::Inconsistent)
+                }
+                z3::SatResult::Unknown => {
+                    info!("Problem is unknown");
+                    Err(SolverError::RuntimeError("Problem is unknown".to_string()))
+                }
+            };
+        }
         self.build_graph()?;
-        Ok(())
+        let assumps: Vec<Bool> = self.flaw_q.borrow().iter().map(|flaw_id| self.flaws.borrow()[**flaw_id].phi().not()).collect();
+        match self.smt.check_assumptions(&assumps) {
+            z3::SatResult::Sat => {
+                info!("Problem is consistent");
+                Ok(())
+            }
+            z3::SatResult::Unsat => {
+                info!("Problem is inconsistent");
+                let unsat_core = self.smt.get_unsat_core();
+                let unsat_flaws: Vec<FlawId> = unsat_core
+                    .iter()
+                    .filter_map(|assump| {
+                        let flaw_q = self.flaw_q.borrow();
+                        flaw_q.iter().find(|&flaw_id| self.flaws.borrow()[**flaw_id].phi() == assump).copied()
+                    })
+                    .collect();
+                Err(SolverError::Inconsistent)
+            }
+            z3::SatResult::Unknown => {
+                info!("Problem is unknown");
+                Err(SolverError::RuntimeError("Problem is unknown".to_string()))
+            }
+        }
     }
 
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
+        while self.root_flaws.borrow().iter().any(|flaw_id| self.flaws.borrow()[**flaw_id].get_cost() < f32::INFINITY) {
+            if let Some(flaw_id) = self.flaw_q.borrow_mut().pop_front() {
+                self.set_current_flaw(Some(flaw_id));
+                self.set_current_flaw(None);
+            } else {
+                info!("No more flaws to process, but some root flaws are still unresolved");
+                Err(SolverError::Inconsistent)?;
+            }
+        }
         Ok(())
     }
 
@@ -169,6 +220,10 @@ impl SolverState {
             cost: flaw.get_cost(),
             data: flaw.to_json(),
         });
+        if flaw.causes().is_empty() {
+            self.root_flaws.borrow_mut().insert(flaw_id);
+        }
+        self.flaw_q.borrow_mut().push_back(flaw_id);
         self.flaws.borrow_mut().push(flaw);
     }
 
@@ -184,6 +239,16 @@ impl SolverState {
             data: resolver.to_json(),
         });
         self.resolvers.borrow_mut().push(resolver);
+    }
+
+    fn set_current_flaw(&self, flaw: Option<FlawId>) {
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(flaw));
+        self.c_flaw.replace(flaw);
+    }
+
+    fn set_current_resolver(&self, resolver: Option<ResolverId>) {
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(resolver));
+        self.c_res.replace(resolver);
     }
 
     fn to_json(&self) -> Value {
