@@ -55,7 +55,7 @@ impl SeMiTONE {
         {
             self.enqueue(expr); // Assign the negated variable to false
         } else {
-            panic!("Unsupported expression type for assignment: {}", expr);
+            unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr);
         }
     }
 

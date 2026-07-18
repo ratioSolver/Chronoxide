@@ -124,3 +124,69 @@ impl fmt::Display for Or {
         write!(f, "({})", self.exprs.iter().fold(String::new(), |acc, expr| { if acc.is_empty() { format!("{}", expr) } else { format!("{} ∨ {}", acc, expr) } }))
     }
 }
+
+pub trait Arith: Node {}
+
+pub trait Int: Arith {}
+
+pub struct IntVar {
+    var: usize,
+}
+
+impl IntVar {
+    pub fn new(var: usize) -> Self {
+        IntVar { var }
+    }
+}
+
+impl Node for IntVar {}
+
+impl Arith for IntVar {}
+
+impl Int for IntVar {}
+
+impl ops::Deref for IntVar {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.var
+    }
+}
+
+impl fmt::Display for IntVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "i{}", self.var)
+    }
+}
+
+pub trait Real: Arith {}
+
+pub struct RealVar {
+    var: usize,
+}
+
+impl RealVar {
+    pub fn new(var: usize) -> Self {
+        RealVar { var }
+    }
+}
+
+impl Node for RealVar {}
+
+impl Arith for RealVar {}
+
+impl Real for RealVar {}
+
+impl ops::Deref for RealVar {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.var
+    }
+}
+
+impl fmt::Display for RealVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "r{}", self.var)
+    }
+}
