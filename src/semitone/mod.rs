@@ -1,6 +1,5 @@
+use crate::semitone::ast::{Bool, BoolExpr, Int, Real};
 use std::fmt;
-
-use crate::semitone::ast::{Bool, BoolVar};
 
 pub mod ast;
 
@@ -27,7 +26,7 @@ impl fmt::Display for LBool {
 }
 
 pub struct SeMiTONE {
-    assigns: Vec<LBool>, // Current assignments of variables
+    bools: Vec<LBool>, // Current assignments of variables
 }
 
 impl Default for SeMiTONE {
@@ -38,16 +37,28 @@ impl Default for SeMiTONE {
 
 impl SeMiTONE {
     pub fn new() -> Self {
-        SeMiTONE { assigns: Vec::new() }
+        SeMiTONE { bools: Vec::new() }
     }
 
-    pub fn add_var(&mut self) -> BoolVar {
-        let var_index = self.assigns.len();
-        self.assigns.push(LBool::Undef);
-        BoolVar::new(var_index)
+    pub fn add_var(&mut self) -> Bool {
+        let var_index = self.bools.len();
+        self.bools.push(LBool::Undef);
+        Bool::new(var_index)
     }
 
-    pub fn assert(&mut self, expr: &dyn Bool, propagate: bool) {
+    pub fn add_int_var(&mut self) -> Int {
+        let var_index = self.bools.len();
+        self.bools.push(LBool::Undef);
+        Int::new(var_index)
+    }
+
+    pub fn add_real_var(&mut self) -> Real {
+        let var_index = self.bools.len();
+        self.bools.push(LBool::Undef);
+        Real::new(var_index)
+    }
+
+    pub fn assert(&mut self, expr: &dyn BoolExpr, propagate: bool) {
         if let Some(_var) = expr.as_var() {
             self.enqueue(expr); // Assign the variable to true
         } else if let Some(not) = expr.as_not()
@@ -59,12 +70,12 @@ impl SeMiTONE {
         }
     }
 
-    fn enqueue(&mut self, expr: &dyn Bool) {
+    fn enqueue(&mut self, expr: &dyn BoolExpr) {
         if let Some(var) = expr.as_var() {
-            self.assigns[**var] = LBool::True; // Enqueue the variable to true
+            self.bools[**var] = LBool::True; // Enqueue the variable to true
         } else if let Some(not) = expr.as_not() {
             if let Some(var) = not.as_var() {
-                self.assigns[**var] = LBool::False; // Enqueue the negated variable to false
+                self.bools[**var] = LBool::False; // Enqueue the negated variable to false
             }
         } else {
             panic!("Unsupported expression type for enqueueing: {}", expr);

@@ -1,9 +1,9 @@
 use std::{fmt, ops};
 
-pub trait Node: fmt::Display {}
+pub trait Expr: fmt::Display {}
 
-pub trait Bool: Node {
-    fn as_var(&self) -> Option<&BoolVar> {
+pub trait BoolExpr: Expr {
+    fn as_var(&self) -> Option<&Bool> {
         None
     }
     fn as_not(&self) -> Option<&Not> {
@@ -17,25 +17,25 @@ pub trait Bool: Node {
     }
 }
 
-pub struct BoolVar {
+pub struct Bool {
     var: usize,
 }
 
-impl BoolVar {
+impl Bool {
     pub(super) fn new(var: usize) -> Self {
-        BoolVar { var }
+        Bool { var }
     }
 }
 
-impl Node for BoolVar {}
+impl Expr for Bool {}
 
-impl Bool for BoolVar {
-    fn as_var(&self) -> Option<&BoolVar> {
+impl BoolExpr for Bool {
+    fn as_var(&self) -> Option<&Bool> {
         Some(self)
     }
 }
 
-impl ops::Deref for BoolVar {
+impl ops::Deref for Bool {
     type Target = usize;
 
     fn deref(&self) -> &Self::Target {
@@ -43,25 +43,25 @@ impl ops::Deref for BoolVar {
     }
 }
 
-impl fmt::Display for BoolVar {
+impl fmt::Display for Bool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "b{}", self.var)
     }
 }
 
 pub struct Not {
-    expr: Box<dyn Bool>,
+    expr: Box<dyn BoolExpr>,
 }
 
 impl Not {
-    pub fn new(expr: Box<dyn Bool>) -> Self {
+    pub fn new(expr: Box<dyn BoolExpr>) -> Self {
         Not { expr }
     }
 }
 
-impl Node for Not {}
+impl Expr for Not {}
 
-impl Bool for Not {
+impl BoolExpr for Not {
     fn as_not(&self) -> Option<&Not> {
         Some(self)
     }
@@ -74,20 +74,20 @@ impl fmt::Display for Not {
 }
 
 pub struct And {
-    exprs: Vec<Box<dyn Bool>>,
+    exprs: Vec<Box<dyn BoolExpr>>,
 }
 
 impl And {
-    pub fn new(exprs: impl IntoIterator<Item = Box<dyn Bool>>) -> Self {
-        let exprs: Vec<Box<dyn Bool>> = exprs.into_iter().collect();
+    pub fn new(exprs: impl IntoIterator<Item = Box<dyn BoolExpr>>) -> Self {
+        let exprs: Vec<Box<dyn BoolExpr>> = exprs.into_iter().collect();
         assert!(!exprs.is_empty(), "And expression must have at least one operand");
         And { exprs }
     }
 }
 
-impl Node for And {}
+impl Expr for And {}
 
-impl Bool for And {
+impl BoolExpr for And {
     fn as_and(&self) -> Option<&And> {
         Some(self)
     }
@@ -100,20 +100,20 @@ impl fmt::Display for And {
 }
 
 pub struct Or {
-    exprs: Vec<Box<dyn Bool>>,
+    exprs: Vec<Box<dyn BoolExpr>>,
 }
 
 impl Or {
-    pub fn new(exprs: impl IntoIterator<Item = Box<dyn Bool>>) -> Self {
-        let exprs: Vec<Box<dyn Bool>> = exprs.into_iter().collect();
+    pub fn new(exprs: impl IntoIterator<Item = Box<dyn BoolExpr>>) -> Self {
+        let exprs: Vec<Box<dyn BoolExpr>> = exprs.into_iter().collect();
         assert!(!exprs.is_empty(), "Or expression must have at least one operand");
         Or { exprs }
     }
 }
 
-impl Node for Or {}
+impl Expr for Or {}
 
-impl Bool for Or {
+impl BoolExpr for Or {
     fn as_or(&self) -> Option<&Or> {
         Some(self)
     }
@@ -125,27 +125,27 @@ impl fmt::Display for Or {
     }
 }
 
-pub trait Arith: Node {}
+pub trait ArithExpr: Expr {}
 
-pub trait Int: Arith {}
+pub trait IntExpr: ArithExpr {}
 
-pub struct IntVar {
+pub struct Int {
     var: usize,
 }
 
-impl IntVar {
-    pub fn new(var: usize) -> Self {
-        IntVar { var }
+impl Int {
+    pub(super) fn new(var: usize) -> Self {
+        Int { var }
     }
 }
 
-impl Node for IntVar {}
+impl Expr for Int {}
 
-impl Arith for IntVar {}
+impl ArithExpr for Int {}
 
-impl Int for IntVar {}
+impl IntExpr for Int {}
 
-impl ops::Deref for IntVar {
+impl ops::Deref for Int {
     type Target = usize;
 
     fn deref(&self) -> &Self::Target {
@@ -153,31 +153,31 @@ impl ops::Deref for IntVar {
     }
 }
 
-impl fmt::Display for IntVar {
+impl fmt::Display for Int {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "i{}", self.var)
     }
 }
 
-pub trait Real: Arith {}
+pub trait RealExpr: ArithExpr {}
 
-pub struct RealVar {
+pub struct Real {
     var: usize,
 }
 
-impl RealVar {
-    pub fn new(var: usize) -> Self {
-        RealVar { var }
+impl Real {
+    pub(super) fn new(var: usize) -> Self {
+        Real { var }
     }
 }
 
-impl Node for RealVar {}
+impl Expr for Real {}
 
-impl Arith for RealVar {}
+impl ArithExpr for Real {}
 
-impl Real for RealVar {}
+impl RealExpr for Real {}
 
-impl ops::Deref for RealVar {
+impl ops::Deref for Real {
     type Target = usize;
 
     fn deref(&self) -> &Self::Target {
@@ -185,7 +185,7 @@ impl ops::Deref for RealVar {
     }
 }
 
-impl fmt::Display for RealVar {
+impl fmt::Display for Real {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "r{}", self.var)
     }
