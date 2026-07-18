@@ -30,13 +30,13 @@ impl SMT {
         }
     }
 
-    pub fn add_var(&mut self) -> BoolExpr {
+    pub fn new_bool(&mut self) -> BoolExpr {
         let var_index = self.bools.len();
         self.bools.push(LBool::Undef);
         BoolExpr::Var(var_index)
     }
 
-    pub fn add_int_var(&mut self) -> ArithExpr {
+    pub fn new_int(&mut self) -> ArithExpr {
         let var_index = self.ints.len();
         self.ints.push(true);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
@@ -45,7 +45,7 @@ impl SMT {
         ArithExpr::Int(var_index)
     }
 
-    pub fn add_real_var(&mut self) -> ArithExpr {
+    pub fn new_real(&mut self) -> ArithExpr {
         let var_index = self.reals.len();
         self.ints.push(false);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
