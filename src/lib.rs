@@ -1,4 +1,4 @@
 mod graph;
 mod objects;
-pub mod semitone;
+pub mod smt;
 pub mod solver;

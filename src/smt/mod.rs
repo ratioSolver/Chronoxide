@@ -1,6 +1,6 @@
 pub mod ast;
 
-use crate::semitone::ast::{ArithExpr, BoolExpr, LBool, Rational};
+use crate::smt::ast::{ArithExpr, BoolExpr, LBool, Rational};
 
 pub struct SeMiTONE {
     bools: Vec<LBool>,    // Current assignments of boolean variables
