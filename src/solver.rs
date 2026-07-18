@@ -179,7 +179,7 @@ impl SolverState {
             z3::SatResult::Unsat => {
                 info!("Problem is inconsistent");
                 let unsat_core = self.smt.get_unsat_core();
-                let unsat_flaws: Vec<FlawId> = unsat_core
+                let _unsat_flaws: Vec<FlawId> = unsat_core
                     .iter()
                     .filter_map(|assump| {
                         let flaw_q = self.flaw_q.borrow();
