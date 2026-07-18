@@ -1,10 +1,6 @@
 pub mod ast;
-pub mod values;
 
-use crate::semitone::{
-    ast::{Bool, BoolExpr, Int, Real},
-    values::{LBool, Rational},
-};
+use crate::semitone::ast::{ArithExpr, BoolExpr, LBool, Rational};
 
 pub struct SeMiTONE {
     bools: Vec<LBool>,    // Current assignments of boolean variables
@@ -25,51 +21,52 @@ impl SeMiTONE {
         SeMiTONE { bools: Vec::new(), ints: Vec::new(), reals: Vec::new(), lbs: Vec::new(), ubs: Vec::new() }
     }
 
-    pub fn add_var(&mut self) -> Bool {
+    pub fn add_var(&mut self) -> BoolExpr {
         let var_index = self.bools.len();
         self.bools.push(LBool::Undef);
-        Bool::new(var_index)
+        BoolExpr::Var(var_index)
     }
 
-    pub fn add_int_var(&mut self) -> Int {
+    pub fn add_int_var(&mut self) -> ArithExpr {
         let var_index = self.ints.len();
         self.ints.push(true);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
         self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
         self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
-        Int::new(var_index)
+        ArithExpr::Int(var_index)
     }
 
-    pub fn add_real_var(&mut self) -> Real {
+    pub fn add_real_var(&mut self) -> ArithExpr {
         let var_index = self.reals.len();
         self.ints.push(false);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
         self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
         self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
-        Real::new(var_index)
+        ArithExpr::Real(var_index)
     }
 
-    pub fn assert(&mut self, expr: &dyn BoolExpr, propagate: bool) {
-        if let Some(_var) = expr.as_var() {
-            self.enqueue(expr); // Assign the variable to true
-        } else if let Some(not) = expr.as_not()
-            && let Some(_var) = not.as_var()
-        {
-            self.enqueue(expr); // Assign the negated variable to false
-        } else {
-            unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr);
+    pub fn assert(&mut self, expr: &BoolExpr, propagate: bool) {
+        match expr {
+            BoolExpr::Var(_v) => self.enqueue(expr),
+            BoolExpr::Not(not) => match not.as_ref() {
+                BoolExpr::Var(_v) => self.enqueue(expr),
+                _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
+            },
+            _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
         }
     }
 
-    fn enqueue(&mut self, expr: &dyn BoolExpr) {
-        if let Some(var) = expr.as_var() {
-            self.bools[**var] = LBool::True; // Enqueue the variable to true
-        } else if let Some(not) = expr.as_not() {
-            if let Some(var) = not.as_var() {
-                self.bools[**var] = LBool::False; // Enqueue the negated variable to false
+    fn enqueue(&mut self, expr: &BoolExpr) {
+        match expr {
+            BoolExpr::Var(v) => self.bools[*v] = LBool::True, // Enqueue the variable to true
+            BoolExpr::Not(not) => {
+                if let BoolExpr::Var(v) = not.as_ref() {
+                    self.bools[*v] = LBool::False; // Enqueue the negated variable to false
+                } else {
+                    panic!("Unsupported expression type for enqueueing: {}", expr);
+                }
             }
-        } else {
-            panic!("Unsupported expression type for enqueueing: {}", expr);
+            _ => panic!("Unsupported expression type for enqueueing: {}", expr),
         }
     }
 }

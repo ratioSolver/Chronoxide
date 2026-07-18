@@ -1,192 +1,126 @@
-use std::{fmt, ops};
+use std::fmt;
 
-pub trait Expr: fmt::Display {}
-
-pub trait BoolExpr: Expr {
-    fn as_var(&self) -> Option<&Bool> {
-        None
-    }
-    fn as_not(&self) -> Option<&Not> {
-        None
-    }
-    fn as_and(&self) -> Option<&And> {
-        None
-    }
-    fn as_or(&self) -> Option<&Or> {
-        None
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum LBool {
+    /// The variable is assigned to true.
+    True,
+    /// The variable is assigned to false.
+    False,
+    /// The variable is currently unassigned.
+    #[default]
+    Undef,
 }
 
-pub struct Bool {
-    var: usize,
-}
-
-impl Bool {
-    pub(super) fn new(var: usize) -> Self {
-        Bool { var }
-    }
-}
-
-impl Expr for Bool {}
-
-impl BoolExpr for Bool {
-    fn as_var(&self) -> Option<&Bool> {
-        Some(self)
-    }
-}
-
-impl ops::Deref for Bool {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.var
-    }
-}
-
-impl fmt::Display for Bool {
+impl fmt::Display for LBool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "b{}", self.var)
+        match self {
+            LBool::True => write!(f, "true"),
+            LBool::False => write!(f, "false"),
+            LBool::Undef => write!(f, "undef"),
+        }
     }
 }
 
-pub struct Not {
-    expr: Box<dyn BoolExpr>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rational {
+    NegativeInf,
+    Finite(rug::Rational),
+    PositiveInf,
 }
 
-impl Not {
-    pub fn new(expr: Box<dyn BoolExpr>) -> Self {
-        Not { expr }
-    }
-}
-
-impl Expr for Not {}
-
-impl BoolExpr for Not {
-    fn as_not(&self) -> Option<&Not> {
-        Some(self)
-    }
-}
-
-impl fmt::Display for Not {
+impl fmt::Display for Rational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "¬{}", self.expr)
+        match self {
+            Rational::NegativeInf => write!(f, "-inf"),
+            Rational::Finite(r) => write!(f, "{}", r),
+            Rational::PositiveInf => write!(f, "+inf"),
+        }
     }
 }
 
-pub struct And {
-    exprs: Vec<Box<dyn BoolExpr>>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expr {
+    Bool(BoolExpr),
+    Arith(ArithExpr),
 }
 
-impl And {
-    pub fn new(exprs: impl IntoIterator<Item = Box<dyn BoolExpr>>) -> Self {
-        let exprs: Vec<Box<dyn BoolExpr>> = exprs.into_iter().collect();
-        assert!(!exprs.is_empty(), "And expression must have at least one operand");
-        And { exprs }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoolExpr {
+    Lit(LBool),
+    Var(usize),
+    Not(Box<BoolExpr>),
+    And(Vec<BoolExpr>),
+    Or(Vec<BoolExpr>),
+    Lt(Box<ArithExpr>, Box<ArithExpr>),
+    Le(Box<ArithExpr>, Box<ArithExpr>),
+    Eq(Box<Expr>, Box<Expr>),
+    Ge(Box<ArithExpr>, Box<ArithExpr>),
+    Gt(Box<ArithExpr>, Box<ArithExpr>),
 }
 
-impl Expr for And {}
-
-impl BoolExpr for And {
-    fn as_and(&self) -> Option<&And> {
-        Some(self)
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArithExpr {
+    Lit(Rational),
+    Int(usize),
+    Real(usize),
+    Add(Vec<ArithExpr>),
+    Sub(Vec<ArithExpr>),
+    Mul(Vec<ArithExpr>),
+    Div(Box<ArithExpr>, Box<ArithExpr>),
 }
 
-impl fmt::Display for And {
+impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({})", self.exprs.iter().fold(String::new(), |acc, expr| { if acc.is_empty() { format!("{}", expr) } else { format!("{} ∧ {}", acc, expr) } }))
+        match self {
+            Expr::Bool(b) => write!(f, "{}", b),
+            Expr::Arith(a) => write!(f, "{}", a),
+        }
     }
 }
 
-pub struct Or {
-    exprs: Vec<Box<dyn BoolExpr>>,
-}
-
-impl Or {
-    pub fn new(exprs: impl IntoIterator<Item = Box<dyn BoolExpr>>) -> Self {
-        let exprs: Vec<Box<dyn BoolExpr>> = exprs.into_iter().collect();
-        assert!(!exprs.is_empty(), "Or expression must have at least one operand");
-        Or { exprs }
-    }
-}
-
-impl Expr for Or {}
-
-impl BoolExpr for Or {
-    fn as_or(&self) -> Option<&Or> {
-        Some(self)
-    }
-}
-
-impl fmt::Display for Or {
+impl fmt::Display for BoolExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({})", self.exprs.iter().fold(String::new(), |acc, expr| { if acc.is_empty() { format!("{}", expr) } else { format!("{} ∨ {}", acc, expr) } }))
+        match self {
+            BoolExpr::Lit(l) => write!(f, "{}", l),
+            BoolExpr::Var(v) => write!(f, "b{}", v),
+            BoolExpr::Not(e) => write!(f, "¬{}", e),
+            BoolExpr::And(es) => {
+                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
+                write!(f, "({})", es_str.join(" ∧ "))
+            }
+            BoolExpr::Or(es) => {
+                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
+                write!(f, "({})", es_str.join(" ∨ "))
+            }
+            BoolExpr::Lt(a1, a2) => write!(f, "{} < {}", a1, a2),
+            BoolExpr::Le(a1, a2) => write!(f, "{} ≤ {}", a1, a2),
+            BoolExpr::Eq(e1, e2) => write!(f, "{} = {}", e1, e2),
+            BoolExpr::Ge(a1, a2) => write!(f, "{} ≥ {}", a1, a2),
+            BoolExpr::Gt(a1, a2) => write!(f, "{} > {}", a1, a2),
+        }
     }
 }
 
-pub trait ArithExpr: Expr {}
-
-pub trait IntExpr: ArithExpr {}
-
-pub struct Int {
-    var: usize,
-}
-
-impl Int {
-    pub(super) fn new(var: usize) -> Self {
-        Int { var }
-    }
-}
-
-impl Expr for Int {}
-
-impl ArithExpr for Int {}
-
-impl IntExpr for Int {}
-
-impl ops::Deref for Int {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.var
-    }
-}
-
-impl fmt::Display for Int {
+impl fmt::Display for ArithExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "i{}", self.var)
-    }
-}
-
-pub trait RealExpr: ArithExpr {}
-
-pub struct Real {
-    var: usize,
-}
-
-impl Real {
-    pub(super) fn new(var: usize) -> Self {
-        Real { var }
-    }
-}
-
-impl Expr for Real {}
-
-impl ArithExpr for Real {}
-
-impl RealExpr for Real {}
-
-impl ops::Deref for Real {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.var
-    }
-}
-
-impl fmt::Display for Real {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "r{}", self.var)
+        match self {
+            ArithExpr::Lit(r) => write!(f, "{}", r),
+            ArithExpr::Int(n) => write!(f, "{}", n),
+            ArithExpr::Real(n) => write!(f, "{}", n),
+            ArithExpr::Add(es) => {
+                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
+                write!(f, "({})", es_str.join(" + "))
+            }
+            ArithExpr::Sub(es) => {
+                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
+                write!(f, "({})", es_str.join(" - "))
+            }
+            ArithExpr::Mul(es) => {
+                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
+                write!(f, "({})", es_str.join(" * "))
+            }
+            ArithExpr::Div(e1, e2) => write!(f, "({} / {})", e1, e2),
+        }
     }
 }
