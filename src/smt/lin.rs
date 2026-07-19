@@ -2,7 +2,7 @@ use crate::smt::{ast::ArithExpr, rational::Rational};
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, btree_map::Entry},
-    ops,
+    fmt, ops,
 };
 
 pub(super) struct Lin {
@@ -174,5 +174,48 @@ impl ops::Div for Lin {
     fn div(mut self, other: Self) -> Self::Output {
         self /= other;
         self
+    }
+}
+
+impl fmt::Display for Lin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Sort terms to ensure deterministic formatting regardless of HashMap iteration order.
+        let mut terms: Vec<(usize, &rug::Rational)> = self.vars.iter().map(|(var, coeff)| (*var, coeff)).collect();
+        terms.sort_by_key(|(var, _)| *var);
+
+        let mut first = true;
+        for (var, coeff) in terms {
+            if first {
+                if coeff > &rug::Rational::from(0) {
+                    if coeff == &rug::Rational::from(1) {
+                        write!(f, "{}", var)?;
+                    } else {
+                        write!(f, "{}*{}", coeff, var)?;
+                    }
+                } else if coeff == &rug::Rational::from(-1) {
+                    write!(f, "-{}", var)?;
+                } else {
+                    write!(f, "-{}*{}", -coeff.clone(), var)?;
+                }
+                first = false;
+            } else if coeff > &rug::Rational::from(0) {
+                if coeff == &rug::Rational::from(1) {
+                    write!(f, " + {}", var)?;
+                } else {
+                    write!(f, " + {}*{}", coeff, var)?;
+                }
+            } else if coeff == &rug::Rational::from(-1) {
+                write!(f, " - {}", var)?;
+            } else {
+                write!(f, " - {}*{}", -coeff.clone(), var)?;
+            }
+        }
+        if first {
+            write!(f, "{}", self.const_term)
+        } else if !self.const_term.is_zero() {
+            if self.const_term.is_positive() { write!(f, " + {}", self.const_term) } else { write!(f, " - {}", -self.const_term.clone()) }
+        } else {
+            Ok(())
+        }
     }
 }
