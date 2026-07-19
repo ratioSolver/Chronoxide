@@ -1,6 +1,14 @@
 pub mod ast;
+mod lin;
+mod lit;
+mod rational;
 
-use crate::smt::ast::{ArithExpr, BoolExpr, Expr, LBool, Rational};
+use crate::smt::{
+    ast::{ArithExpr, BoolExpr, Expr, LBool},
+    lin::Lin,
+    lit::Lit,
+    rational::Rational,
+};
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt,
@@ -219,9 +227,9 @@ impl SMT {
 
     pub fn assert(&mut self, expr: &BoolExpr, propagate: bool) -> bool {
         match expr {
-            BoolExpr::Var(_v) => self.enqueue(to_lit(expr), None),
+            BoolExpr::Var(_v) => self.enqueue(Lit::from(expr), None),
             BoolExpr::Not(not) => match not.as_ref() {
-                BoolExpr::Var(_v) => self.enqueue(to_lit(expr), None),
+                BoolExpr::Var(_v) => self.enqueue(Lit::from(expr), None),
                 _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
             },
             _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
@@ -244,47 +252,6 @@ impl SMT {
     }
 }
 
-fn to_lit(expr: &BoolExpr) -> Lit {
-    match expr {
-        BoolExpr::Var(v) => Lit { x: *v, sign: true },
-        BoolExpr::Not(not) => {
-            if let BoolExpr::Var(v) = not.as_ref() {
-                Lit { x: *v, sign: false }
-            } else {
-                panic!("Unsupported expression type for conversion to literal: {}", expr);
-            }
-        }
-        _ => panic!("Unsupported expression type for conversion to literal: {}", expr),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Lit {
-    x: usize,   // Variable index
-    sign: bool, // true for positive literal, false for negated literal
-}
-
-impl fmt::Display for Lit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.x == 0 {
-            match self.sign {
-                true => write!(f, "⊤"),  // True literal
-                false => write!(f, "⊥"), // False literal
-            }
-        } else {
-            match self.sign {
-                true => write!(f, "{}", self.x),
-                false => write!(f, "¬{}", self.x),
-            }
-        }
-    }
-}
-
-/// The literal that is always true.
-const TRUE_LIT: Lit = Lit { x: 0, sign: true };
-/// The literal that is always false.
-const FALSE_LIT: Lit = Lit { x: 0, sign: false };
-
 struct Clause {
     lits: Vec<Lit>, // List of literals in the clause
 }
@@ -294,8 +261,4 @@ impl fmt::Display for Clause {
         let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
         write!(f, "{}", lits.join(" ∨ "))
     }
-}
-struct Lin {
-    vars: BTreeMap<usize, rug::Rational>, // Map from variable index to coefficient
-    const_term: rug::Rational,            // Constant term in the linear expression
 }
