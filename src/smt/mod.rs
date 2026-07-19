@@ -1,10 +1,17 @@
 pub mod ast;
 
 use crate::smt::ast::{ArithExpr, BoolExpr, Expr, LBool, Rational};
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, VecDeque},
+    fmt,
+};
+use tracing::trace;
 
 pub struct SMT {
     bools: Vec<LBool>,             // Current assignments of boolean variables
+    clauses: Vec<Clause>,          // List of clauses in CNF
+    reason: Vec<Option<usize>>,    // Reason for each variable's assignment
+    prop_q: VecDeque<Lit>,         // Queue of literals to propagate
     ints: Vec<bool>,               // Distinguish between integer and real variables
     reals: Vec<Rational>,          // Current assignments of real variables
     lbs: Vec<Rational>,            // Current assignments of lower bounds
@@ -22,6 +29,9 @@ impl SMT {
     pub fn new() -> Self {
         SMT {
             bools: Vec::new(),
+            clauses: Vec::new(),
+            reason: Vec::new(),
+            prop_q: VecDeque::new(),
             ints: Vec::new(),
             reals: Vec::new(),
             lbs: Vec::new(),
@@ -207,32 +217,84 @@ impl SMT {
         }
     }
 
-    pub fn assert(&mut self, expr: &BoolExpr, propagate: bool) {
+    pub fn assert(&mut self, expr: &BoolExpr, propagate: bool) -> bool {
         match expr {
-            BoolExpr::Var(_v) => self.enqueue(expr),
+            BoolExpr::Var(_v) => self.enqueue(to_lit(expr), None),
             BoolExpr::Not(not) => match not.as_ref() {
-                BoolExpr::Var(_v) => self.enqueue(expr),
+                BoolExpr::Var(_v) => self.enqueue(to_lit(expr), None),
                 _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
             },
             _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
         }
     }
 
-    fn enqueue(&mut self, expr: &BoolExpr) {
-        match expr {
-            BoolExpr::Var(v) => self.bools[*v] = LBool::True, // Enqueue the variable to true
-            BoolExpr::Not(not) => {
-                if let BoolExpr::Var(v) = not.as_ref() {
-                    self.bools[*v] = LBool::False; // Enqueue the negated variable to false
-                } else {
-                    panic!("Unsupported expression type for enqueueing: {}", expr);
-                }
+    fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
+        trace!("Enqueue {}{}", lit, reason.map_or("".to_string(), |r| format!(" (reason: {})", r)));
+        match self.bools.get(lit.x) {
+            Some(LBool::Undef) => {
+                self.bools[lit.x] = if lit.sign { LBool::True } else { LBool::False };
+                self.reason[lit.x] = reason;
+                self.prop_q.push_back(lit);
+                true
             }
-            _ => panic!("Unsupported expression type for enqueueing: {}", expr),
+            Some(LBool::True) if !lit.sign => false,
+            Some(LBool::False) if lit.sign => false,
+            _ => true, // Already assigned to the same value
         }
     }
 }
 
+fn to_lit(expr: &BoolExpr) -> Lit {
+    match expr {
+        BoolExpr::Var(v) => Lit { x: *v, sign: true },
+        BoolExpr::Not(not) => {
+            if let BoolExpr::Var(v) = not.as_ref() {
+                Lit { x: *v, sign: false }
+            } else {
+                panic!("Unsupported expression type for conversion to literal: {}", expr);
+            }
+        }
+        _ => panic!("Unsupported expression type for conversion to literal: {}", expr),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Lit {
+    x: usize,   // Variable index
+    sign: bool, // true for positive literal, false for negated literal
+}
+
+impl fmt::Display for Lit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.x == 0 {
+            match self.sign {
+                true => write!(f, "⊤"),  // True literal
+                false => write!(f, "⊥"), // False literal
+            }
+        } else {
+            match self.sign {
+                true => write!(f, "{}", self.x),
+                false => write!(f, "¬{}", self.x),
+            }
+        }
+    }
+}
+
+/// The literal that is always true.
+const TRUE_LIT: Lit = Lit { x: 0, sign: true };
+/// The literal that is always false.
+const FALSE_LIT: Lit = Lit { x: 0, sign: false };
+
+struct Clause {
+    lits: Vec<Lit>, // List of literals in the clause
+}
+
+impl fmt::Display for Clause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
+        write!(f, "{}", lits.join(" ∨ "))
+    }
+}
 struct Lin {
     vars: BTreeMap<usize, rug::Rational>, // Map from variable index to coefficient
     const_term: rug::Rational,            // Constant term in the linear expression
