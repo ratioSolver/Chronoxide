@@ -4,7 +4,7 @@ mod lit;
 mod rational;
 
 use crate::smt::{
-    ast::{ArithExpr, BoolExpr, Expr, LBool},
+    ast::{ArithExpr, BoolExpr, Expr, LBool, to_cnf},
     lin::Lin,
     lit::Lit,
     rational::Rational,
@@ -18,8 +18,12 @@ use tracing::trace;
 pub struct SMT {
     bools: Vec<LBool>,             // Current assignments of boolean variables
     clauses: Vec<Clause>,          // List of clauses in CNF
+    watches: Vec<Vec<usize>>,      // Watch lists for each literal (index is 2*var + sign)
     reason: Vec<Option<usize>>,    // Reason for each variable's assignment
     prop_q: VecDeque<Lit>,         // Queue of literals to propagate
+    trail: Vec<Lit>,               // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,         // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,     // Decision level for each variable
     ints: Vec<bool>,               // Distinguish between integer and real variables
     reals: Vec<Rational>,          // Current assignments of real variables
     lbs: Vec<Rational>,            // Current assignments of lower bounds
@@ -38,8 +42,12 @@ impl SMT {
         SMT {
             bools: Vec::new(),
             clauses: Vec::new(),
+            watches: Vec::new(),
             reason: Vec::new(),
             prop_q: VecDeque::new(),
+            trail: Vec::new(),
+            trail_lim: Vec::new(),
+            level: Vec::new(),
             ints: Vec::new(),
             reals: Vec::new(),
             lbs: Vec::new(),
@@ -51,6 +59,10 @@ impl SMT {
     pub fn new_bool(&mut self) -> BoolExpr {
         let var_index = self.bools.len();
         self.bools.push(LBool::Undef);
+        self.watches.push(Vec::new());
+        self.watches.push(Vec::new()); // For the negated literal
+        self.reason.push(None);
+        self.level.push(None);
         BoolExpr::Var(var_index)
     }
 
@@ -225,15 +237,60 @@ impl SMT {
         }
     }
 
-    pub fn assert(&mut self, expr: &BoolExpr, propagate: bool) -> bool {
-        match expr {
-            BoolExpr::Var(_v) => self.enqueue(Lit::from(expr), None),
+    pub fn assert(&mut self, expr: &BoolExpr) -> bool {
+        match to_cnf(expr) {
+            BoolExpr::Lit(l) => return l == LBool::True, // If the literal is true, the assertion is satisfied
+            BoolExpr::Var(v) => self.enqueue(Lit::new(v, false), None),
             BoolExpr::Not(not) => match not.as_ref() {
-                BoolExpr::Var(_v) => self.enqueue(Lit::from(expr), None),
-                _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
+                BoolExpr::Var(v) => self.enqueue(Lit::new(*v, true), None),
+                _ => panic!("Unsupported expression type for assertion: {}", expr),
             },
-            _ => unimplemented!("Assertion for complex expressions is not implemented yet: {}", expr),
+            BoolExpr::And(and) => {
+                for sub_expr in and {
+                    if !self.assert(&sub_expr) {
+                        return false;
+                    }
+                }
+                true
+            }
+            BoolExpr::Or(or) => {
+                let lits: Vec<Lit> = or
+                    .iter()
+                    .map(|sub_expr| match sub_expr {
+                        BoolExpr::Var(v) => Lit::new(*v, false),
+                        BoolExpr::Not(not) => match not.as_ref() {
+                            BoolExpr::Var(v) => Lit::new(*v, true),
+                            _ => panic!("Unsupported expression type for assertion: {}", expr),
+                        },
+                        _ => panic!("Unsupported expression type for assertion: {}", expr),
+                    })
+                    .collect();
+                self.add_clause(lits).is_ok()
+            }
+            _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
+    }
+
+    fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
+        let clause_index = self.clauses.len();
+        let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>() };
+        trace!("Adding clause {}: {}", clause_index, clause);
+        if clause.lits.is_empty() {
+            return Err(clause.lits);
+        } else if clause.lits.len() == 1 {
+            self.cancel_until(0);
+            if !self.enqueue(clause.lits[0], Some(clause_index)) {
+                return Err(clause.lits);
+            }
+        } else {
+            clause.lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(LBool::Undef) != LBool::Undef);
+            for lit in &clause.lits[0..2] {
+                self.watches[lit.index()].push(clause_index);
+            }
+            self.clauses.push(clause);
+        }
+
+        Ok(())
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
@@ -241,13 +298,38 @@ impl SMT {
         match self.bools.get(lit.var()) {
             Some(LBool::Undef) => {
                 self.bools[lit.var()] = if lit.sign() { LBool::False } else { LBool::True };
+                self.level[lit.var()] = Some(self.decision_level());
                 self.reason[lit.var()] = reason;
+                self.trail.push(lit);
                 self.prop_q.push_back(lit);
                 true
             }
             Some(LBool::True) if lit.sign() => false,
             Some(LBool::False) if !lit.sign() => false,
             _ => true, // Already assigned to the same value
+        }
+    }
+
+    fn undo_one(&mut self) {
+        if let Some(lit) = self.trail.pop() {
+            trace!("Undoing assignment of {}", lit);
+            self.bools[lit.var()] = LBool::Undef;
+            self.reason[lit.var()] = None;
+            self.level[lit.var()] = None;
+        }
+    }
+
+    pub fn decision_level(&self) -> usize {
+        self.trail_lim.len()
+    }
+
+    pub fn cancel_until(&mut self, level: usize) {
+        trace!("Canceling until level {}", level);
+        while self.decision_level() > level {
+            let lim = self.trail_lim.pop().unwrap();
+            while self.trail.len() > lim {
+                self.undo_one();
+            }
         }
     }
 }

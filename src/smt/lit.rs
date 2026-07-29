@@ -21,6 +21,11 @@ impl Lit {
     pub(super) fn sign(self) -> bool {
         self.x & 1 != 0
     }
+
+    /// Compact integer index suitable for watch-list indexing (MiniSat's toInt).
+    pub(super) fn index(self) -> usize {
+        self.x
+    }
 }
 
 impl ops::Not for Lit {
