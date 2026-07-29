@@ -238,15 +238,15 @@ impl SMT {
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
         trace!("Enqueue {}{}", lit, reason.map_or("".to_string(), |r| format!(" (reason: {})", r)));
-        match self.bools.get(lit.x) {
+        match self.bools.get(lit.var()) {
             Some(LBool::Undef) => {
-                self.bools[lit.x] = if lit.sign { LBool::True } else { LBool::False };
-                self.reason[lit.x] = reason;
+                self.bools[lit.var()] = if lit.sign() { LBool::False } else { LBool::True };
+                self.reason[lit.var()] = reason;
                 self.prop_q.push_back(lit);
                 true
             }
-            Some(LBool::True) if !lit.sign => false,
-            Some(LBool::False) if lit.sign => false,
+            Some(LBool::True) if lit.sign() => false,
+            Some(LBool::False) if !lit.sign() => false,
             _ => true, // Already assigned to the same value
         }
     }
