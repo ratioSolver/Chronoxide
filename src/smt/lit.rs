@@ -40,6 +40,6 @@ impl fmt::Display for Lit {
 }
 
 /// The literal that is always true.
-const TRUE_LIT: Lit = Lit { x: 0, sign: true };
+pub(super) const TRUE_LIT: Lit = Lit { x: 0, sign: true };
 /// The literal that is always false.
-const FALSE_LIT: Lit = Lit { x: 0, sign: false };
+pub(super) const FALSE_LIT: Lit = Lit { x: 0, sign: false };
