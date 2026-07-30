@@ -39,7 +39,7 @@ impl Default for SMT {
 
 impl SMT {
     pub fn new() -> Self {
-        let mut smt = SMT {
+        SMT {
             bools: Vec::new(),
             clauses: Vec::new(),
             watches: Vec::new(),
@@ -53,10 +53,7 @@ impl SMT {
             lbs: Vec::new(),
             ubs: Vec::new(),
             tableau: BTreeMap::new(),
-        };
-        smt.new_bool(); // Initialize with one boolean variable
-        smt.bools[0] = LBool::True; // Set the first boolean variable to true
-        smt
+        }
     }
 
     pub fn new_bool(&mut self) -> BoolExpr {
@@ -530,7 +527,7 @@ mod tests {
         smt.new_bool();
         smt.new_int();
         smt.new_real();
-        assert_eq!(smt.bools.len(), 3); // 1 initial + 2 new
+        assert_eq!(smt.bools.len(), 2);
         assert_eq!(smt.ints.len(), 2);
         assert_eq!(smt.reals.len(), 2);
     }

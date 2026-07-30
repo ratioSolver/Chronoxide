@@ -54,13 +54,7 @@ impl From<&BoolExpr> for Lit {
 
 impl fmt::Display for Lit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.var() == 0 {
-            if self.sign() { write!(f, "⊥") } else { write!(f, "⊤") }
-        } else if self.sign() {
-            write!(f, "¬b{}", self.var())
-        } else {
-            write!(f, "b{}", self.var())
-        }
+        if self.sign() { write!(f, "¬b{}", self.var()) } else { write!(f, "b{}", self.var()) }
     }
 }
 
