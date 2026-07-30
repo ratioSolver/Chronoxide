@@ -9,26 +9,29 @@ use crate::smt::{
     lit::Lit,
     rational::Rational,
 };
+use rug::Complete;
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     fmt, mem,
 };
 use tracing::trace;
 
 pub struct SMT {
-    bools: Vec<LBool>,             // Current assignments of boolean variables
-    clauses: Vec<Clause>,          // List of clauses in CNF
-    watches: Vec<Vec<usize>>,      // Watch lists for each literal (index is 2*var + sign)
-    reason: Vec<Option<usize>>,    // Reason for each variable's assignment
-    prop_q: VecDeque<Lit>,         // Queue of literals to propagate
-    trail: Vec<Lit>,               // Trail of assigned literals for backtracking
-    trail_lim: Vec<usize>,         // Indices in the trail where decisions were made
-    level: Vec<Option<usize>>,     // Decision level for each variable
-    ints: Vec<bool>,               // Distinguish between integer and real variables
-    reals: Vec<Rational>,          // Current assignments of real variables
-    lbs: Vec<Rational>,            // Current assignments of lower bounds
-    ubs: Vec<Rational>,            // Current assignments of upper bounds
-    tableau: BTreeMap<usize, Lin>, // Map from variable index to linear expressions
+    bools: Vec<LBool>,                   // Current assignments of boolean variables
+    clauses: Vec<Clause>,                // List of clauses in CNF
+    watches: Vec<Vec<usize>>,            // Watch lists for each literal (index is 2*var + sign)
+    reason: Vec<Option<usize>>,          // Reason for each variable's assignment
+    prop_q: VecDeque<Lit>,               // Queue of literals to propagate
+    trail: Vec<Lit>,                     // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,               // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,           // Decision level for each variable
+    ints: Vec<bool>,                     // Distinguish between integer and real variables
+    reals: Vec<Rational>,                // Current assignments of real variables
+    lbs: Vec<Rational>,                  // Current assignments of lower bounds
+    ubs: Vec<Rational>,                  // Current assignments of upper bounds
+    tableau: BTreeMap<usize, Lin>,       // Map from variable index to linear expressions
+    sat_to_bound: Vec<Option<Bound>>,    // Map from variable index to its bound (if any)
+    bound_to_sat: HashMap<Bound, usize>, // Map from bound to its corresponding variable index
 }
 
 impl Default for SMT {
@@ -53,6 +56,8 @@ impl SMT {
             lbs: Vec::new(),
             ubs: Vec::new(),
             tableau: BTreeMap::new(),
+            sat_to_bound: Vec::new(),
+            bound_to_sat: HashMap::new(),
         }
     }
 
@@ -250,23 +255,42 @@ impl SMT {
                 true
             }
             BoolExpr::Or(or) => {
-                let lits: Vec<Lit> = or
-                    .iter()
-                    .map(|sub_expr| match sub_expr {
-                        BoolExpr::Var(v) => Lit::new(*v, false),
+                let mut lits = Vec::new();
+                lits.reserve(or.len());
+                for sub_expr in or {
+                    match sub_expr {
+                        BoolExpr::Var(v) => lits.push(Lit::new(v, false)),
                         BoolExpr::Not(not) => match not.as_ref() {
-                            BoolExpr::Var(v) => Lit::new(*v, true),
+                            BoolExpr::Var(v) => lits.push(Lit::new(*v, true)),
                             _ => panic!("Unsupported expression type for assertion: {}", expr),
                         },
+                        BoolExpr::Lt(e1, e2) => {
+                            let diff = Lin::from(e1.as_ref()) - Lin::from(e2.as_ref());
+                            let mut result = Lin { vars: BTreeMap::new(), const_term: diff.const_term.clone() };
+                            for (&var, coeff) in &diff.vars {
+                                if let Some(basic) = self.tableau.get(&var) {
+                                    for (&sub_var, sub_coeff) in &basic.vars {
+                                        *result.vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
+                                    }
+                                    result.const_term += (coeff * &basic.const_term).complete();
+                                } else {
+                                    result.vars.insert(var, coeff.clone());
+                                }
+                            }
+                            result.vars.retain(|_, c| *c != 0);
+                            match result.vars.len() {
+                                0 => {
+                                    if result.const_term < rug::Rational::from(0) {
+                                        return true; // The inequality is satisfied
+                                    }
+                                }
+                                _ => panic!("Unsupported expression type for assertion: {}", expr),
+                            }
+                        }
                         _ => panic!("Unsupported expression type for assertion: {}", expr),
-                    })
-                    .collect();
+                    }
+                }
                 self.add_clause(lits).is_ok()
-            }
-            BoolExpr::Lt(e1, e2) => {
-                let l0 = Lin::from(e1.as_ref());
-                let l1 = Lin::from(e2.as_ref());
-                true
             }
             _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
@@ -490,6 +514,23 @@ impl fmt::Display for Clause {
         let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
         write!(f, "{}", lits.join(" ∨ "))
     }
+}
+
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
+struct InfRational {
+    rat: rug::Rational,
+    inf: rug::Rational,
+}
+
+impl InfRational {
+    fn new(rat: rug::Rational, inf: rug::Rational) -> Self {
+        InfRational { rat, inf }
+    }
+}
+
+enum Bound {
+    Lower(usize, InfRational),
+    Upper(usize, InfRational),
 }
 
 #[cfg(test)]
