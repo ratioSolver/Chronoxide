@@ -284,7 +284,7 @@ impl SMT {
     fn decide_lit(&mut self, lit: Lit) -> Result<(), BoolExpr> {
         self.trail_lim.push(self.trail.len());
         self.enqueue(lit, None);
-        self.propagate().map_err(conflict_to_bool_expr)
+        self.propagate()
     }
 
     fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
@@ -302,6 +302,11 @@ impl SMT {
             clause.lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(LBool::Undef) != LBool::Undef);
             for lit in &clause.lits[0..2] {
                 self.watches[lit.index()].push(clause_index);
+            }
+            if self.lit_value(&clause.lits[0]) == LBool::Undef && self.lit_value(&clause.lits[1]) == LBool::False {
+                if !self.enqueue(clause.lits[0], Some(clause_index)) {
+                    return Err(clause.lits);
+                }
             }
             self.clauses.push(clause);
         }
@@ -325,7 +330,7 @@ impl SMT {
         }
     }
 
-    fn propagate(&mut self) -> Result<(), Vec<Lit>> {
+    pub fn propagate(&mut self) -> Result<(), BoolExpr> {
         while let Some(lit) = self.prop_q.pop_front() {
             let falsified = !lit;
             let falsified_index = falsified.index();
@@ -416,7 +421,7 @@ impl SMT {
                     }
 
                     self.cancel_until(backtrack_level);
-                    return Err(learnt);
+                    return Err(conflict_to_bool_expr(learnt));
                 }
             }
         }
@@ -597,5 +602,9 @@ mod tests {
         // Decision: ¬b1
         let decision_result = smt.decide(&not(b1.clone()));
         assert!(decision_result.is_err());
+        let conflict_expr = decision_result.err().unwrap();
+        smt.assert(&conflict_expr);
+        let prop_result = smt.propagate();
+        assert!(prop_result.is_ok());
     }
 }
