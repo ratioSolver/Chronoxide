@@ -1,5 +1,5 @@
 use crate::smt::rational::Rational;
-use std::fmt;
+use std::{fmt, ops};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
@@ -11,6 +11,18 @@ pub enum LBool {
     /// The variable is currently unassigned.
     #[default]
     Undef,
+}
+
+impl ops::Not for LBool {
+    type Output = Self;
+
+    fn not(self) -> Self {
+        match self {
+            LBool::True => LBool::False,
+            LBool::False => LBool::True,
+            LBool::Undef => LBool::Undef,
+        }
+    }
 }
 
 impl fmt::Display for LBool {
@@ -216,11 +228,11 @@ mod tests {
     fn not(e: BoolExpr) -> BoolExpr {
         BoolExpr::Not(Box::new(e))
     }
-    fn and(es: Vec<BoolExpr>) -> BoolExpr {
-        BoolExpr::And(es)
+    fn and(es: impl IntoIterator<Item = BoolExpr>) -> BoolExpr {
+        BoolExpr::And(es.into_iter().collect())
     }
-    fn or(es: Vec<BoolExpr>) -> BoolExpr {
-        BoolExpr::Or(es)
+    fn or(es: impl IntoIterator<Item = BoolExpr>) -> BoolExpr {
+        BoolExpr::Or(es.into_iter().collect())
     }
     fn lit_true() -> BoolExpr {
         BoolExpr::Lit(LBool::True)
@@ -263,12 +275,12 @@ mod tests {
 
     #[test]
     fn bool_display_and() {
-        assert_eq!(and(vec![var(0), var(1)]).to_string(), "(b0 ∧ b1)");
+        assert_eq!(and([var(0), var(1)]).to_string(), "(b0 ∧ b1)");
     }
 
     #[test]
     fn bool_display_or() {
-        assert_eq!(or(vec![var(0), var(1)]).to_string(), "(b0 ∨ b1)");
+        assert_eq!(or([var(0), var(1)]).to_string(), "(b0 ∨ b1)");
     }
 
     #[test]
@@ -364,28 +376,28 @@ mod tests {
 
     #[test]
     fn push_negations_recurses_into_and() {
-        let expr = and(vec![not(not(var(0))), not(not(var(1)))]);
-        assert_eq!(push_negations(&expr), and(vec![var(0), var(1)]));
+        let expr = and([not(not(var(0))), not(not(var(1)))]);
+        assert_eq!(push_negations(&expr), and([var(0), var(1)]));
     }
 
     #[test]
     fn push_negations_recurses_into_or() {
-        let expr = or(vec![not(not(var(0))), var(1)]);
-        assert_eq!(push_negations(&expr), or(vec![var(0), var(1)]));
+        let expr = or([not(not(var(0))), var(1)]);
+        assert_eq!(push_negations(&expr), or([var(0), var(1)]));
     }
 
     #[test]
     fn push_negations_not_and_demorgan() {
         // Not(And(a, b)) => Or(Not(a), Not(b))
-        let expr = not(and(vec![var(0), var(1)]));
-        assert_eq!(push_negations(&expr), or(vec![not(var(0)), not(var(1))]));
+        let expr = not(and([var(0), var(1)]));
+        assert_eq!(push_negations(&expr), or([not(var(0)), not(var(1))]));
     }
 
     #[test]
     fn push_negations_not_or_demorgan() {
         // Not(Or(a, b)) => And(Not(a), Not(b))
-        let expr = not(or(vec![var(0), var(1)]));
-        assert_eq!(push_negations(&expr), and(vec![not(var(0)), not(var(1))]));
+        let expr = not(or([var(0), var(1)]));
+        assert_eq!(push_negations(&expr), and([not(var(0)), not(var(1))]));
     }
 
     #[test]
@@ -429,49 +441,49 @@ mod tests {
 
     #[test]
     fn distribute_and_of_atoms() {
-        let expr = and(vec![var(0), var(1)]);
-        assert_eq!(distribute(&expr), and(vec![var(0), var(1)]));
+        let expr = and([var(0), var(1)]);
+        assert_eq!(distribute(&expr), and([var(0), var(1)]));
     }
 
     #[test]
     fn distribute_or_of_atoms() {
-        let expr = or(vec![var(0), var(1)]);
+        let expr = or([var(0), var(1)]);
         // Or(a, b) with no And inside stays as-is (wrapped in And with one element, unwrapped)
-        assert_eq!(distribute(&expr), or(vec![var(0), var(1)]));
+        assert_eq!(distribute(&expr), or([var(0), var(1)]));
     }
 
     #[test]
     fn distribute_or_over_and() {
         // Or(a, And(b, c)) => And(Or(a, b), Or(a, c))
-        let expr = or(vec![var(0), and(vec![var(1), var(2)])]);
-        let expected = and(vec![or(vec![var(0), var(1)]), or(vec![var(0), var(2)])]);
+        let expr = or([var(0), and([var(1), var(2)])]);
+        let expected = and([or([var(0), var(1)]), or([var(0), var(2)])]);
         assert_eq!(distribute(&expr), expected);
     }
 
     #[test]
     fn distribute_flattens_nested_or() {
         // Or(Or(a, b), c) => Or(a, b, c)
-        let expr = or(vec![or(vec![var(0), var(1)]), var(2)]);
-        assert_eq!(distribute(&expr), or(vec![var(0), var(1), var(2)]));
+        let expr = or([or([var(0), var(1)]), var(2)]);
+        assert_eq!(distribute(&expr), or([var(0), var(1), var(2)]));
     }
 
     #[test]
     fn distribute_flattens_nested_and() {
         // And(And(a, b), c) => And(a, b, c)
-        let expr = and(vec![and(vec![var(0), var(1)]), var(2)]);
-        assert_eq!(distribute(&expr), and(vec![var(0), var(1), var(2)]));
+        let expr = and([and([var(0), var(1)]), var(2)]);
+        assert_eq!(distribute(&expr), and([var(0), var(1), var(2)]));
     }
 
     #[test]
     fn distribute_and_inside_and_flattened() {
-        let expr = and(vec![var(0), and(vec![var(1), var(2)])]);
-        assert_eq!(distribute(&expr), and(vec![var(0), var(1), var(2)]));
+        let expr = and([var(0), and([var(1), var(2)])]);
+        assert_eq!(distribute(&expr), and([var(0), var(1), var(2)]));
     }
 
     #[test]
     fn distribute_cartesian_product_two_ands() {
         // Or(And(a, b), And(c, d)) => And(Or(a,c), Or(a,d), Or(b,c), Or(b,d))
-        let expr = or(vec![and(vec![var(0), var(1)]), and(vec![var(2), var(3)])]);
+        let expr = or([and([var(0), var(1)]), and([var(2), var(3)])]);
         let result = distribute(&expr);
         // Should be an And of four Or clauses
         if let BoolExpr::And(clauses) = result {
@@ -494,7 +506,7 @@ mod tests {
     #[test]
     fn to_cnf_already_cnf() {
         // And(Or(a, b), Or(c, d)) is already CNF
-        let expr = and(vec![or(vec![var(0), var(1)]), or(vec![var(2), var(3)])]);
+        let expr = and([or([var(0), var(1)]), or([var(2), var(3)])]);
         assert_eq!(to_cnf(&expr), expr);
     }
 
@@ -506,22 +518,22 @@ mod tests {
     #[test]
     fn to_cnf_not_and_demorgan_then_distribute() {
         // Not(And(a, b)) => Or(Not(a), Not(b)) — already a single clause
-        let expr = not(and(vec![var(0), var(1)]));
-        assert_eq!(to_cnf(&expr), or(vec![not(var(0)), not(var(1))]));
+        let expr = not(and([var(0), var(1)]));
+        assert_eq!(to_cnf(&expr), or([not(var(0)), not(var(1))]));
     }
 
     #[test]
     fn to_cnf_not_or_demorgan() {
         // Not(Or(a, b)) => And(Not(a), Not(b))
-        let expr = not(or(vec![var(0), var(1)]));
-        assert_eq!(to_cnf(&expr), and(vec![not(var(0)), not(var(1))]));
+        let expr = not(or([var(0), var(1)]));
+        assert_eq!(to_cnf(&expr), and([not(var(0)), not(var(1))]));
     }
 
     #[test]
     fn to_cnf_or_over_and_distributes() {
         // Or(a, And(b, c)) => And(Or(a, b), Or(a, c))
-        let expr = or(vec![var(0), and(vec![var(1), var(2)])]);
-        let expected = and(vec![or(vec![var(0), var(1)]), or(vec![var(0), var(2)])]);
+        let expr = or([var(0), and([var(1), var(2)])]);
+        let expected = and([or([var(0), var(1)]), or([var(0), var(2)])]);
         assert_eq!(to_cnf(&expr), expected);
     }
 
@@ -534,7 +546,7 @@ mod tests {
     #[test]
     fn to_cnf_nested_not_and_or() {
         // Not(Or(And(a,b), c)) => And(Or(Not(a), Not(c)), Or(Not(b), Not(c)))
-        let expr = not(or(vec![and(vec![var(0), var(1)]), var(2)]));
+        let expr = not(or([and([var(0), var(1)]), var(2)]));
         // push_negations: And(Or(Not(a), Not(b)), Not(c))
         // distribute: And of Or(Not(a),Not(b)) and Not(c) — already flat
         let result = to_cnf(&expr);

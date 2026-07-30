@@ -57,9 +57,9 @@ impl fmt::Display for Lit {
         if self.var() == 0 {
             if self.sign() { write!(f, "⊥") } else { write!(f, "⊤") }
         } else if self.sign() {
-            write!(f, "¬{}", self.var())
+            write!(f, "¬b{}", self.var())
         } else {
-            write!(f, "{}", self.var())
+            write!(f, "b{}", self.var())
         }
     }
 }

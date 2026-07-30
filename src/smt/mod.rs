@@ -10,8 +10,8 @@ use crate::smt::{
     rational::Rational,
 };
 use std::{
-    collections::{BTreeMap, VecDeque},
-    fmt,
+    collections::{BTreeMap, HashSet, VecDeque},
+    fmt, mem,
 };
 use tracing::trace;
 
@@ -39,7 +39,7 @@ impl Default for SMT {
 
 impl SMT {
     pub fn new() -> Self {
-        SMT {
+        let mut smt = SMT {
             bools: Vec::new(),
             clauses: Vec::new(),
             watches: Vec::new(),
@@ -53,7 +53,10 @@ impl SMT {
             lbs: Vec::new(),
             ubs: Vec::new(),
             tableau: BTreeMap::new(),
-        }
+        };
+        smt.new_bool(); // Initialize with one boolean variable
+        smt.bools[0] = LBool::True; // Set the first boolean variable to true
+        smt
     }
 
     pub fn new_bool(&mut self) -> BoolExpr {
@@ -98,11 +101,7 @@ impl SMT {
         match expr {
             BoolExpr::Lit(l) => l.clone(),
             BoolExpr::Var(v) => self.bools[*v].clone(),
-            BoolExpr::Not(not) => match self.eval_bool(not) {
-                LBool::True => LBool::False,
-                LBool::False => LBool::True,
-                LBool::Undef => LBool::Undef,
-            },
+            BoolExpr::Not(not) => !self.eval_bool(not),
             BoolExpr::And(and) => {
                 let mut result = LBool::True;
                 for sub_expr in and {
@@ -271,6 +270,23 @@ impl SMT {
         }
     }
 
+    pub fn decide(&mut self, expr: &BoolExpr) -> Result<(), BoolExpr> {
+        match expr {
+            BoolExpr::Var(v) => self.decide_lit(Lit::new(*v, false)),
+            BoolExpr::Not(not) => match not.as_ref() {
+                BoolExpr::Var(v) => self.decide_lit(Lit::new(*v, true)),
+                _ => panic!("Unsupported expression type for decision: {}", expr),
+            },
+            _ => panic!("Unsupported expression type for decision: {}", expr),
+        }
+    }
+
+    fn decide_lit(&mut self, lit: Lit) -> Result<(), BoolExpr> {
+        self.trail_lim.push(self.trail.len());
+        self.enqueue(lit, None);
+        self.propagate().map_err(conflict_to_bool_expr)
+    }
+
     fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
         let clause_index = self.clauses.len();
         let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>() };
@@ -295,8 +311,8 @@ impl SMT {
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
         trace!("Enqueue {}{}", lit, reason.map_or("".to_string(), |r| format!(" (reason: {})", r)));
-        match self.bools.get(lit.var()) {
-            Some(LBool::Undef) => {
+        match self.lit_value(&lit) {
+            LBool::Undef => {
                 self.bools[lit.var()] = if lit.sign() { LBool::False } else { LBool::True };
                 self.level[lit.var()] = Some(self.decision_level());
                 self.reason[lit.var()] = reason;
@@ -304,10 +320,107 @@ impl SMT {
                 self.prop_q.push_back(lit);
                 true
             }
-            Some(LBool::True) if lit.sign() => false,
-            Some(LBool::False) if !lit.sign() => false,
-            _ => true, // Already assigned to the same value
+            LBool::True => true,
+            LBool::False => false,
         }
+    }
+
+    fn propagate(&mut self) -> Result<(), Vec<Lit>> {
+        while let Some(lit) = self.prop_q.pop_front() {
+            let falsified = !lit;
+            let falsified_index = falsified.index();
+            let watches = mem::take(&mut self.watches[falsified_index]);
+            for i in 0..watches.len() {
+                let mut clause_idx = watches[i];
+                // Keep the first watched literal as the other watcher and the second as the falsified one.
+                if self.clauses[clause_idx].lits[0] == falsified {
+                    self.clauses[clause_idx].lits.swap(0, 1);
+                }
+
+                // Check if clause is already satisfied
+                if self.lit_value(&self.clauses[clause_idx].lits[0]) == LBool::True {
+                    self.watches[lit.index()].push(clause_idx);
+                    continue;
+                }
+
+                // Find a replacement watcher that is not currently false.
+                let mut found_replacement = false;
+                for j in 2..self.clauses[clause_idx].lits.len() {
+                    let next_lit = self.clauses[clause_idx].lits[j];
+                    if self.lit_value(&next_lit) != LBool::False {
+                        self.clauses[clause_idx].lits.swap(1, j);
+                        self.watches[next_lit.index()].push(clause_idx);
+                        found_replacement = true;
+                        break;
+                    }
+                }
+
+                if found_replacement {
+                    continue;
+                }
+
+                // If we reach here, the clause is either unit or unsatisfied
+                self.watches[falsified_index].push(clause_idx); // Re-add the clause to the watch list
+                if !self.enqueue(self.clauses[clause_idx].lits[0], Some(clause_idx)) {
+                    for c_i in watches.iter().skip(i + 1) {
+                        self.watches[falsified_index].push(*c_i);
+                    }
+                    self.prop_q.clear();
+
+                    let mut seen: HashSet<usize> = HashSet::new();
+                    let mut counter: usize = 0;
+                    let mut p: Option<(Lit, Option<usize>)> = None;
+                    let mut learnt = Vec::new();
+                    learnt.push(Lit::new(0, false)); // Placeholder for the asserting literal
+                    let mut backtrack_level: usize = 0;
+
+                    loop {
+                        // 1. Process the current clause (either the conflict or a reason)
+                        for lit in &self.clauses[clause_idx].lits {
+                            // Skip the variable we are currently resolving away
+                            if Some(lit.var()) == p.map(|l| l.0.var()) {
+                                continue;
+                            }
+
+                            if !seen.contains(&lit.var()) {
+                                seen.insert(lit.var());
+                                if self.level(lit.var()).expect("Variable should have a level") == self.decision_level() {
+                                    counter += 1;
+                                } else {
+                                    // This literal comes from a previous decision level
+                                    learnt.push(*lit);
+                                    backtrack_level = backtrack_level.max(self.level(lit.var()).expect("Variable should have a level"));
+                                }
+                            }
+                        }
+
+                        // 2. Find the next variable from the trail assigned at this level
+                        p = loop {
+                            let lit = self.trail.last().expect("There should be a literal").clone();
+                            let reason = self.reason[lit.var()];
+                            self.undo_one();
+                            if seen.contains(&lit.var()) {
+                                break Some((lit, reason));
+                            }
+                        };
+                        counter -= 1;
+
+                        if counter == 0 {
+                            // 3. We have found the asserting literal
+                            learnt[0] = !p.expect("There should be a literal").0;
+                            break;
+                        }
+
+                        // 4. Update clause to the reason of the variable we just resolved away
+                        clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
+                    }
+
+                    self.cancel_until(backtrack_level);
+                    return Err(learnt);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn undo_one(&mut self) {
@@ -317,6 +430,14 @@ impl SMT {
             self.reason[lit.var()] = None;
             self.level[lit.var()] = None;
         }
+    }
+
+    fn lit_value(&self, lit: &Lit) -> LBool {
+        if lit.sign() { !self.bools[lit.var()] } else { self.bools[lit.var()] }
+    }
+
+    fn level(&self, var: usize) -> Option<usize> {
+        self.level[var]
     }
 
     pub fn decision_level(&self) -> usize {
@@ -334,6 +455,25 @@ impl SMT {
     }
 }
 
+fn lit_to_bool_expr(lit: Lit) -> BoolExpr {
+    let var = BoolExpr::Var(lit.var());
+    if lit.sign() { BoolExpr::Not(Box::new(var)) } else { var }
+}
+
+fn conflict_to_bool_expr(conflict: Vec<Lit>) -> BoolExpr {
+    let mut terms = conflict.into_iter().map(lit_to_bool_expr);
+
+    match (terms.next(), terms.next()) {
+        (None, _) => BoolExpr::Lit(LBool::False),
+        (Some(term), None) => term,
+        (Some(first), Some(second)) => {
+            let mut disj = vec![first, second];
+            disj.extend(terms);
+            BoolExpr::Or(disj)
+        }
+    }
+}
+
 struct Clause {
     lits: Vec<Lit>, // List of literals in the clause
 }
@@ -342,5 +482,120 @@ impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
         write!(f, "{}", lits.join(" ∨ "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing::{Level, subscriber};
+
+    use super::*;
+
+    // --- Helpers ---
+
+    fn var(v: usize) -> BoolExpr {
+        BoolExpr::Var(v)
+    }
+    fn not(e: BoolExpr) -> BoolExpr {
+        BoolExpr::Not(Box::new(e))
+    }
+    fn and(es: impl IntoIterator<Item = BoolExpr>) -> BoolExpr {
+        BoolExpr::And(es.into_iter().collect())
+    }
+    fn or(es: impl IntoIterator<Item = BoolExpr>) -> BoolExpr {
+        BoolExpr::Or(es.into_iter().collect())
+    }
+    fn lit_true() -> BoolExpr {
+        BoolExpr::Lit(LBool::True)
+    }
+    fn lit_false() -> BoolExpr {
+        BoolExpr::Lit(LBool::False)
+    }
+    fn aint(n: usize) -> Box<ArithExpr> {
+        Box::new(ArithExpr::Int(n))
+    }
+    fn alit(n: i32) -> Box<ArithExpr> {
+        Box::new(ArithExpr::Lit(Rational::Finite(rug::Rational::from(n))))
+    }
+
+    #[test]
+    fn test_smt_creation() {
+        let mut smt = SMT::new();
+        smt.new_bool();
+        smt.new_bool();
+        smt.new_int();
+        smt.new_real();
+        assert_eq!(smt.bools.len(), 3); // 1 initial + 2 new
+        assert_eq!(smt.ints.len(), 2);
+        assert_eq!(smt.reals.len(), 2);
+    }
+
+    #[test]
+    fn test_eval_bool() {
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        smt.assert(&b1);
+        smt.assert(&not(b2.clone()));
+        assert_eq!(smt.eval_bool(&b1), LBool::True);
+        assert_eq!(smt.eval_bool(&b2), LBool::False);
+    }
+
+    #[test]
+    fn test_add_clause() {
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        let clause = or([b1.clone(), b2.clone()]);
+        smt.assert(&clause);
+        assert_eq!(smt.clauses.len(), 1);
+    }
+
+    #[test]
+    fn test_propagate() {
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        smt.assert(&or([b1.clone(), b2.clone()]));
+        let decision_result = smt.decide(&not(b1.clone()));
+        assert!(decision_result.is_ok());
+        assert_eq!(smt.eval_bool(&b1), LBool::False);
+        assert_eq!(smt.eval_bool(&b2), LBool::True);
+    }
+
+    #[test]
+    fn test_conflict_analysis() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        let b3 = smt.new_bool();
+        let b4 = smt.new_bool();
+        let b5 = smt.new_bool();
+        let b6 = smt.new_bool();
+        let b7 = smt.new_bool();
+        let b8 = smt.new_bool();
+        let b9 = smt.new_bool();
+
+        // [(b1 ∨ b2) ∧ (b1 ∨ b3 ∨ b7) ∧ (¬b2 ∨ ¬b3 ∨ b4) ∧ (¬b4 ∨ b5 ∨ b8) ∧ (¬b4 ∨ b6 ∨ b9) ∧ (¬b5 ∨ ¬b6)]
+        smt.assert(&and([or([b1.clone(), b2.clone()]), or([b1.clone(), b3.clone(), b7.clone()]), or([not(b2.clone()), not(b3.clone()), b4.clone()]), or([not(b4.clone()), b5.clone(), b8.clone()]), or([not(b4.clone()), b6.clone(), b9.clone()]), or([not(b5.clone()), not(b6.clone())])]));
+
+        // Decision: ¬b7
+        let decision_result = smt.decide(&not(b7.clone()));
+        assert!(decision_result.is_ok());
+
+        // Decision: ¬b8
+        let decision_result = smt.decide(&not(b8.clone()));
+        assert!(decision_result.is_ok());
+
+        // Decision: ¬b9
+        let decision_result = smt.decide(&not(b9.clone()));
+        assert!(decision_result.is_ok());
+
+        // Decision: ¬b1
+        let decision_result = smt.decide(&not(b1.clone()));
+        assert!(decision_result.is_err());
     }
 }
