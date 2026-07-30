@@ -263,6 +263,11 @@ impl SMT {
                     .collect();
                 self.add_clause(lits).is_ok()
             }
+            BoolExpr::Lt(e1, e2) => {
+                let l0 = Lin::from(e1.as_ref());
+                let l1 = Lin::from(e2.as_ref());
+                true
+            }
             _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
     }
