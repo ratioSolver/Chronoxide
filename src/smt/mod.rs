@@ -15,7 +15,6 @@ use std::{
     fmt, mem,
 };
 use tracing::trace;
-use z3::ast::Bool;
 
 pub struct SMT {
     bools: Vec<LBool>,                                            // Current assignments of boolean variables
@@ -258,8 +257,7 @@ impl SMT {
                 true
             }
             BoolExpr::Or(or) => {
-                let mut lits = Vec::new();
-                lits.reserve(or.len());
+                let mut lits = Vec::with_capacity(or.len());
                 for sub_expr in or {
                     match &sub_expr {
                         BoolExpr::Var(v) => lits.push(Lit::new(*v, false)),
