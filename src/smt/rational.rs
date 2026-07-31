@@ -60,18 +60,18 @@ impl ops::Mul for Rational {
     fn mul(self, other: Self) -> Self::Output {
         match (self, other) {
             (Rational::NegativeInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::NegativeInf) => {
-                if r > rug::Rational::from(0) {
+                if r.is_positive() {
                     Rational::NegativeInf
-                } else if r < rug::Rational::from(0) {
+                } else if r.is_negative() {
                     Rational::PositiveInf
                 } else {
                     panic!("undefined operation: -inf * 0")
                 }
             }
             (Rational::PositiveInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::PositiveInf) => {
-                if r > rug::Rational::from(0) {
+                if r.is_positive() {
                     Rational::PositiveInf
-                } else if r < rug::Rational::from(0) {
+                } else if r.is_negative() {
                     Rational::NegativeInf
                 } else {
                     panic!("undefined operation: +inf * 0")
@@ -96,18 +96,18 @@ impl ops::Div for Rational {
     fn div(self, other: Self) -> Self::Output {
         match (self, other) {
             (Rational::NegativeInf, Rational::Finite(r)) => {
-                if r > rug::Rational::from(0) {
+                if r.is_positive() {
                     Rational::NegativeInf
-                } else if r < rug::Rational::from(0) {
+                } else if r.is_negative() {
                     Rational::PositiveInf
                 } else {
                     panic!("undefined operation: -inf / 0")
                 }
             }
             (Rational::PositiveInf, Rational::Finite(r)) => {
-                if r > rug::Rational::from(0) {
+                if r.is_positive() {
                     Rational::PositiveInf
-                } else if r < rug::Rational::from(0) {
+                } else if r.is_negative() {
                     Rational::NegativeInf
                 } else {
                     panic!("undefined operation: +inf / 0")
@@ -116,10 +116,10 @@ impl ops::Div for Rational {
             (Rational::Finite(_), Rational::NegativeInf) | (Rational::Finite(_), Rational::PositiveInf) => Rational::Finite(rug::Rational::from(0)),
             (Rational::NegativeInf, Rational::NegativeInf) | (Rational::PositiveInf, Rational::PositiveInf) | (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => panic!("undefined operation: ±inf / ±inf"),
             (Rational::Finite(r1), Rational::Finite(r2)) => {
-                if r2 == rug::Rational::from(0) {
-                    if r1 > rug::Rational::from(0) {
+                if r2.is_zero() {
+                    if r1.is_positive() {
                         Rational::PositiveInf
-                    } else if r1 < rug::Rational::from(0) {
+                    } else if r1.is_negative() {
                         Rational::NegativeInf
                     } else {
                         panic!("undefined operation: 0 / 0")

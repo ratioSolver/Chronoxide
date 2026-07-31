@@ -274,17 +274,31 @@ impl SMT {
                                     }
                                     result.const_term += (coeff * &basic.const_term).complete();
                                 } else {
-                                    result.vars.insert(var, coeff.clone());
+                                    *result.vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
                                 }
                             }
                             result.vars.retain(|_, c| *c != 0);
                             match result.vars.len() {
                                 0 => {
-                                    if result.const_term < rug::Rational::from(0) {
+                                    if result.const_term.is_negative() {
                                         return true; // The inequality is satisfied
                                     }
                                 }
-                                _ => panic!("Unsupported expression type for assertion: {}", expr),
+                                1 => {
+                                    let (&var, coeff) = result.vars.iter().next().unwrap();
+                                    let limit_rat = -result.const_term.clone() / coeff;
+                                    let eps_coeff = rug::Rational::from(-1) / coeff;
+                                    let bound = if coeff.is_positive() { Bound::Upper(var, InfRational::new(limit_rat, eps_coeff)) } else { Bound::Lower(var, InfRational::new(limit_rat, eps_coeff)) };
+                                    lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
+                                }
+                                _ => {
+                                    let limit_rat = -result.const_term.clone();
+                                    result.const_term = rug::Rational::from(0);
+                                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                    self.tableau.insert(slack, result);
+                                    let bound = Bound::Upper(slack, InfRational::new(limit_rat, rug::Rational::from(-1)));
+                                    lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
+                                }
                             }
                         }
                         _ => panic!("Unsupported expression type for assertion: {}", expr),
@@ -294,6 +308,23 @@ impl SMT {
             }
             _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
+    }
+
+    fn get_or_create_bound_proxy(&mut self, bound: Bound) -> usize {
+        if let Some(&sat_var) = self.bound_to_sat.get(&bound) {
+            return sat_var;
+        }
+
+        let BoolExpr::Var(sat_var) = self.new_bool() else { unreachable!() };
+
+        if sat_var >= self.sat_to_bound.len() {
+            self.sat_to_bound.resize(sat_var + 1, None);
+        }
+
+        self.sat_to_bound[sat_var] = Some(bound.clone());
+        self.bound_to_sat.insert(bound, sat_var);
+
+        sat_var
     }
 
     pub fn decide(&mut self, expr: &BoolExpr) -> Result<(), BoolExpr> {
@@ -516,7 +547,7 @@ impl fmt::Display for Clause {
     }
 }
 
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct InfRational {
     rat: rug::Rational,
     inf: rug::Rational,
@@ -528,6 +559,7 @@ impl InfRational {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Bound {
     Lower(usize, InfRational),
     Upper(usize, InfRational),
