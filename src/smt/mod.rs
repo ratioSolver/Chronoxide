@@ -268,42 +268,39 @@ impl SMT {
                         },
                         BoolExpr::Lt(e1, e2) => {
                             let diff = Lin::from(e1.as_ref()) - Lin::from(e2.as_ref());
-                            let mut result = Lin { vars: BTreeMap::new(), const_term: diff.const_term.clone() };
+                            let mut vars = BTreeMap::new();
                             for (&var, coeff) in &diff.vars {
                                 if let Some(basic) = self.tableau.get(&var) {
                                     for (&sub_var, sub_coeff) in basic {
-                                        *result.vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
+                                        *vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
                                     }
                                 } else {
-                                    *result.vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
+                                    *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
                                 }
                             }
-                            result.vars.retain(|_, c| *c != 0);
-                            match result.vars.len() {
+                            vars.retain(|_, c| *c != 0);
+                            match vars.len() {
                                 0 => {
-                                    if result.const_term.is_negative() {
+                                    if diff.const_term.is_negative() {
                                         return true; // The inequality is satisfied
                                     }
                                 }
                                 1 => {
-                                    let (&var, coeff) = result.vars.iter().next().unwrap();
-                                    let limit_rat = -result.const_term.clone() / coeff;
-                                    let eps_coeff = rug::Rational::from(-1) / coeff;
-                                    let bound = if coeff.is_positive() { Bound::Upper(var, InfRational::new(limit_rat, eps_coeff)) } else { Bound::Lower(var, InfRational::new(limit_rat, eps_coeff)) };
+                                    let (&var, coeff) = vars.iter().next().unwrap();
+                                    let bound = InfRational::new(-diff.const_term / coeff, rug::Rational::from(-1) / coeff);
+                                    let bound = if coeff.is_positive() { Bound::Upper(var, bound) } else { Bound::Lower(var, bound) };
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
                                 _ => {
-                                    let limit_rat = -result.const_term.clone();
-                                    result.const_term = rug::Rational::from(0);
-                                    let slack = if let Some(&slack) = self.lin_to_slack.get(&result.vars) {
+                                    let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                                         slack
                                     } else {
                                         let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
-                                        self.tableau.insert(slack, result.vars.clone());
-                                        self.lin_to_slack.insert(result.vars, slack);
+                                        self.tableau.insert(slack, vars.clone());
+                                        self.lin_to_slack.insert(vars, slack);
                                         slack
                                     };
-                                    let bound = Bound::Upper(slack, InfRational::new(limit_rat, rug::Rational::from(-1)));
+                                    let bound = Bound::Upper(slack, InfRational::new(-diff.const_term, rug::Rational::from(-1)));
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
                             }
