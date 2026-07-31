@@ -4,7 +4,11 @@ mod lit;
 mod rational;
 
 use crate::smt::{
-    ast::{ArithExpr, BoolExpr, Expr, LBool, to_cnf},
+    ast::{
+        ArithExpr, BoolExpr,
+        Expr::{self, Arith, Bool},
+        LBool, to_cnf,
+    },
     lin::Lin,
     lit::Lit,
     rational::Rational,
@@ -268,7 +272,7 @@ impl SMT {
                         },
                         BoolExpr::Lt(e1, e2) | BoolExpr::Le(e1, e2) => {
                             let is_strict = matches!(sub_expr, BoolExpr::Lt(_, _));
-                            let (vars, const_term) = self.canonize_inequality(e1.as_ref(), e2.as_ref());
+                            let (vars, const_term) = self.canonize_linear_combination(e1.as_ref(), e2.as_ref());
 
                             match vars.len() {
                                 0 => {
@@ -302,9 +306,73 @@ impl SMT {
                                 }
                             }
                         }
+                        BoolExpr::Eq(e1, e2) => match (e1.as_ref(), e2.as_ref()) {
+                            (Bool(b1), Bool(b2)) => {
+                                let lit1 = match b1 {
+                                    BoolExpr::Var(v) => Lit::new(*v, false),
+                                    BoolExpr::Not(not) => match not.as_ref() {
+                                        BoolExpr::Var(v) => Lit::new(*v, true),
+                                        _ => panic!("Unsupported expression type for assertion: {}", expr),
+                                    },
+                                    _ => panic!("Unsupported expression type for assertion: {}", expr),
+                                };
+                                let lit2 = match b2 {
+                                    BoolExpr::Var(v) => Lit::new(*v, false),
+                                    BoolExpr::Not(not) => match not.as_ref() {
+                                        BoolExpr::Var(v) => Lit::new(*v, true),
+                                        _ => panic!("Unsupported expression type for assertion: {}", expr),
+                                    },
+                                    _ => panic!("Unsupported expression type for assertion: {}", expr),
+                                };
+                                if lit1 == lit2 {
+                                    return true;
+                                } else if lit1.var() != lit2.var() || lit1.sign() != lit2.sign() {
+                                    let BoolExpr::Var(p) = self.new_bool() else { unreachable!() };
+                                    // (p ∨ ¬lit1 ∨ ¬lit2)
+                                    self.add_clause(vec![Lit::new(p, false), !lit1, !lit2]).unwrap();
+                                    // (p ∨ lit1 ∨ lit2)
+                                    self.add_clause(vec![Lit::new(p, false), lit1, lit2]).unwrap();
+                                    // (¬p ∨ lit1 ∨ ¬lit2)
+                                    self.add_clause(vec![Lit::new(p, true), lit1, !lit2]).unwrap();
+                                    // (¬p ∨ ¬lit1 ∨ lit2)
+                                    self.add_clause(vec![Lit::new(p, true), !lit1, lit2]).unwrap();
+                                    lits.push(Lit::new(p, false));
+                                }
+                            }
+                            (Arith(e1), Arith(e2)) => {
+                                let (vars, const_term) = self.canonize_linear_combination(e1, e2);
+
+                                match vars.len() {
+                                    0 => {
+                                        if const_term.is_zero() {
+                                            return true;
+                                        }
+                                    }
+                                    1 => {
+                                        let (&var, coeff) = vars.iter().next().unwrap();
+                                        let bound = InfRational::new(-const_term.clone() / coeff, rug::Rational::from(0));
+                                        lits.push(Lit::new(self.get_or_create_bound_proxy(Bound::Equal(var, bound)), false));
+                                    }
+                                    _ => {
+                                        let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                                            slack
+                                        } else {
+                                            let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                            self.tableau.insert(slack, vars.clone());
+                                            self.lin_to_slack.insert(vars, slack);
+                                            slack
+                                        };
+
+                                        let bound = Bound::Equal(slack, InfRational::new(-const_term, rug::Rational::from(0)));
+                                        lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        },
                         BoolExpr::Ge(e1, e2) | BoolExpr::Gt(e1, e2) => {
                             let is_strict = matches!(sub_expr, BoolExpr::Gt(_, _));
-                            let (vars, const_term) = self.canonize_inequality(e1.as_ref(), e2.as_ref());
+                            let (vars, const_term) = self.canonize_linear_combination(e1.as_ref(), e2.as_ref());
 
                             match vars.len() {
                                 0 => {
@@ -341,13 +409,13 @@ impl SMT {
                         _ => panic!("Unsupported expression type for assertion: {}", expr),
                     }
                 }
-                self.add_clause(lits).is_ok()
+                if lits.is_empty() { false } else { self.add_clause(lits).is_ok() }
             }
             _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
     }
 
-    fn canonize_inequality(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
+    fn canonize_linear_combination(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
         let diff = Lin::from(e1) - Lin::from(e2);
         let mut vars = BTreeMap::new();
 
@@ -615,6 +683,7 @@ impl InfRational {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Bound {
     Lower(usize, InfRational),
+    Equal(usize, InfRational),
     Upper(usize, InfRational),
 }
 
@@ -735,9 +804,6 @@ mod tests {
 
     #[test]
     fn test_assert_linear_constant_inequalities() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut smt = SMT::new();
 
         let tautology = or([BoolExpr::Le(alit(1), alit(2))]);
@@ -751,6 +817,9 @@ mod tests {
 
     #[test]
     fn test_assert_linear_single_var_negative_coeff_creates_lower_bound() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
         let mut smt = SMT::new();
         let x = smt.new_real();
 

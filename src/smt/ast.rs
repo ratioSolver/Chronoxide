@@ -104,8 +104,8 @@ impl fmt::Display for ArithExpr {
         match self {
             ArithExpr::Lit(r) => write!(f, "{}", r),
             ArithExpr::Val { lb, val, ub } => write!(f, "{} ∈ [{} , {}]", val, lb, ub),
-            ArithExpr::Int(n) => write!(f, "{}", n),
-            ArithExpr::Real(n) => write!(f, "{}", n),
+            ArithExpr::Int(n) => write!(f, "i{}", n),
+            ArithExpr::Real(n) => write!(f, "r{}", n),
             ArithExpr::Add(es) => {
                 let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", es_str.join(" + "))
