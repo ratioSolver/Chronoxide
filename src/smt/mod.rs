@@ -241,6 +241,7 @@ impl SMT {
     }
 
     pub fn assert(&mut self, expr: &BoolExpr) -> bool {
+        trace!("Adding assertion: {}", expr);
         match to_cnf(expr) {
             BoolExpr::Lit(l) => l == LBool::True, // If the literal is true, the assertion is satisfied
             BoolExpr::Var(v) => self.enqueue(Lit::new(v, false), None),
@@ -697,9 +698,6 @@ mod tests {
 
     #[test]
     fn test_conflict_analysis() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut smt = SMT::new();
         let b1 = smt.new_bool();
         let b2 = smt.new_bool();
@@ -733,5 +731,154 @@ mod tests {
         smt.assert(&conflict_expr);
         let prop_result = smt.propagate();
         assert!(prop_result.is_ok());
+    }
+
+    #[test]
+    fn test_assert_linear_constant_inequalities() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+        let mut smt = SMT::new();
+
+        let tautology = or([BoolExpr::Le(alit(1), alit(2))]);
+        assert!(smt.assert(&tautology));
+        assert_eq!(smt.bound_to_sat.len(), 0);
+
+        let contradiction = or([BoolExpr::Gt(alit(1), alit(2))]);
+        assert!(!smt.assert(&contradiction));
+        assert_eq!(smt.bound_to_sat.len(), 0);
+    }
+
+    #[test]
+    fn test_assert_linear_single_var_negative_coeff_creates_lower_bound() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+
+        // -x <= 3  <=>  x >= -3
+        let c = or([BoolExpr::Le(Box::new(ArithExpr::Sub(alit(0), Box::new(x))), alit(3))]);
+        assert!(smt.assert(&c));
+
+        assert_eq!(smt.bound_to_sat.len(), 1);
+        assert_eq!(smt.sat_to_bound.len(), 1);
+
+        let bound = smt.sat_to_bound[0].as_ref().expect("expected bound proxy");
+        match bound {
+            Bound::Lower(var, inf) => {
+                assert_eq!(*var, 0);
+                assert_eq!(inf.rat, rug::Rational::from(-3));
+                assert_eq!(inf.inf, rug::Rational::from(0));
+            }
+            other => panic!("expected lower bound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_assert_linear_multivar_reuses_slack_variable() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+        let y = smt.new_real();
+
+        let lhs = ArithExpr::Add(vec![x.clone(), y.clone()]);
+
+        let c1 = or([BoolExpr::Le(Box::new(lhs.clone()), alit(10))]);
+        assert!(smt.assert(&c1));
+        assert_eq!(smt.lin_to_slack.len(), 1);
+        assert_eq!(smt.tableau.len(), 1);
+        assert_eq!(smt.reals.len(), 3);
+
+        let c2 = or([BoolExpr::Le(Box::new(lhs), alit(8))]);
+        assert!(smt.assert(&c2));
+
+        // Same linear form should reuse the existing slack variable.
+        assert_eq!(smt.lin_to_slack.len(), 1);
+        assert_eq!(smt.tableau.len(), 1);
+        assert_eq!(smt.reals.len(), 3);
+        assert_eq!(smt.bound_to_sat.len(), 2);
+    }
+
+    #[test]
+    fn test_assert_linear_strict_lt_creates_upper_bound_with_negative_epsilon() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+
+        let c = or([BoolExpr::Lt(Box::new(x), alit(5))]);
+        assert!(smt.assert(&c));
+
+        assert_eq!(smt.bound_to_sat.len(), 1);
+        let bound = smt.sat_to_bound[0].as_ref().expect("expected bound proxy");
+
+        match bound {
+            Bound::Upper(var, inf) => {
+                assert_eq!(*var, 0);
+                assert_eq!(inf.rat, rug::Rational::from(5));
+                assert_eq!(inf.inf, rug::Rational::from(-1));
+            }
+            other => panic!("expected upper bound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_assert_linear_strict_gt_creates_lower_bound_with_positive_epsilon() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+
+        let c = or([BoolExpr::Gt(Box::new(x), alit(5))]);
+        assert!(smt.assert(&c));
+
+        assert_eq!(smt.bound_to_sat.len(), 1);
+        let bound = smt.sat_to_bound[0].as_ref().expect("expected bound proxy");
+
+        match bound {
+            Bound::Lower(var, inf) => {
+                assert_eq!(*var, 0);
+                assert_eq!(inf.rat, rug::Rational::from(5));
+                assert_eq!(inf.inf, rug::Rational::from(1));
+            }
+            other => panic!("expected lower bound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_assert_linear_strict_lt_negative_coeff_creates_lower_bound() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+
+        // -x < 5  <=>  x > -5, strict => positive epsilon on lower bound.
+        let c = or([BoolExpr::Lt(Box::new(ArithExpr::Sub(alit(0), Box::new(x))), alit(5))]);
+        assert!(smt.assert(&c));
+
+        assert_eq!(smt.bound_to_sat.len(), 1);
+        let bound = smt.sat_to_bound[0].as_ref().expect("expected bound proxy");
+
+        match bound {
+            Bound::Lower(var, inf) => {
+                assert_eq!(*var, 0);
+                assert_eq!(inf.rat, rug::Rational::from(-5));
+                assert_eq!(inf.inf, rug::Rational::from(1));
+            }
+            other => panic!("expected lower bound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_assert_linear_strict_gt_negative_coeff_creates_upper_bound() {
+        let mut smt = SMT::new();
+        let x = smt.new_real();
+
+        // -x > 5  <=>  x < -5, strict => negative epsilon on upper bound.
+        let c = or([BoolExpr::Gt(Box::new(ArithExpr::Sub(alit(0), Box::new(x))), alit(5))]);
+        assert!(smt.assert(&c));
+
+        assert_eq!(smt.bound_to_sat.len(), 1);
+        let bound = smt.sat_to_bound[0].as_ref().expect("expected bound proxy");
+
+        match bound {
+            Bound::Upper(var, inf) => {
+                assert_eq!(*var, 0);
+                assert_eq!(inf.rat, rug::Rational::from(-5));
+                assert_eq!(inf.inf, rug::Rational::from(-1));
+            }
+            other => panic!("expected upper bound, got {:?}", other),
+        }
     }
 }
