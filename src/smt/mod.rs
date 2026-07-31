@@ -260,34 +260,28 @@ impl SMT {
                 let mut lits = Vec::new();
                 lits.reserve(or.len());
                 for sub_expr in or {
-                    match sub_expr {
-                        BoolExpr::Var(v) => lits.push(Lit::new(v, false)),
+                    match &sub_expr {
+                        BoolExpr::Var(v) => lits.push(Lit::new(*v, false)),
                         BoolExpr::Not(not) => match not.as_ref() {
                             BoolExpr::Var(v) => lits.push(Lit::new(*v, true)),
                             _ => panic!("Unsupported expression type for assertion: {}", expr),
                         },
-                        BoolExpr::Lt(e1, e2) => {
-                            let diff = Lin::from(e1.as_ref()) - Lin::from(e2.as_ref());
-                            let mut vars = BTreeMap::new();
-                            for (&var, coeff) in &diff.vars {
-                                if let Some(basic) = self.tableau.get(&var) {
-                                    for (&sub_var, sub_coeff) in basic {
-                                        *vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
-                                    }
-                                } else {
-                                    *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
-                                }
-                            }
-                            vars.retain(|_, c| *c != 0);
+                        BoolExpr::Lt(e1, e2) | BoolExpr::Le(e1, e2) => {
+                            let is_strict = matches!(sub_expr, BoolExpr::Lt(_, _));
+                            let (vars, const_term) = self.canonize_inequality(e1.as_ref(), e2.as_ref());
+
                             match vars.len() {
                                 0 => {
-                                    if diff.const_term.is_negative() {
-                                        return true; // The inequality is satisfied
+                                    if if is_strict { const_term.is_negative() } else { const_term.is_negative() || const_term.is_zero() } {
+                                        return true;
                                     }
                                 }
                                 1 => {
                                     let (&var, coeff) = vars.iter().next().unwrap();
-                                    let bound = InfRational::new(-diff.const_term / coeff, rug::Rational::from(-1) / coeff);
+
+                                    let eps_val = if is_strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                                    let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+
                                     let bound = if coeff.is_positive() { Bound::Upper(var, bound) } else { Bound::Lower(var, bound) };
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
@@ -300,7 +294,10 @@ impl SMT {
                                         self.lin_to_slack.insert(vars, slack);
                                         slack
                                     };
-                                    let bound = Bound::Upper(slack, InfRational::new(-diff.const_term, rug::Rational::from(-1)));
+
+                                    let eps_val = if is_strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                                    let bound = Bound::Upper(slack, InfRational::new(-const_term, eps_val));
+
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
                             }
@@ -312,6 +309,24 @@ impl SMT {
             }
             _ => panic!("Unsupported expression type for assertion: {}", expr),
         }
+    }
+
+    fn canonize_inequality(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
+        let diff = Lin::from(e1) - Lin::from(e2);
+        let mut vars = BTreeMap::new();
+
+        for (&var, coeff) in &diff.vars {
+            if let Some(basic) = self.tableau.get(&var) {
+                for (&sub_var, sub_coeff) in basic {
+                    *vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
+                }
+            } else {
+                *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
+            }
+        }
+
+        vars.retain(|_, c| *c != 0);
+        (vars, diff.const_term)
     }
 
     fn get_or_create_bound_proxy(&mut self, bound: Bound) -> usize {
