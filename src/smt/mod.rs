@@ -17,21 +17,22 @@ use std::{
 use tracing::trace;
 
 pub struct SMT {
-    bools: Vec<LBool>,                   // Current assignments of boolean variables
-    clauses: Vec<Clause>,                // List of clauses in CNF
-    watches: Vec<Vec<usize>>,            // Watch lists for each literal (index is 2*var + sign)
-    reason: Vec<Option<usize>>,          // Reason for each variable's assignment
-    prop_q: VecDeque<Lit>,               // Queue of literals to propagate
-    trail: Vec<Lit>,                     // Trail of assigned literals for backtracking
-    trail_lim: Vec<usize>,               // Indices in the trail where decisions were made
-    level: Vec<Option<usize>>,           // Decision level for each variable
-    ints: Vec<bool>,                     // Distinguish between integer and real variables
-    reals: Vec<Rational>,                // Current assignments of real variables
-    lbs: Vec<Rational>,                  // Current assignments of lower bounds
-    ubs: Vec<Rational>,                  // Current assignments of upper bounds
-    tableau: BTreeMap<usize, Lin>,       // Map from variable index to linear expressions
-    sat_to_bound: Vec<Option<Bound>>,    // Map from variable index to its bound (if any)
-    bound_to_sat: HashMap<Bound, usize>, // Map from bound to its corresponding variable index
+    bools: Vec<LBool>,                                            // Current assignments of boolean variables
+    clauses: Vec<Clause>,                                         // List of clauses in CNF
+    watches: Vec<Vec<usize>>,                                     // Watch lists for each literal (index is 2*var + sign)
+    reason: Vec<Option<usize>>,                                   // Reason for each variable's assignment
+    prop_q: VecDeque<Lit>,                                        // Queue of literals to propagate
+    trail: Vec<Lit>,                                              // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,                                        // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,                                    // Decision level for each variable
+    ints: Vec<bool>,                                              // Distinguish between integer and real variables
+    reals: Vec<Rational>,                                         // Current assignments of real variables
+    lbs: Vec<Rational>,                                           // Current assignments of lower bounds
+    ubs: Vec<Rational>,                                           // Current assignments of upper bounds
+    tableau: BTreeMap<usize, BTreeMap<usize, rug::Rational>>,     // Map from variable index to linear expressions
+    sat_to_bound: Vec<Option<Bound>>,                             // Map from variable index to its bound (if any)
+    bound_to_sat: HashMap<Bound, usize>,                          // Map from bound to its corresponding variable index
+    lin_to_slack: HashMap<BTreeMap<usize, rug::Rational>, usize>, // Map from linear expressions to their corresponding slack variable index
 }
 
 impl Default for SMT {
@@ -58,6 +59,7 @@ impl SMT {
             tableau: BTreeMap::new(),
             sat_to_bound: Vec::new(),
             bound_to_sat: HashMap::new(),
+            lin_to_slack: HashMap::new(),
         }
     }
 
@@ -269,10 +271,9 @@ impl SMT {
                             let mut result = Lin { vars: BTreeMap::new(), const_term: diff.const_term.clone() };
                             for (&var, coeff) in &diff.vars {
                                 if let Some(basic) = self.tableau.get(&var) {
-                                    for (&sub_var, sub_coeff) in &basic.vars {
+                                    for (&sub_var, sub_coeff) in basic {
                                         *result.vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += (coeff * sub_coeff).complete();
                                     }
-                                    result.const_term += (coeff * &basic.const_term).complete();
                                 } else {
                                     *result.vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone();
                                 }
@@ -294,8 +295,14 @@ impl SMT {
                                 _ => {
                                     let limit_rat = -result.const_term.clone();
                                     result.const_term = rug::Rational::from(0);
-                                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
-                                    self.tableau.insert(slack, result);
+                                    let slack = if let Some(&slack) = self.lin_to_slack.get(&result.vars) {
+                                        slack
+                                    } else {
+                                        let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                        self.tableau.insert(slack, result.vars.clone());
+                                        self.lin_to_slack.insert(result.vars, slack);
+                                        slack
+                                    };
                                     let bound = Bound::Upper(slack, InfRational::new(limit_rat, rug::Rational::from(-1)));
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
