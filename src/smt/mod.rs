@@ -15,6 +15,7 @@ use std::{
     fmt, mem,
 };
 use tracing::trace;
+use z3::ast::Bool;
 
 pub struct SMT {
     bools: Vec<LBool>,                                            // Current assignments of boolean variables
@@ -297,6 +298,42 @@ impl SMT {
 
                                     let eps_val = if is_strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
                                     let bound = Bound::Upper(slack, InfRational::new(-const_term, eps_val));
+
+                                    lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
+                                }
+                            }
+                        }
+                        BoolExpr::Ge(e1, e2) | BoolExpr::Gt(e1, e2) => {
+                            let is_strict = matches!(sub_expr, BoolExpr::Gt(_, _));
+                            let (vars, const_term) = self.canonize_inequality(e1.as_ref(), e2.as_ref());
+
+                            match vars.len() {
+                                0 => {
+                                    if if is_strict { const_term.is_positive() } else { const_term.is_positive() || const_term.is_zero() } {
+                                        return true;
+                                    }
+                                }
+                                1 => {
+                                    let (&var, coeff) = vars.iter().next().unwrap();
+
+                                    let eps_val = if is_strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                                    let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+
+                                    let bound = if coeff.is_positive() { Bound::Lower(var, bound) } else { Bound::Upper(var, bound) };
+                                    lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
+                                }
+                                _ => {
+                                    let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                                        slack
+                                    } else {
+                                        let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                        self.tableau.insert(slack, vars.clone());
+                                        self.lin_to_slack.insert(vars, slack);
+                                        slack
+                                    };
+
+                                    let eps_val = if is_strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                                    let bound = Bound::Lower(slack, InfRational::new(-const_term, eps_val));
 
                                     lits.push(Lit::new(self.get_or_create_bound_proxy(bound), false));
                                 }
