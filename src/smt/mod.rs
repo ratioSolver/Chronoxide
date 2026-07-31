@@ -103,8 +103,8 @@ impl SMT {
 
     pub fn eval_bool(&self, expr: &BoolExpr) -> LBool {
         match expr {
-            BoolExpr::Lit(l) => l.clone(),
-            BoolExpr::Var(v) => self.bools[*v].clone(),
+            BoolExpr::Lit(l) => *l,
+            BoolExpr::Var(v) => self.bools[*v],
             BoolExpr::Not(not) => !self.eval_bool(not),
             BoolExpr::And(and) => {
                 let mut result = LBool::True;
@@ -242,7 +242,7 @@ impl SMT {
 
     pub fn assert(&mut self, expr: &BoolExpr) -> bool {
         match to_cnf(expr) {
-            BoolExpr::Lit(l) => return l == LBool::True, // If the literal is true, the assertion is satisfied
+            BoolExpr::Lit(l) => l == LBool::True, // If the literal is true, the assertion is satisfied
             BoolExpr::Var(v) => self.enqueue(Lit::new(v, false), None),
             BoolExpr::Not(not) => match not.as_ref() {
                 BoolExpr::Var(v) => self.enqueue(Lit::new(*v, true), None),
@@ -379,10 +379,8 @@ impl SMT {
             for lit in &clause.lits[0..2] {
                 self.watches[lit.index()].push(clause_index);
             }
-            if self.lit_value(&clause.lits[0]) == LBool::Undef && self.lit_value(&clause.lits[1]) == LBool::False {
-                if !self.enqueue(clause.lits[0], Some(clause_index)) {
-                    return Err(clause.lits);
-                }
+            if self.lit_value(&clause.lits[0]) == LBool::Undef && self.lit_value(&clause.lits[1]) == LBool::False && !self.enqueue(clause.lits[0], Some(clause_index)) {
+                return Err(clause.lits);
             }
             self.clauses.push(clause);
         }
@@ -477,7 +475,7 @@ impl SMT {
 
                         // 2. Find the next variable from the trail assigned at this level
                         p = loop {
-                            let lit = self.trail.last().expect("There should be a literal").clone();
+                            let lit = *self.trail.last().expect("There should be a literal");
                             let reason = self.reason[lit.var()];
                             self.undo_one();
                             if seen.contains(&lit.var()) {

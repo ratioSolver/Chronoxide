@@ -458,16 +458,16 @@ impl Core for SolverState {
         let resolvers = self.resolvers.borrow();
         let rho = self.c_res.borrow().map(|res_id| resolvers[*res_id].rho());
         if let Some(rho) = rho {
-            self.smt.assert(&rho.implies(expr_to_bool(&term)));
+            self.smt.assert(rho.implies(expr_to_bool(&term)));
         } else {
-            self.smt.assert(&expr_to_bool(&term));
+            self.smt.assert(expr_to_bool(&term));
         }
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         let var = Int::fresh_const("e");
         for id in instances {
-            self.smt.assert(&var.eq(Int::from_u64(**id as u64)));
+            self.smt.assert(var.eq(Int::from_u64(**id as u64)));
         }
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }

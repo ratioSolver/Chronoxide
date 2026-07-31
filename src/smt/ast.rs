@@ -135,10 +135,10 @@ fn push_inverted(expr: &BoolExpr) -> BoolExpr {
         BoolExpr::Not(inner) => push_negations(inner),
 
         // De Morgan: Not(And(a, b, ...)) => Or(Not(a), Not(b), ...)
-        BoolExpr::And(terms) => BoolExpr::Or(terms.iter().map(|t| push_inverted(t)).collect()),
+        BoolExpr::And(terms) => BoolExpr::Or(terms.iter().map(push_inverted).collect()),
 
         // De Morgan: Not(Or(a, b, ...)) => And(Not(a), Not(b), ...)
-        BoolExpr::Or(terms) => BoolExpr::And(terms.iter().map(|t| push_inverted(t)).collect()),
+        BoolExpr::Or(terms) => BoolExpr::And(terms.iter().map(push_inverted).collect()),
 
         // Negate comparisons by flipping to their complement
         BoolExpr::Lt(a, b) => BoolExpr::Ge(a.clone(), b.clone()),
@@ -188,7 +188,7 @@ fn distribute(expr: &BoolExpr) -> BoolExpr {
             }
 
             // Step 3: Wrap combinations back into Or nodes inside a master And
-            let cnf_or_nodes: Vec<BoolExpr> = result_ands.into_iter().map(|sub_terms| BoolExpr::Or(sub_terms)).collect();
+            let cnf_or_nodes: Vec<BoolExpr> = result_ands.into_iter().map(BoolExpr::Or).collect();
 
             if cnf_or_nodes.len() == 1 { cnf_or_nodes.into_iter().next().unwrap() } else { BoolExpr::And(cnf_or_nodes) }
         }
