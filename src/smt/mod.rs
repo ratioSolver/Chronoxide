@@ -9,7 +9,6 @@ use crate::smt::{
     lit::Lit,
     rational::{InfRational, Rational},
 };
-use rug::Complete;
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap, VecDeque},
@@ -115,32 +114,112 @@ impl SMT {
 
     pub fn assert<T: Borrow<BoolExpr>>(&mut self, expr: T) -> bool {
         trace!("Asserting: {}", expr.borrow());
-        match expr.borrow() {
+        match self.mk_expr(expr.borrow()) {
             BoolExpr::True => true,
             BoolExpr::False => false,
             BoolExpr::Var(_) => {
-                let proxy = self.get_or_create_proxy(expr);
+                let proxy = self.get_proxy(expr.borrow()).expect("Proxy should exist after mk_expr");
                 self.enqueue(Lit::new(proxy, false), None)
             }
             BoolExpr::Not(inner) => {
-                let proxy = self.get_or_create_proxy(inner.as_ref());
+                let proxy = self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr");
                 self.enqueue(Lit::new(proxy, true), None)
             }
             _ => todo!(),
         }
     }
 
-    fn mk_or(&mut self, or: Vec<BoolExpr>) -> BoolExpr {
+    fn mk_expr(&mut self, expr: &BoolExpr) -> BoolExpr {
+        match expr {
+            BoolExpr::True => BoolExpr::True,
+            BoolExpr::False => BoolExpr::False,
+            BoolExpr::Var(_) => {
+                let proxy = self.get_or_create_proxy(expr);
+                if let Some(level) = self.level(proxy)
+                    && *level == 0
+                {
+                    match self.bools.get(proxy).expect("Variable index out of bounds") {
+                        Some(true) => BoolExpr::True,
+                        Some(false) => BoolExpr::False,
+                        None => BoolExpr::Var(proxy),
+                    }
+                } else {
+                    BoolExpr::Var(proxy)
+                }
+            }
+            BoolExpr::Not(inner) => {
+                let inner_expr = self.mk_expr(inner.as_ref());
+                match inner_expr {
+                    BoolExpr::True => BoolExpr::False,
+                    BoolExpr::False => BoolExpr::True,
+                    BoolExpr::Var(var) => BoolExpr::Not(Box::new(BoolExpr::Var(var))),
+                    _ => unreachable!(),
+                }
+            }
+            BoolExpr::And(and) => self.mk_and(and),
+            BoolExpr::Or(or) => self.mk_or(or),
+            BoolExpr::Le(e1, e2) => self.mk_le(e1, e2, false),
+            BoolExpr::Lt(e1, e2) => self.mk_le(e1, e2, true),
+            BoolExpr::Ge(e1, e2) => self.mk_ge(e1, e2, false),
+            BoolExpr::Gt(e1, e2) => self.mk_ge(e1, e2, true),
+            _ => todo!(),
+        }
+    }
+
+    fn mk_and(&mut self, and: &Vec<BoolExpr>) -> BoolExpr {
+        let mut lits = Vec::with_capacity(and.len());
+        for expr in and {
+            let expr = self.mk_expr(expr);
+            match expr {
+                BoolExpr::True => continue,
+                BoolExpr::False => return BoolExpr::False,
+                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
+                BoolExpr::Not(inner) => {
+                    let BoolExpr::Var(var) = inner.as_ref() else { unreachable!() };
+                    lits.push(Lit::new(*var, true));
+                }
+                _ => unreachable!(),
+            }
+        }
+        match lits.len() {
+            0 => BoolExpr::True,
+            1 => {
+                if lits[0].sign() {
+                    BoolExpr::Not(Box::new(BoolExpr::Var(lits[0].var())))
+                } else {
+                    BoolExpr::Var(lits[0].var())
+                }
+            }
+            _ => {
+                let and = BoolExpr::And(lits.iter().map(|lit| if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(lit.var()))) } else { BoolExpr::Var(lit.var()) }).collect());
+                if let Some(proxy) = self.get_proxy(&and) {
+                    BoolExpr::Var(proxy)
+                } else {
+                    let proxy = self.create_proxy(and);
+                    for lit in &lits {
+                        if self.add_clause([Lit::new(proxy, true), *lit]).is_err() {
+                            return BoolExpr::False;
+                        }
+                    }
+                    BoolExpr::Var(proxy)
+                }
+            }
+        }
+    }
+
+    fn mk_or(&mut self, or: &Vec<BoolExpr>) -> BoolExpr {
         let mut lits = Vec::with_capacity(1 + or.len());
-        for expr in &or {
+        for expr in or {
+            let expr = self.mk_expr(expr);
             match expr {
                 BoolExpr::True => return BoolExpr::True,
                 BoolExpr::False => continue,
+                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
                 BoolExpr::Not(inner) => {
-                    let proxy = self.get_or_create_proxy(inner.as_ref());
-                    lits.push(Lit::new(proxy, true));
+                    let BoolExpr::Var(var) = inner.as_ref() else { unreachable!() };
+                    lits.push(Lit::new(*var, true));
                 }
-                _ => todo!(),
+                _ => unreachable!(),
             }
         }
         match lits.len() {
@@ -159,7 +238,7 @@ impl SMT {
                 } else {
                     let proxy = self.create_proxy(or);
                     for lit in &lits {
-                        if self.add_clause([Lit::new(proxy, true), *lit]).is_err() {
+                        if self.add_clause([Lit::new(proxy, false), !*lit]).is_err() {
                             return BoolExpr::False;
                         }
                     }
@@ -323,8 +402,8 @@ impl SMT {
         if lit.sign() { self.bools[lit.var()].map(|v| !v) } else { self.bools[lit.var()] }
     }
 
-    fn level(&self, var: usize) -> Option<usize> {
-        self.level[var]
+    fn level(&self, var: usize) -> &Option<usize> {
+        self.level.get(var).expect("Variable index out of bounds")
     }
 
     pub fn decision_level(&self) -> usize {
