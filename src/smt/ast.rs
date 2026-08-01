@@ -38,11 +38,11 @@ pub enum BoolExpr {
     Not(Box<BoolExpr>),
     And(Vec<BoolExpr>),
     Or(Vec<BoolExpr>),
-    Lt(Box<ArithExpr>, Box<ArithExpr>),
-    Le(Box<ArithExpr>, Box<ArithExpr>),
+    Lt(ArithExpr, ArithExpr),
+    Le(ArithExpr, ArithExpr),
     Eq(Box<Expr>, Box<Expr>),
-    Ge(Box<ArithExpr>, Box<ArithExpr>),
-    Gt(Box<ArithExpr>, Box<ArithExpr>),
+    Ge(ArithExpr, ArithExpr),
+    Gt(ArithExpr, ArithExpr),
     Lb(usize, InfRational),
     Ub(usize, InfRational),
 }
@@ -111,6 +111,12 @@ pub enum ArithExpr {
     Sub(Box<ArithExpr>, Box<ArithExpr>),
     Mul(Vec<ArithExpr>),
     Div(Box<ArithExpr>, Box<ArithExpr>),
+}
+
+impl From<i32> for ArithExpr {
+    fn from(n: i32) -> Self {
+        ArithExpr::Const(Rational::Finite(rug::Rational::from(n)))
+    }
 }
 
 impl From<Rational> for ArithExpr {
@@ -252,15 +258,6 @@ mod tests {
     use super::*;
     use crate::smt::rational::Rational;
 
-    // --- Helpers ---
-
-    fn aint(n: usize) -> Box<ArithExpr> {
-        Box::new(ArithExpr::IntVar(n))
-    }
-    fn alit(n: i32) -> Box<ArithExpr> {
-        Box::new(ArithExpr::Const(Rational::Finite(rug::Rational::from(n))))
-    }
-
     // --- BoolExpr Display ---
 
     #[test]
@@ -291,10 +288,10 @@ mod tests {
 
     #[test]
     fn bool_display_comparisons() {
-        assert_eq!(BoolExpr::Lt(aint(0), aint(1)).to_string(), "0 < 1");
-        assert_eq!(BoolExpr::Le(aint(0), aint(1)).to_string(), "0 ≤ 1");
-        assert_eq!(BoolExpr::Ge(aint(0), aint(1)).to_string(), "0 ≥ 1");
-        assert_eq!(BoolExpr::Gt(aint(0), aint(1)).to_string(), "0 > 1");
+        assert_eq!(BoolExpr::Lt(ArithExpr::IntVar(0), ArithExpr::IntVar(1)).to_string(), "i0 < i1");
+        assert_eq!(BoolExpr::Le(ArithExpr::IntVar(0), ArithExpr::IntVar(1)).to_string(), "i0 ≤ i1");
+        assert_eq!(BoolExpr::Ge(ArithExpr::IntVar(0), ArithExpr::IntVar(1)).to_string(), "i0 ≥ i1");
+        assert_eq!(BoolExpr::Gt(ArithExpr::IntVar(0), ArithExpr::IntVar(1)).to_string(), "i0 > i1");
     }
 
     #[test]
@@ -312,32 +309,32 @@ mod tests {
 
     #[test]
     fn arith_display_int_real() {
-        assert_eq!(ArithExpr::IntVar(2).to_string(), "2");
-        assert_eq!(ArithExpr::RealVar(5).to_string(), "5");
+        assert_eq!(ArithExpr::IntVar(2).to_string(), "i2");
+        assert_eq!(ArithExpr::RealVar(5).to_string(), "r5");
     }
 
     #[test]
     fn arith_display_add() {
         let e = add([ArithExpr::IntVar(0), ArithExpr::IntVar(1)]);
-        assert_eq!(e.to_string(), "(0 + 1)");
+        assert_eq!(e.to_string(), "(i0 + i1)");
     }
 
     #[test]
     fn arith_display_sub() {
         let e = ArithExpr::Sub(Box::new(ArithExpr::IntVar(0)), Box::new(ArithExpr::IntVar(1)));
-        assert_eq!(e.to_string(), "(0 - 1)");
+        assert_eq!(e.to_string(), "(i0 - i1)");
     }
 
     #[test]
     fn arith_display_mul() {
         let e = mul([ArithExpr::IntVar(0), ArithExpr::IntVar(1)]);
-        assert_eq!(e.to_string(), "(0 * 1)");
+        assert_eq!(e.to_string(), "(i0 * i1)");
     }
 
     #[test]
     fn arith_display_div() {
         let e = ArithExpr::Div(Box::new(ArithExpr::IntVar(0)), Box::new(ArithExpr::IntVar(1)));
-        assert_eq!(e.to_string(), "(0 / 1)");
+        assert_eq!(e.to_string(), "(i0 / i1)");
     }
 
     // --- push_negations ---
@@ -398,26 +395,26 @@ mod tests {
 
     #[test]
     fn push_negations_not_lt_becomes_ge() {
-        let expr = !BoolExpr::Lt(aint(0), aint(1));
-        assert_eq!(push_negations(&expr), BoolExpr::Ge(aint(0), aint(1)));
+        let expr = !BoolExpr::Lt(ArithExpr::IntVar(0), ArithExpr::IntVar(1));
+        assert_eq!(push_negations(&expr), BoolExpr::Ge(ArithExpr::IntVar(0), ArithExpr::IntVar(1)));
     }
 
     #[test]
     fn push_negations_not_le_becomes_gt() {
-        let expr = !BoolExpr::Le(aint(0), aint(1));
-        assert_eq!(push_negations(&expr), BoolExpr::Gt(aint(0), aint(1)));
+        let expr = !BoolExpr::Le(ArithExpr::IntVar(0), ArithExpr::IntVar(1));
+        assert_eq!(push_negations(&expr), BoolExpr::Gt(ArithExpr::IntVar(0), ArithExpr::IntVar(1)));
     }
 
     #[test]
     fn push_negations_not_ge_becomes_lt() {
-        let expr = !BoolExpr::Ge(aint(0), aint(1));
-        assert_eq!(push_negations(&expr), BoolExpr::Lt(aint(0), aint(1)));
+        let expr = !BoolExpr::Ge(ArithExpr::IntVar(0), ArithExpr::IntVar(1));
+        assert_eq!(push_negations(&expr), BoolExpr::Lt(ArithExpr::IntVar(0), ArithExpr::IntVar(1)));
     }
 
     #[test]
     fn push_negations_not_gt_becomes_le() {
-        let expr = !BoolExpr::Gt(aint(0), aint(1));
-        assert_eq!(push_negations(&expr), BoolExpr::Le(aint(0), aint(1)));
+        let expr = !BoolExpr::Gt(ArithExpr::IntVar(0), ArithExpr::IntVar(1));
+        assert_eq!(push_negations(&expr), BoolExpr::Le(ArithExpr::IntVar(0), ArithExpr::IntVar(1)));
     }
 
     #[test]
@@ -535,8 +532,8 @@ mod tests {
 
     #[test]
     fn to_cnf_not_comparison_flipped() {
-        assert_eq!(to_cnf(&!(BoolExpr::Lt(alit(0), alit(1)))), BoolExpr::Ge(alit(0), alit(1)));
-        assert_eq!(to_cnf(&!(BoolExpr::Ge(alit(0), alit(1)))), BoolExpr::Lt(alit(0), alit(1)));
+        assert_eq!(to_cnf(&!(BoolExpr::Lt(ArithExpr::from(0), ArithExpr::from(1)))), BoolExpr::Ge(ArithExpr::from(0), ArithExpr::from(1)));
+        assert_eq!(to_cnf(&!(BoolExpr::Ge(ArithExpr::from(0), ArithExpr::from(1)))), BoolExpr::Lt(ArithExpr::from(0), ArithExpr::from(1)));
     }
 
     #[test]
