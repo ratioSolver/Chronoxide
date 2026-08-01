@@ -164,11 +164,11 @@ impl SMT {
                 return Err(clause.lits);
             }
         } else {
-            clause.lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(None) != None);
+            clause.lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(None).is_some());
             for lit in &clause.lits[0..2] {
                 self.watches[lit.index()].push(clause_index);
             }
-            if self.lit_value(&clause.lits[0]) == None && self.lit_value(&clause.lits[1]) == Some(false) && !self.enqueue(clause.lits[0], Some(clause_index)) {
+            if self.lit_value(&clause.lits[0]).is_none() && self.lit_value(&clause.lits[1]) == Some(false) && !self.enqueue(clause.lits[0], Some(clause_index)) {
                 return Err(clause.lits);
             }
             self.clauses.push(clause);
