@@ -3,25 +3,37 @@ mod lin;
 mod lit;
 mod rational;
 
-use crate::smt::{ast::BoolExpr, lit::Lit};
+use crate::smt::{
+    ast::{ArithExpr, BoolExpr},
+    lin::Lin,
+    lit::Lit,
+    rational::{InfRational, Rational},
+};
+use rug::Complete;
 use std::{
     borrow::Borrow,
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fmt,
 };
 use tracing::trace;
 
 pub struct SMT {
-    sat_to_ast: Vec<Option<BoolExpr>>,    // Map from SAT variable index to its corresponding AST expression
-    ast_to_sat: HashMap<BoolExpr, usize>, // Map from AST expression to its corresponding SAT variable index
-    bools: Vec<Option<bool>>,             // Current assignment of each boolean variable (true, false, or unassigned)
-    clauses: Vec<Clause>,                 // List of clauses in the solver
-    watches: Vec<Vec<usize>>,             // Watch lists for each literal (positive and negative)
-    reason: Vec<Option<usize>>,           // Reason for each variable's assignment
-    prop_q: VecDeque<Lit>,                // Queue of literals to propagate
-    trail: Vec<Lit>,                      // Trail of assigned literals for backtracking
-    trail_lim: Vec<usize>,                // Indices in the trail where decisions were made
-    level: Vec<Option<usize>>,            // Decision level for each variable
+    sat_to_ast: Vec<Option<BoolExpr>>,                            // Map from SAT variable index to its corresponding AST expression
+    ast_to_sat: HashMap<BoolExpr, usize>,                         // Map from AST expression to its corresponding SAT variable index
+    bools: Vec<Option<bool>>,                                     // Current assignment of each boolean variable (true, false, or unassigned)
+    clauses: Vec<Clause>,                                         // List of clauses in the solver
+    watches: Vec<Vec<usize>>,                                     // Watch lists for each literal (positive and negative)
+    reason: Vec<Option<usize>>,                                   // Reason for each variable's assignment
+    prop_q: VecDeque<Lit>,                                        // Queue of literals to propagate
+    trail: Vec<Lit>,                                              // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,                                        // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,                                    // Decision level for each variable
+    ints: Vec<bool>,                                              // Distinguish between integer and real variables
+    reals: Vec<Rational>,                                         // Current assignments of real variables
+    lbs: Vec<Rational>,                                           // Current assignments of lower bounds
+    ubs: Vec<Rational>,                                           // Current assignments of upper bounds
+    lin_to_slack: HashMap<BTreeMap<usize, rug::Rational>, usize>, // Mapping from linear constraints to their corresponding slack variable
+    tableau: BTreeMap<usize, BTreeMap<usize, rug::Rational>>,     // Tableau for linear constraints
 }
 
 impl Default for SMT {
@@ -43,6 +55,12 @@ impl SMT {
             trail: Vec::new(),
             trail_lim: Vec::new(),
             level: Vec::new(),
+            ints: Vec::new(),
+            reals: Vec::new(),
+            lbs: Vec::new(),
+            ubs: Vec::new(),
+            lin_to_slack: HashMap::new(),
+            tableau: BTreeMap::new(),
         }
     }
 
@@ -54,6 +72,24 @@ impl SMT {
         self.reason.push(None);
         self.level.push(None);
         idx
+    }
+
+    fn new_int(&mut self) -> usize {
+        let var_index = self.ints.len();
+        self.ints.push(true);
+        self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
+        self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
+        self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
+        var_index
+    }
+
+    fn new_real(&mut self) -> usize {
+        let var_index = self.reals.len();
+        self.ints.push(false);
+        self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
+        self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
+        self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
+        var_index
     }
 
     fn get_proxy(&mut self, expr: &BoolExpr) -> Option<usize> {
@@ -73,8 +109,8 @@ impl SMT {
         proxy
     }
 
-    fn get_or_create_proxy(&mut self, expr: &BoolExpr) -> usize {
-        if let Some(proxy) = self.get_proxy(expr) { proxy } else { self.create_proxy(expr.clone()) }
+    fn get_or_create_proxy<T: Borrow<BoolExpr>>(&mut self, expr: T) -> usize {
+        if let Some(proxy) = self.get_proxy(expr.borrow()) { proxy } else { self.create_proxy(expr.borrow().clone()) }
     }
 
     pub fn assert<T: Borrow<BoolExpr>>(&mut self, expr: T) -> bool {
@@ -83,11 +119,11 @@ impl SMT {
             BoolExpr::True => true,
             BoolExpr::False => false,
             BoolExpr::Var(_) => {
-                let proxy = self.get_or_create_proxy(expr.borrow());
+                let proxy = self.get_or_create_proxy(expr);
                 self.enqueue(Lit::new(proxy, false), None)
             }
             BoolExpr::Not(inner) => {
-                let proxy = self.get_or_create_proxy(inner);
+                let proxy = self.get_or_create_proxy(inner.as_ref());
                 self.enqueue(Lit::new(proxy, true), None)
             }
             _ => todo!(),
@@ -101,7 +137,7 @@ impl SMT {
                 BoolExpr::True => return BoolExpr::True,
                 BoolExpr::False => continue,
                 BoolExpr::Not(inner) => {
-                    let proxy = self.get_or_create_proxy(inner);
+                    let proxy = self.get_or_create_proxy(inner.as_ref());
                     lits.push(Lit::new(proxy, true));
                 }
                 _ => todo!(),
@@ -122,12 +158,118 @@ impl SMT {
                     BoolExpr::Var(proxy)
                 } else {
                     let proxy = self.create_proxy(or);
-                    lits.push(Lit::new(proxy, false));
-                    self.add_clause(lits).unwrap();
+                    for lit in &lits {
+                        if self.add_clause([Lit::new(proxy, true), *lit]).is_err() {
+                            return BoolExpr::False;
+                        }
+                    }
+                    lits.push(Lit::new(proxy, true));
+                    if self.add_clause(lits).is_err() {
+                        return BoolExpr::False;
+                    }
                     BoolExpr::Var(proxy)
                 }
             }
         }
+    }
+
+    fn mk_le(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => BoolExpr::from(if strict { const_term.is_negative() } else { const_term.is_negative() || const_term.is_zero() }),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+
+                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+                BoolExpr::Var(self.get_or_create_proxy(if coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) }))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let slack = self.new_real();
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                BoolExpr::Var(self.get_or_create_proxy(BoolExpr::Ub(slack, InfRational::new(-const_term, eps_val))))
+            }
+        }
+    }
+
+    fn mk_arith_eq(&mut self, e1: &ArithExpr, e2: &ArithExpr) -> BoolExpr {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => BoolExpr::from(const_term.is_zero()),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+                let bound = InfRational::new(-const_term.clone() / coeff, rug::Rational::from(0));
+                BoolExpr::Var(self.get_or_create_proxy(BoolExpr::ArithEq(var, bound)))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let slack = self.new_real();
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                BoolExpr::Var(self.get_or_create_proxy(BoolExpr::ArithEq(slack, InfRational::new(-const_term, rug::Rational::from(0)))))
+            }
+        }
+    }
+
+    fn mk_ge(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => BoolExpr::from(if strict { const_term.is_positive() } else { const_term.is_positive() || const_term.is_zero() }),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+
+                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+                BoolExpr::Var(self.get_or_create_proxy(if coeff.is_positive() { BoolExpr::Lb(var, bound) } else { BoolExpr::Ub(var, bound) }))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let slack = self.new_real();
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                BoolExpr::Var(self.get_or_create_proxy(BoolExpr::Lb(slack, InfRational::new(-const_term, eps_val))))
+            }
+        }
+    }
+
+    fn diff(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
+        let diff = Lin::from(e1) - Lin::from(e2);
+        let mut vars = BTreeMap::new();
+
+        for (var, coeff) in diff.vars {
+            if let Some(basic) = self.tableau.get(&var) {
+                for (&sub_var, sub_coeff) in basic {
+                    *vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone() * sub_coeff;
+                }
+            } else {
+                *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff;
+            }
+        }
+
+        vars.retain(|_, c| *c != 0);
+        (vars, diff.const_term)
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {

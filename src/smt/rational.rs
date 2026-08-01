@@ -149,7 +149,7 @@ pub struct InfRational {
 }
 
 impl InfRational {
-    fn new(rat: rug::Rational, inf: rug::Rational) -> Self {
+    pub fn new(rat: rug::Rational, inf: rug::Rational) -> Self {
         InfRational { rat, inf }
     }
 }
