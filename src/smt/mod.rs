@@ -153,6 +153,7 @@ impl SMT {
                     BoolExpr::True => BoolExpr::False,
                     BoolExpr::False => BoolExpr::True,
                     BoolExpr::Var(var) => BoolExpr::Not(Box::new(BoolExpr::Var(var))),
+                    BoolExpr::Not(inner_inner) => *inner_inner,
                     _ => unreachable!(),
                 }
             }
@@ -173,11 +174,8 @@ impl SMT {
             match expr {
                 BoolExpr::True => continue,
                 BoolExpr::False => return BoolExpr::False,
-                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
-                BoolExpr::Not(inner) => {
-                    let BoolExpr::Var(var) = inner.as_ref() else { unreachable!() };
-                    lits.push(Lit::new(*var, true));
-                }
+                BoolExpr::Var(_) => lits.push(Lit::new(self.get_proxy(&expr).expect("Proxy should exist after mk_expr"), false)),
+                BoolExpr::Not(inner) => lits.push(Lit::new(self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr"), true)),
                 _ => unreachable!(),
             }
         }
@@ -214,11 +212,8 @@ impl SMT {
             match expr {
                 BoolExpr::True => return BoolExpr::True,
                 BoolExpr::False => continue,
-                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
-                BoolExpr::Not(inner) => {
-                    let BoolExpr::Var(var) = inner.as_ref() else { unreachable!() };
-                    lits.push(Lit::new(*var, true));
-                }
+                BoolExpr::Var(_) => lits.push(Lit::new(self.get_proxy(&expr).expect("Proxy should exist after mk_expr"), false)),
+                BoolExpr::Not(inner) => lits.push(Lit::new(self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr"), true)),
                 _ => unreachable!(),
             }
         }
@@ -438,5 +433,81 @@ impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
         write!(f, "{}", lits.join(" ∨ "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::smt::ast::BoolExpr;
+
+    #[test]
+    fn test_ast_to_sat_constants() {
+        let mut solver = SMT::new();
+
+        assert_eq!(solver.mk_expr(&BoolExpr::True), BoolExpr::True);
+        assert_eq!(solver.mk_expr(&BoolExpr::False), BoolExpr::False);
+
+        assert_eq!(solver.mk_expr(&BoolExpr::Not(Box::new(BoolExpr::True))), BoolExpr::False);
+        assert_eq!(solver.mk_expr(&BoolExpr::Not(Box::new(BoolExpr::False))), BoolExpr::True);
+    }
+
+    #[test]
+    fn test_ast_to_sat_var_caching() {
+        let mut solver = SMT::new();
+
+        let not_expr = BoolExpr::Not(Box::new(BoolExpr::Var(0)));
+
+        let res1 = solver.mk_expr(&not_expr);
+        let res2 = solver.mk_expr(&not_expr);
+
+        assert_eq!(res1, res2, "mk_expr should return the same proxy for the same expression");
+    }
+
+    #[test]
+    fn test_ast_to_sat_and_reduction() {
+        let mut solver = SMT::new();
+
+        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![])), BoolExpr::True);
+        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![BoolExpr::Var(0)])), BoolExpr::Var(0));
+        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![BoolExpr::Var(0), BoolExpr::False])), BoolExpr::False);
+    }
+
+    #[test]
+    fn test_ast_to_sat_or_reduction() {
+        let mut solver = SMT::new();
+
+        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![])), BoolExpr::False);
+        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![BoolExpr::Var(0)])), BoolExpr::Var(0));
+        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![BoolExpr::Var(0), BoolExpr::True])), BoolExpr::True);
+    }
+
+    #[test]
+    fn test_ast_to_sat_tseitin_and_proxy() {
+        let mut solver = SMT::new();
+
+        let and_expr = BoolExpr::And(vec![BoolExpr::Var(0), BoolExpr::Var(1)]);
+        let res = solver.mk_expr(&and_expr);
+
+        if let BoolExpr::Var(proxy_id) = res {
+            assert!(proxy_id > 1, "Proxy ID should be greater than the original variable IDs");
+
+            assert_eq!(solver.sat_to_ast[proxy_id], Some(and_expr.clone()));
+            assert_eq!(solver.ast_to_sat.get(&and_expr), Some(&proxy_id));
+            assert_eq!(solver.clauses.len(), 2, "Two clauses should be added for the AND Tseitin transformation");
+        } else {
+            panic!("The conversion of a multi-variable AND did not return a Var(proxy)");
+        }
+    }
+
+    #[test]
+    fn test_ast_to_sat_double_negation() {
+        let mut solver = SMT::new();
+
+        let not_v1 = BoolExpr::Not(Box::new(BoolExpr::Var(0)));
+        let double_not = BoolExpr::Not(Box::new(not_v1));
+
+        let res = solver.mk_expr(&double_not);
+        assert_eq!(res, BoolExpr::Var(0), "The double negation is not simplified correctly");
     }
 }
