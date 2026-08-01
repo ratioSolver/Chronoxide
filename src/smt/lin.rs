@@ -13,14 +13,14 @@ pub(super) struct Lin {
 impl From<&ArithExpr> for Lin {
     fn from(expr: &ArithExpr) -> Self {
         match expr {
-            ArithExpr::Lit(r) => Lin {
+            ArithExpr::Const(r) => Lin {
                 vars: BTreeMap::new(),
                 const_term: match r {
                     Rational::Finite(fr) => fr.clone(),
                     Rational::NegativeInf | Rational::PositiveInf => panic!("Cannot convert infinite rational to linear expression"),
                 },
             },
-            ArithExpr::Int(v) | ArithExpr::Real(v) => {
+            ArithExpr::IntVar(v) | ArithExpr::RealVar(v) => {
                 let mut vars = BTreeMap::new();
                 vars.insert(*v, rug::Rational::from(1));
                 Lin { vars, const_term: rug::Rational::from(0) }
@@ -233,11 +233,11 @@ mod tests {
     }
 
     fn lit(n: i32) -> ArithExpr {
-        ArithExpr::Lit(Rational::Finite(ri(n)))
+        ArithExpr::Const(Rational::Finite(ri(n)))
     }
 
     fn lit_frac(n: i32, d: i32) -> ArithExpr {
-        ArithExpr::Lit(Rational::Finite(r(n, d)))
+        ArithExpr::Const(Rational::Finite(r(n, d)))
     }
 
     fn var(v: usize) -> Lin {
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn from_int_variable() {
-        let lin = Lin::from(&ArithExpr::Int(3));
+        let lin = Lin::from(&ArithExpr::IntVar(3));
         assert_eq!(lin.const_term, ri(0));
         assert_eq!(coeff_of(&lin, 3), Some(ri(1)));
         assert_eq!(lin.vars.len(), 1);
@@ -280,14 +280,14 @@ mod tests {
 
     #[test]
     fn from_real_variable() {
-        let lin = Lin::from(&ArithExpr::Real(7));
+        let lin = Lin::from(&ArithExpr::RealVar(7));
         assert_eq!(lin.const_term, ri(0));
         assert_eq!(coeff_of(&lin, 7), Some(ri(1)));
     }
 
     #[test]
     fn from_add_two_vars() {
-        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::Int(0), ArithExpr::Int(1)]));
+        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::IntVar(0), ArithExpr::IntVar(1)]));
         assert_eq!(coeff_of(&lin, 0), Some(ri(1)));
         assert_eq!(coeff_of(&lin, 1), Some(ri(1)));
         assert_eq!(lin.const_term, ri(0));
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn from_add_var_and_lit() {
-        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::Int(2), lit(3)]));
+        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::IntVar(2), lit(3)]));
         assert_eq!(coeff_of(&lin, 2), Some(ri(1)));
         assert_eq!(lin.const_term, ri(3));
     }
@@ -303,14 +303,14 @@ mod tests {
     #[test]
     fn from_add_cancels_opposite_vars() {
         // x + (-x) should cancel
-        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::Int(0), ArithExpr::Sub(Box::new(lit(0)), Box::new(ArithExpr::Int(0)))]));
+        let lin = Lin::from(&ArithExpr::Add(vec![ArithExpr::IntVar(0), ArithExpr::Sub(Box::new(lit(0)), Box::new(ArithExpr::IntVar(0)))]));
         assert!(lin.vars.is_empty());
         assert_eq!(lin.const_term, ri(0));
     }
 
     #[test]
     fn from_sub() {
-        let lin = Lin::from(&ArithExpr::Sub(Box::new(ArithExpr::Int(0)), Box::new(lit(4))));
+        let lin = Lin::from(&ArithExpr::Sub(Box::new(ArithExpr::IntVar(0)), Box::new(lit(4))));
         assert_eq!(coeff_of(&lin, 0), Some(ri(1)));
         assert_eq!(lin.const_term, ri(-4));
     }
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn from_mul_var_by_scalar() {
         // 3 * x0
-        let lin = Lin::from(&ArithExpr::Mul(vec![lit(3), ArithExpr::Int(0)]));
+        let lin = Lin::from(&ArithExpr::Mul(vec![lit(3), ArithExpr::IntVar(0)]));
         assert_eq!(coeff_of(&lin, 0), Some(ri(3)));
         assert_eq!(lin.const_term, ri(0));
     }
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn from_div_var_by_scalar() {
         // x0 / 2
-        let lin = Lin::from(&ArithExpr::Div(Box::new(ArithExpr::Int(0)), Box::new(lit(2))));
+        let lin = Lin::from(&ArithExpr::Div(Box::new(ArithExpr::IntVar(0)), Box::new(lit(2))));
         assert_eq!(coeff_of(&lin, 0), Some(r(1, 2)));
         assert_eq!(lin.const_term, ri(0));
     }
@@ -348,25 +348,25 @@ mod tests {
     #[test]
     #[should_panic(expected = "Cannot convert infinite rational")]
     fn from_lit_pos_inf_panics() {
-        let _ = Lin::from(&ArithExpr::Lit(Rational::PositiveInf));
+        let _ = Lin::from(&ArithExpr::Const(Rational::PositiveInf));
     }
 
     #[test]
     #[should_panic(expected = "Multiplication of two linear expressions")]
     fn from_mul_two_vars_panics() {
-        let _ = Lin::from(&ArithExpr::Mul(vec![ArithExpr::Int(0), ArithExpr::Int(1)]));
+        let _ = Lin::from(&ArithExpr::Mul(vec![ArithExpr::IntVar(0), ArithExpr::IntVar(1)]));
     }
 
     #[test]
     #[should_panic(expected = "Division by a linear expression with variables")]
     fn from_div_by_var_panics() {
-        let _ = Lin::from(&ArithExpr::Div(Box::new(lit(1)), Box::new(ArithExpr::Int(0))));
+        let _ = Lin::from(&ArithExpr::Div(Box::new(lit(1)), Box::new(ArithExpr::IntVar(0))));
     }
 
     #[test]
     #[should_panic(expected = "Division by zero")]
     fn from_div_by_zero_panics() {
-        let _ = Lin::from(&ArithExpr::Div(Box::new(ArithExpr::Int(0)), Box::new(lit(0))));
+        let _ = Lin::from(&ArithExpr::Div(Box::new(ArithExpr::IntVar(0)), Box::new(lit(0))));
     }
 
     // --- Neg ---

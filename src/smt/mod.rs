@@ -83,7 +83,7 @@ impl SMT {
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
         self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
         self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
-        ArithExpr::Int(var_index)
+        ArithExpr::IntVar(var_index)
     }
 
     pub fn new_real(&mut self) -> ArithExpr {
@@ -92,7 +92,7 @@ impl SMT {
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
         self.lbs.push(Rational::NegativeInf); // Initialize lower bound to -inf
         self.ubs.push(Rational::PositiveInf); // Initialize upper bound to +inf
-        ArithExpr::Real(var_index)
+        ArithExpr::RealVar(var_index)
     }
 
     pub fn eval(&self, expr: &Expr) -> Expr {
@@ -104,7 +104,7 @@ impl SMT {
             },
             Expr::Arith(a) => {
                 let (_lb, val, _ub) = self.eval_arith(a);
-                Expr::Arith(ArithExpr::Lit(val)) // Return the evaluated value as a literal
+                Expr::Arith(ArithExpr::Const(val)) // Return the evaluated value as a literal
             }
         }
     }
@@ -207,9 +207,9 @@ impl SMT {
 
     pub fn eval_arith(&self, expr: &ArithExpr) -> (Rational, Rational, Rational) {
         match expr {
-            ArithExpr::Lit(r) => (r.clone(), r.clone(), r.clone()),
-            ArithExpr::Int(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
-            ArithExpr::Real(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
+            ArithExpr::Const(r) => (r.clone(), r.clone(), r.clone()),
+            ArithExpr::IntVar(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
+            ArithExpr::RealVar(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
             ArithExpr::Add(add) => {
                 let mut lb = Rational::Finite(rug::Rational::from(0));
                 let mut res = Rational::Finite(rug::Rational::from(0));
@@ -295,7 +295,7 @@ impl SMT {
                                     let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                                         slack
                                     } else {
-                                        let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                        let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                                         self.tableau.insert(slack, vars.clone());
                                         self.lin_to_slack.insert(vars, slack);
                                         slack
@@ -359,7 +359,7 @@ impl SMT {
                                         let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                                             slack
                                         } else {
-                                            let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                            let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                                             self.tableau.insert(slack, vars.clone());
                                             self.lin_to_slack.insert(vars, slack);
                                             slack
@@ -395,7 +395,7 @@ impl SMT {
                                     let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                                         slack
                                     } else {
-                                        let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                                        let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                                         self.tableau.insert(slack, vars.clone());
                                         self.lin_to_slack.insert(vars, slack);
                                         slack
@@ -483,7 +483,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -540,7 +540,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -567,7 +567,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    let ArithExpr::RealVar(slack) = self.new_real() else { unreachable!() };
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -912,10 +912,10 @@ mod tests {
         BoolExpr::Lit(LBool::False)
     }
     fn aint(n: usize) -> Box<ArithExpr> {
-        Box::new(ArithExpr::Int(n))
+        Box::new(ArithExpr::IntVar(n))
     }
     fn alit(n: i32) -> Box<ArithExpr> {
-        Box::new(ArithExpr::Lit(Rational::Finite(rug::Rational::from(n))))
+        Box::new(ArithExpr::Const(Rational::Finite(rug::Rational::from(n))))
     }
 
     #[test]

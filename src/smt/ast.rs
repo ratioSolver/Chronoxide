@@ -4,6 +4,7 @@ use std::{fmt, ops};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     Bool(BoolExpr),
+    Enum(EnumExpr),
     Arith(ArithExpr),
 }
 
@@ -16,6 +17,16 @@ impl From<bool> for Expr {
 impl From<Rational> for Expr {
     fn from(r: Rational) -> Self {
         Expr::Arith(ArithExpr::from(r))
+    }
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Bool(b) => write!(f, "{}", b),
+            Expr::Enum(e) => write!(f, "{}", e),
+            Expr::Arith(a) => write!(f, "{}", a),
+        }
     }
 }
 
@@ -48,32 +59,6 @@ impl ops::Not for BoolExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ArithExpr {
-    Lit(Rational),
-    Int(usize),
-    Real(usize),
-    Add(Vec<ArithExpr>),
-    Sub(Box<ArithExpr>, Box<ArithExpr>),
-    Mul(Vec<ArithExpr>),
-    Div(Box<ArithExpr>, Box<ArithExpr>),
-}
-
-impl From<Rational> for ArithExpr {
-    fn from(r: Rational) -> Self {
-        ArithExpr::Lit(r)
-    }
-}
-
-impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Expr::Bool(b) => write!(f, "{}", b),
-            Expr::Arith(a) => write!(f, "{}", a),
-        }
-    }
-}
-
 impl fmt::Display for BoolExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -98,12 +83,44 @@ impl fmt::Display for BoolExpr {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EnumExpr {
+    Var(usize),
+    Const(usize),
+}
+
+impl fmt::Display for EnumExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EnumExpr::Var(n) => write!(f, "e{}", n),
+            EnumExpr::Const(n) => write!(f, "#{}", n),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ArithExpr {
+    Const(Rational),
+    IntVar(usize),
+    RealVar(usize),
+    Add(Vec<ArithExpr>),
+    Sub(Box<ArithExpr>, Box<ArithExpr>),
+    Mul(Vec<ArithExpr>),
+    Div(Box<ArithExpr>, Box<ArithExpr>),
+}
+
+impl From<Rational> for ArithExpr {
+    fn from(r: Rational) -> Self {
+        ArithExpr::Const(r)
+    }
+}
+
 impl fmt::Display for ArithExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ArithExpr::Lit(r) => write!(f, "{}", r),
-            ArithExpr::Int(n) => write!(f, "i{}", n),
-            ArithExpr::Real(n) => write!(f, "r{}", n),
+            ArithExpr::Const(r) => write!(f, "{}", r),
+            ArithExpr::IntVar(n) => write!(f, "i{}", n),
+            ArithExpr::RealVar(n) => write!(f, "r{}", n),
             ArithExpr::Add(es) => {
                 let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", es_str.join(" + "))
@@ -234,10 +251,10 @@ mod tests {
     // --- Helpers ---
 
     fn aint(n: usize) -> Box<ArithExpr> {
-        Box::new(ArithExpr::Int(n))
+        Box::new(ArithExpr::IntVar(n))
     }
     fn alit(n: i32) -> Box<ArithExpr> {
-        Box::new(ArithExpr::Lit(Rational::Finite(rug::Rational::from(n))))
+        Box::new(ArithExpr::Const(Rational::Finite(rug::Rational::from(n))))
     }
 
     // --- BoolExpr Display ---
@@ -286,36 +303,36 @@ mod tests {
 
     #[test]
     fn arith_display_lit() {
-        assert_eq!(ArithExpr::Lit(Rational::Finite(rug::Rational::from(5))).to_string(), "5");
+        assert_eq!(ArithExpr::Const(Rational::Finite(rug::Rational::from(5))).to_string(), "5");
     }
 
     #[test]
     fn arith_display_int_real() {
-        assert_eq!(ArithExpr::Int(2).to_string(), "2");
-        assert_eq!(ArithExpr::Real(5).to_string(), "5");
+        assert_eq!(ArithExpr::IntVar(2).to_string(), "2");
+        assert_eq!(ArithExpr::RealVar(5).to_string(), "5");
     }
 
     #[test]
     fn arith_display_add() {
-        let e = add([ArithExpr::Int(0), ArithExpr::Int(1)]);
+        let e = add([ArithExpr::IntVar(0), ArithExpr::IntVar(1)]);
         assert_eq!(e.to_string(), "(0 + 1)");
     }
 
     #[test]
     fn arith_display_sub() {
-        let e = ArithExpr::Sub(Box::new(ArithExpr::Int(0)), Box::new(ArithExpr::Int(1)));
+        let e = ArithExpr::Sub(Box::new(ArithExpr::IntVar(0)), Box::new(ArithExpr::IntVar(1)));
         assert_eq!(e.to_string(), "(0 - 1)");
     }
 
     #[test]
     fn arith_display_mul() {
-        let e = mul([ArithExpr::Int(0), ArithExpr::Int(1)]);
+        let e = mul([ArithExpr::IntVar(0), ArithExpr::IntVar(1)]);
         assert_eq!(e.to_string(), "(0 * 1)");
     }
 
     #[test]
     fn arith_display_div() {
-        let e = ArithExpr::Div(Box::new(ArithExpr::Int(0)), Box::new(ArithExpr::Int(1)));
+        let e = ArithExpr::Div(Box::new(ArithExpr::IntVar(0)), Box::new(ArithExpr::IntVar(1)));
         assert_eq!(e.to_string(), "(0 / 1)");
     }
 
