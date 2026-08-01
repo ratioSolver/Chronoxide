@@ -142,6 +142,30 @@ impl fmt::Display for Rational {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InfRational {
+    rat: rug::Rational,
+    inf: rug::Rational,
+}
+
+impl InfRational {
+    fn new(rat: rug::Rational, inf: rug::Rational) -> Self {
+        InfRational { rat, inf }
+    }
+}
+
+impl fmt::Display for InfRational {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.inf.is_zero() {
+            write!(f, "{}", self.rat)
+        } else if self.inf.is_positive() {
+            write!(f, "{} + {}ϵ", self.rat, self.inf)
+        } else {
+            write!(f, "{} - {}ϵ", self.rat, -self.inf.clone())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
