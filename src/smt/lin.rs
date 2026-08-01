@@ -20,13 +20,6 @@ impl From<&ArithExpr> for Lin {
                     Rational::NegativeInf | Rational::PositiveInf => panic!("Cannot convert infinite rational to linear expression"),
                 },
             },
-            ArithExpr::Val { val, .. } => Lin {
-                vars: BTreeMap::new(),
-                const_term: match val {
-                    Rational::Finite(fr) => fr.clone(),
-                    Rational::NegativeInf | Rational::PositiveInf => panic!("Cannot convert infinite rational to linear expression"),
-                },
-            },
             ArithExpr::Int(v) | ArithExpr::Real(v) => {
                 let mut vars = BTreeMap::new();
                 vars.insert(*v, rug::Rational::from(1));
@@ -278,14 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn from_val() {
-        let expr = ArithExpr::Val { lb: Rational::Finite(ri(0)), val: Rational::Finite(ri(7)), ub: Rational::Finite(ri(10)) };
-        let lin = Lin::from(&expr);
-        assert!(lin.vars.is_empty());
-        assert_eq!(lin.const_term, ri(7));
-    }
-
-    #[test]
     fn from_int_variable() {
         let lin = Lin::from(&ArithExpr::Int(3));
         assert_eq!(lin.const_term, ri(0));
@@ -364,12 +349,6 @@ mod tests {
     #[should_panic(expected = "Cannot convert infinite rational")]
     fn from_lit_pos_inf_panics() {
         let _ = Lin::from(&ArithExpr::Lit(Rational::PositiveInf));
-    }
-
-    #[test]
-    #[should_panic(expected = "Cannot convert infinite rational")]
-    fn from_val_neg_inf_panics() {
-        let _ = Lin::from(&ArithExpr::Val { lb: Rational::NegativeInf, val: Rational::NegativeInf, ub: Rational::PositiveInf });
     }
 
     #[test]

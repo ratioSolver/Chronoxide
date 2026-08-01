@@ -7,7 +7,7 @@ use crate::smt::{
     ast::{
         ArithExpr, BoolExpr,
         Expr::{self, Arith, Bool},
-        LBool, to_cnf,
+        to_cnf,
     },
     lin::Lin,
     lit::Lit,
@@ -16,7 +16,7 @@ use crate::smt::{
 use rug::Complete;
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    fmt, mem,
+    fmt, mem, ops,
 };
 use tracing::trace;
 
@@ -34,8 +34,8 @@ pub struct SMT {
     lbs: Vec<Rational>,                                           // Current assignments of lower bounds
     ubs: Vec<Rational>,                                           // Current assignments of upper bounds
     tableau: BTreeMap<usize, BTreeMap<usize, rug::Rational>>,     // Map from variable index to linear expressions
-    sat_to_bound: Vec<Option<Bound>>,                             // Map from variable index to its bound (if any)
-    bound_to_sat: HashMap<Bound, usize>,                          // Map from bound to its corresponding variable index
+    sat_to_ast: Vec<Option<Expr>>,                                // Map from SAT variable index to its corresponding AST expression
+    ast_to_sat: HashMap<Expr, usize>,                             // Map from AST expression to its corresponding SAT variable index
     lin_to_slack: HashMap<BTreeMap<usize, rug::Rational>, usize>, // Map from linear expressions to their corresponding slack variable index
 }
 
@@ -61,8 +61,8 @@ impl SMT {
             lbs: Vec::new(),
             ubs: Vec::new(),
             tableau: BTreeMap::new(),
-            sat_to_bound: Vec::new(),
-            bound_to_sat: HashMap::new(),
+            sat_to_ast: Vec::new(),
+            ast_to_sat: HashMap::new(),
             lin_to_slack: HashMap::new(),
         }
     }
@@ -97,10 +97,14 @@ impl SMT {
 
     pub fn eval(&self, expr: &Expr) -> Expr {
         match expr {
-            Expr::Bool(b) => Expr::Bool(BoolExpr::Lit(self.eval_bool(b))),
+            Expr::Bool(b) => match self.eval_bool(b) {
+                LBool::True => Expr::Bool(BoolExpr::True),
+                LBool::False => Expr::Bool(BoolExpr::False),
+                LBool::Undef => Expr::Bool(b.clone()),
+            },
             Expr::Arith(a) => {
-                let (lb, val, ub) = self.eval_arith(a);
-                Expr::Arith(ArithExpr::Val { lb, val, ub })
+                let (_lb, val, _ub) = self.eval_arith(a);
+                Expr::Arith(ArithExpr::Lit(val)) // Return the evaluated value as a literal
             }
         }
     }
@@ -204,7 +208,6 @@ impl SMT {
     pub fn eval_arith(&self, expr: &ArithExpr) -> (Rational, Rational, Rational) {
         match expr {
             ArithExpr::Lit(r) => (r.clone(), r.clone(), r.clone()),
-            ArithExpr::Val { lb, val, ub } => (lb.clone(), val.clone(), ub.clone()),
             ArithExpr::Int(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
             ArithExpr::Real(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
             ArithExpr::Add(add) => {
@@ -247,7 +250,6 @@ impl SMT {
     pub fn assert(&mut self, expr: &BoolExpr) -> bool {
         trace!("Adding assertion: {}", expr);
         match to_cnf(expr) {
-            BoolExpr::Lit(l) => l == LBool::True, // If the literal is true, the assertion is satisfied
             BoolExpr::Var(v) => self.enqueue(Lit::new(v, false), None),
             BoolExpr::Not(not) => match not.as_ref() {
                 BoolExpr::Var(v) => self.enqueue(Lit::new(*v, true), None),
@@ -272,7 +274,7 @@ impl SMT {
                         },
                         BoolExpr::Lt(e1, e2) | BoolExpr::Le(e1, e2) => {
                             let is_strict = matches!(sub_expr, BoolExpr::Lt(_, _));
-                            let (vars, const_term) = self.canonize_linear_combination(e1.as_ref(), e2.as_ref());
+                            let (vars, const_term) = self.diff(e1.as_ref(), e2.as_ref());
 
                             match vars.len() {
                                 0 => {
@@ -340,7 +342,7 @@ impl SMT {
                                 }
                             }
                             (Arith(e1), Arith(e2)) => {
-                                let (vars, const_term) = self.canonize_linear_combination(e1, e2);
+                                let (vars, const_term) = self.diff(e1, e2);
 
                                 match vars.len() {
                                     0 => {
@@ -372,7 +374,7 @@ impl SMT {
                         },
                         BoolExpr::Ge(e1, e2) | BoolExpr::Gt(e1, e2) => {
                             let is_strict = matches!(sub_expr, BoolExpr::Gt(_, _));
-                            let (vars, const_term) = self.canonize_linear_combination(e1.as_ref(), e2.as_ref());
+                            let (vars, const_term) = self.diff(e1.as_ref(), e2.as_ref());
 
                             match vars.len() {
                                 0 => {
@@ -415,7 +417,169 @@ impl SMT {
         }
     }
 
-    fn canonize_linear_combination(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
+    fn mk_or(&mut self, or: Vec<BoolExpr>) -> BoolExpr {
+        let mut lits = Vec::with_capacity(1 + or.len());
+        for sub_expr in or {
+            match &sub_expr {
+                BoolExpr::Var(v) => lits.push(Lit::new(*v, false)),
+                BoolExpr::Not(not) => match not.as_ref() {
+                    BoolExpr::Var(v) => lits.push(Lit::new(*v, true)),
+                    _ => panic!("Unsupported expression type for assertion: {}", sub_expr),
+                },
+                BoolExpr::Lt(e1, e2) | BoolExpr::Le(e1, e2) => match self.mk_le(e1, e2, matches!(sub_expr, BoolExpr::Lt(_, _))) {
+                    BoolExpr::Var(p) => lits.push(Lit::new(p, false)),
+                    BoolExpr::True => return BoolExpr::True,
+                    BoolExpr::False => {}
+                    _ => panic!("Unsupported expression type for assertion: {}", sub_expr),
+                },
+                BoolExpr::Ge(e1, e2) | BoolExpr::Gt(e1, e2) => match self.mk_ge(e1, e2, matches!(sub_expr, BoolExpr::Gt(_, _))) {
+                    BoolExpr::Var(p) => lits.push(Lit::new(p, false)),
+                    BoolExpr::True => return BoolExpr::True,
+                    BoolExpr::False => {}
+                    _ => panic!("Unsupported expression type for assertion: {}", sub_expr),
+                },
+                _ => panic!("Unsupported expression type for assertion: {}", sub_expr),
+            }
+        }
+        match lits.len() {
+            0 => BoolExpr::False,
+            1 => {
+                if lits[0].sign() {
+                    BoolExpr::Not(Box::new(BoolExpr::Var(lits[0].var())))
+                } else {
+                    BoolExpr::Var(lits[0].var())
+                }
+            }
+            _ => {
+                let or = BoolExpr::Or(lits.iter().map(|lit| if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(lit.var()))) } else { BoolExpr::Var(lit.var()) }).collect());
+                let proxy = if let Some(&sat_var) = self.ast_to_sat.get(&Expr::Bool(or.clone())) {
+                    sat_var
+                } else {
+                    let BoolExpr::Var(p) = self.new_bool() else { unreachable!() };
+                    self.add_clause(lits).unwrap();
+                    self.sat_to_ast.resize(p + 1, None);
+                    self.sat_to_ast[p] = Some(Expr::Bool(or.clone()));
+                    self.ast_to_sat.insert(Expr::Bool(or), p);
+                    p
+                };
+                BoolExpr::Var(proxy)
+            }
+        }
+    }
+
+    fn mk_le(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => BoolExpr::from(if strict { const_term.is_negative() } else { const_term.is_negative() || const_term.is_zero() }),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+
+                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+                BoolExpr::from(self.get_or_create_bound_proxy(if coeff.is_positive() { Bound::Upper(var, bound) } else { Bound::Lower(var, bound) }))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
+                BoolExpr::from(self.get_or_create_bound_proxy(Bound::Upper(slack, InfRational::new(-const_term, eps_val))))
+            }
+        }
+    }
+
+    fn mk_bool_eq(&mut self, e1: &BoolExpr, e2: &BoolExpr) -> EncLit {
+        let lit_e1 = match e1 {
+            BoolExpr::Var(v) => Lit::new(*v, false),
+            BoolExpr::Not(not) => match not.as_ref() {
+                BoolExpr::Var(v) => Lit::new(*v, true),
+                _ => panic!("Unsupported expression type for boolean equality: {}", e1),
+            },
+            _ => panic!("Unsupported expression type for boolean equality: {}", e1),
+        };
+
+        let lit_e2 = match e2 {
+            BoolExpr::Var(v) => Lit::new(*v, false),
+            BoolExpr::Not(not) => match not.as_ref() {
+                BoolExpr::Var(v) => Lit::new(*v, true),
+                _ => panic!("Unsupported expression type for boolean equality: {}", e2),
+            },
+            _ => panic!("Unsupported expression type for boolean equality: {}", e2),
+        };
+
+        // (¬p ∨ ¬e1 ∨ e2)
+        self.add_clause(vec![lit_not_p, !lit_e1, lit_e2]).unwrap();
+        // (¬p ∨ e1 ∨ ¬e2)
+        self.add_clause(vec![lit_not_p, lit_e1, !lit_e2]).unwrap();
+        // (p ∨ ¬e1 ∨ ¬e2)
+        self.add_clause(vec![lit_p, !lit_e1, !lit_e2]).unwrap();
+        // (p ∨ e1 ∨ e2)
+        self.add_clause(vec![lit_p, lit_e1, lit_e2]).unwrap();
+
+        EncLit::Lit(lit_p)
+    }
+
+    fn mk_arith_eq(&mut self, e1: &ArithExpr, e2: &ArithExpr) -> EncLit {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => EncLit::from(const_term.is_zero()),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+                let bound = InfRational::new(-const_term.clone() / coeff, rug::Rational::from(0));
+                EncLit::from(self.get_or_create_bound_proxy(Bound::Equal(var, bound)))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                EncLit::from(self.get_or_create_bound_proxy(Bound::Equal(slack, InfRational::new(-const_term, rug::Rational::from(0)))))
+            }
+        }
+    }
+
+    fn mk_ge(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> EncLit {
+        let (vars, const_term) = self.diff(e1, e2);
+
+        match vars.len() {
+            0 => EncLit::from(if strict { const_term.is_positive() } else { const_term.is_positive() || const_term.is_zero() }),
+            1 => {
+                let (&var, coeff) = vars.iter().next().unwrap();
+
+                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+                EncLit::from(self.get_or_create_bound_proxy(if coeff.is_positive() { Bound::Lower(var, bound) } else { Bound::Upper(var, bound) }))
+            }
+            _ => {
+                let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
+                    slack
+                } else {
+                    let ArithExpr::Real(slack) = self.new_real() else { unreachable!() };
+                    self.tableau.insert(slack, vars.clone());
+                    self.lin_to_slack.insert(vars, slack);
+                    slack
+                };
+
+                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
+                EncLit::from(self.get_or_create_bound_proxy(Bound::Lower(slack, InfRational::new(-const_term, eps_val))))
+            }
+        }
+    }
+
+    fn diff(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
         let diff = Lin::from(e1) - Lin::from(e2);
         let mut vars = BTreeMap::new();
 
@@ -433,19 +597,19 @@ impl SMT {
         (vars, diff.const_term)
     }
 
-    fn get_or_create_bound_proxy(&mut self, bound: Bound) -> usize {
-        if let Some(&sat_var) = self.bound_to_sat.get(&bound) {
+    fn get_or_create_proxy(&mut self, expr: Expr) -> usize {
+        if let Some(&sat_var) = self.ast_to_sat.get(&expr) {
             return sat_var;
         }
 
         let BoolExpr::Var(sat_var) = self.new_bool() else { unreachable!() };
 
-        if sat_var >= self.sat_to_bound.len() {
-            self.sat_to_bound.resize(sat_var + 1, None);
+        if sat_var >= self.sat_to_ast.len() {
+            self.sat_to_ast.resize(sat_var + 1, None);
         }
 
-        self.sat_to_bound[sat_var] = Some(bound.clone());
-        self.bound_to_sat.insert(bound, sat_var);
+        self.sat_to_ast[sat_var] = Some(expr.clone());
+        self.ast_to_sat.insert(expr, sat_var);
 
         sat_var
     }
@@ -653,6 +817,40 @@ fn conflict_to_bool_expr(conflict: Vec<Lit>) -> BoolExpr {
             let mut disj = vec![first, second];
             disj.extend(terms);
             BoolExpr::Or(disj)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum LBool {
+    /// The variable is assigned to true.
+    True,
+    /// The variable is assigned to false.
+    False,
+    /// The variable is currently unassigned.
+    #[default]
+    Undef,
+}
+
+impl ops::Not for LBool {
+    type Output = Self;
+
+    fn not(self) -> Self {
+        match self {
+            LBool::True => LBool::False,
+            LBool::False => LBool::True,
+            LBool::Undef => LBool::Undef,
+        }
+    }
+}
+
+impl fmt::Display for LBool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LBool::True => write!(f, "true"),
+            LBool::False => write!(f, "false"),
+            LBool::Undef => write!(f, "undef"),
         }
     }
 }

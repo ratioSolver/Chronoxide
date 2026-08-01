@@ -57,8 +57,3 @@ impl fmt::Display for Lit {
         if self.sign() { write!(f, "¬b{}", self.var()) } else { write!(f, "b{}", self.var()) }
     }
 }
-
-/// The literal that is always true.
-pub(super) const TRUE_LIT: Lit = Lit { x: 0 };
-/// The literal that is always false.
-pub(super) const FALSE_LIT: Lit = Lit { x: 1 };

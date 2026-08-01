@@ -1,6 +1,6 @@
 use std::{fmt, ops};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
 pub enum Rational {
     NegativeInf,
     Finite(rug::Rational),
