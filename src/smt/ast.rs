@@ -92,7 +92,7 @@ impl fmt::Display for BoolExpr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EnumExpr {
     Var(usize),
-    Const(usize),
+    Const(i32),
 }
 
 impl fmt::Display for EnumExpr {

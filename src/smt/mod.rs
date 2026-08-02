@@ -4,15 +4,15 @@ mod lit;
 mod rational;
 
 use crate::smt::{
-    ast::{ArithExpr, BoolExpr},
+    ast::{ArithExpr, BoolExpr, EnumExpr, Expr},
     lin::Lin,
     lit::Lit,
     rational::{InfRational, Rational},
 };
 use std::{
     borrow::Borrow,
-    collections::{BTreeMap, HashMap, VecDeque},
-    fmt,
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    fmt, mem,
 };
 use tracing::trace;
 
@@ -33,6 +33,7 @@ pub struct SMT {
     ubs: Vec<Rational>,                                           // Current assignments of upper bounds
     lin_to_slack: HashMap<BTreeMap<usize, rug::Rational>, usize>, // Mapping from linear constraints to their corresponding slack variable
     tableau: BTreeMap<usize, BTreeMap<usize, rug::Rational>>,     // Tableau for linear constraints
+    enums: Vec<HashMap<i32, usize>>,                              // Enum variables
 }
 
 impl Default for SMT {
@@ -60,10 +61,250 @@ impl SMT {
             ubs: Vec::new(),
             lin_to_slack: HashMap::new(),
             tableau: BTreeMap::new(),
+            enums: Vec::new(),
         }
     }
 
-    fn new_bool(&mut self) -> usize {
+    pub fn new_bool(&mut self) -> BoolExpr {
+        let expr = BoolExpr::Var(self.bools.len());
+        self.create_proxy(expr.clone());
+        expr
+    }
+
+    pub fn new_int(&mut self) -> ArithExpr {
+        let var_index = self.mk_int();
+        ArithExpr::IntVar(var_index)
+    }
+
+    pub fn new_real(&mut self) -> ArithExpr {
+        let var_index = self.mk_real();
+        ArithExpr::RealVar(var_index)
+    }
+
+    pub fn new_enum(&mut self, values: impl IntoIterator<Item = i32>) -> EnumExpr {
+        let var_index = self.enums.len();
+        let mut var_domain = HashMap::new();
+        for val in values {
+            var_domain.insert(val, self.mk_bool());
+        }
+        self.enums.push(var_domain);
+        EnumExpr::Var(var_index)
+    }
+
+    pub fn eval(&self, expr: &Expr) -> Option<Expr> {
+        match expr {
+            Expr::Bool(b) => match self.eval_bool(b) {
+                Some(BoolExpr::True) => Some(Expr::Bool(BoolExpr::True)),
+                Some(BoolExpr::False) => Some(Expr::Bool(BoolExpr::False)),
+                None => None,
+                _ => unreachable!(),
+            },
+            Expr::Enum(e) => match e {
+                EnumExpr::Var(var_index) => {
+                    let var_domain = &self.enums[*var_index];
+                    for (val, bool_var) in var_domain {
+                        if let Some(true) = self.bools.get(*bool_var).copied().unwrap_or(None) {
+                            return Some(Expr::Enum(EnumExpr::Const(*val)));
+                        }
+                    }
+                    None
+                }
+                EnumExpr::Const(val) => Some(Expr::Enum(EnumExpr::Const(*val))),
+            },
+            Expr::Arith(a) => {
+                let (_lb, val, _ub) = self.eval_arith(a);
+                Some(Expr::Arith(ArithExpr::Const(val))) // Return the evaluated value as a literal
+            }
+        }
+    }
+
+    pub fn eval_bool(&self, expr: &BoolExpr) -> Option<BoolExpr> {
+        match expr {
+            BoolExpr::True => Some(BoolExpr::True),
+            BoolExpr::False => Some(BoolExpr::False),
+            BoolExpr::Var(v) => match self.bools.get(*v).copied().unwrap_or(None) {
+                Some(true) => Some(BoolExpr::True),
+                Some(false) => Some(BoolExpr::False),
+                None => Some(BoolExpr::Var(*v)),
+            },
+            BoolExpr::Not(not) => {
+                let sub_result = self.eval_bool(not);
+                match sub_result {
+                    Some(BoolExpr::True) => Some(BoolExpr::False),
+                    Some(BoolExpr::False) => Some(BoolExpr::True),
+                    None => None,
+                    _ => unreachable!(),
+                }
+            }
+            BoolExpr::And(and) => {
+                for sub_expr in and {
+                    let sub_result = self.eval_bool(sub_expr);
+                    match sub_result {
+                        Some(BoolExpr::False) => return Some(BoolExpr::False),
+                        None => return None,
+                        _ => {}
+                    }
+                }
+                Some(BoolExpr::True)
+            }
+            BoolExpr::Or(or) => {
+                for sub_expr in or {
+                    let sub_result = self.eval_bool(sub_expr);
+                    match sub_result {
+                        Some(BoolExpr::True) => return Some(BoolExpr::True),
+                        None => return None,
+                        _ => {}
+                    }
+                }
+                Some(BoolExpr::False)
+            }
+            BoolExpr::Lt(e1, e2) => {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if ub1 < lb2 {
+                    Some(BoolExpr::True)
+                } else if lb1 >= ub2 {
+                    Some(BoolExpr::False)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::Le(e1, e2) => {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if ub1 <= lb2 {
+                    Some(BoolExpr::True)
+                } else if lb1 > ub2 {
+                    Some(BoolExpr::False)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::Eq(e1, e2) => match (self.eval(e1), self.eval(e2)) {
+                (Some(Expr::Bool(a1)), Some(Expr::Bool(a2))) => match (self.eval_bool(&a1), self.eval_bool(&a2)) {
+                    (Some(BoolExpr::True), Some(BoolExpr::True)) => Some(BoolExpr::True),
+                    (Some(BoolExpr::False), Some(BoolExpr::False)) => Some(BoolExpr::True),
+                    (None, _) | (_, None) => None,
+                    _ => Some(BoolExpr::False),
+                },
+                (Some(Expr::Enum(a1)), Some(Expr::Enum(a2))) => {
+                    if a1 == a2 {
+                        Some(BoolExpr::True)
+                    } else {
+                        Some(BoolExpr::False)
+                    }
+                }
+                (Some(Expr::Arith(a1)), Some(Expr::Arith(a2))) => {
+                    let (lb1, _, ub1) = self.eval_arith(&a1);
+                    let (lb2, _, ub2) = self.eval_arith(&a2);
+                    if ub1 < lb2 || lb1 > ub2 {
+                        Some(BoolExpr::False)
+                    } else if lb1 == ub1 && lb2 == ub2 && lb1 == lb2 {
+                        Some(BoolExpr::True)
+                    } else {
+                        None
+                    }
+                }
+                _ => Some(BoolExpr::False), // Different types cannot be equal
+            },
+            BoolExpr::Ge(e1, e2) => {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if lb1 > ub2 {
+                    Some(BoolExpr::True)
+                } else if ub1 < lb2 {
+                    Some(BoolExpr::False)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::Gt(e1, e2) => {
+                let (lb1, _, ub1) = self.eval_arith(e1);
+                let (lb2, _, ub2) = self.eval_arith(e2);
+                if lb1 > ub2 {
+                    Some(BoolExpr::True)
+                } else if ub1 <= lb2 {
+                    Some(BoolExpr::False)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::Lb(var, inf_rational) => {
+                let (lb, _, ub) = self.eval_arith(&ArithExpr::RealVar(*var));
+                if ub < Rational::Finite(inf_rational.rat.clone()) || (ub == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf > rug::Rational::from(0)) {
+                    Some(BoolExpr::False)
+                } else if lb >= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf <= rug::Rational::from(0)) {
+                    Some(BoolExpr::True)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::ArithEq(var, inf_rational) => {
+                let (lb, _, ub) = self.eval_arith(&ArithExpr::RealVar(*var));
+                if ub < Rational::Finite(inf_rational.rat.clone()) || lb > Rational::Finite(inf_rational.rat.clone()) {
+                    Some(BoolExpr::False)
+                } else if lb == ub && lb == Rational::Finite(inf_rational.rat.clone()) {
+                    Some(BoolExpr::True)
+                } else {
+                    None
+                }
+            }
+            BoolExpr::Ub(var, inf_rational) => {
+                let (lb, _, ub) = self.eval_arith(&ArithExpr::RealVar(*var));
+                if lb > Rational::Finite(inf_rational.rat.clone()) || (lb == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf < rug::Rational::from(0)) {
+                    Some(BoolExpr::False)
+                } else if ub <= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf >= rug::Rational::from(0)) {
+                    Some(BoolExpr::True)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn eval_arith(&self, expr: &ArithExpr) -> (Rational, Rational, Rational) {
+        match expr {
+            ArithExpr::Const(r) => (r.clone(), r.clone(), r.clone()),
+            ArithExpr::IntVar(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
+            ArithExpr::RealVar(v) => (self.lbs[*v].clone(), self.reals[*v].clone(), self.ubs[*v].clone()),
+            ArithExpr::Add(add) => {
+                let mut lb = Rational::Finite(rug::Rational::from(0));
+                let mut res = Rational::Finite(rug::Rational::from(0));
+                let mut ub = Rational::Finite(rug::Rational::from(0));
+                for sub_expr in add {
+                    let (sub_lb, sub_res, sub_ub) = self.eval_arith(sub_expr);
+                    lb += sub_lb;
+                    res += sub_res;
+                    ub += sub_ub;
+                }
+                (lb, res, ub)
+            }
+            ArithExpr::Sub(e1, e2) => {
+                let (lb1, res1, ub1) = self.eval_arith(e1);
+                let (lb2, res2, ub2) = self.eval_arith(e2);
+                (lb1 - ub2, res1 - res2, ub1 - lb2)
+            }
+            ArithExpr::Mul(mul) => {
+                let mut lb = Rational::Finite(rug::Rational::from(1));
+                let mut res = Rational::Finite(rug::Rational::from(1));
+                let mut ub = Rational::Finite(rug::Rational::from(1));
+                for sub_expr in mul {
+                    let (sub_lb, sub_res, sub_ub) = self.eval_arith(sub_expr);
+                    lb *= sub_lb;
+                    res *= sub_res;
+                    ub *= sub_ub;
+                }
+                (lb, res, ub)
+            }
+            ArithExpr::Div(e1, e2) => {
+                let (lb1, res1, ub1) = self.eval_arith(e1);
+                let (lb2, res2, ub2) = self.eval_arith(e2);
+                (lb1 / ub2, res1 / res2, ub1 / lb2)
+            }
+        }
+    }
+
+    fn mk_bool(&mut self) -> usize {
         let idx = self.bools.len();
         self.bools.push(None);
         self.watches.push(Vec::new());
@@ -73,7 +314,7 @@ impl SMT {
         idx
     }
 
-    fn new_int(&mut self) -> usize {
+    fn mk_int(&mut self) -> usize {
         let var_index = self.ints.len();
         self.ints.push(true);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
@@ -82,7 +323,7 @@ impl SMT {
         var_index
     }
 
-    fn new_real(&mut self) -> usize {
+    fn mk_real(&mut self) -> usize {
         let var_index = self.reals.len();
         self.ints.push(false);
         self.reals.push(Rational::Finite(rug::Rational::from(0))); // Initialize with 0
@@ -96,7 +337,7 @@ impl SMT {
     }
 
     fn create_proxy(&mut self, expr: BoolExpr) -> usize {
-        let proxy = self.new_bool();
+        let proxy = self.mk_bool();
 
         if proxy >= self.sat_to_ast.len() {
             self.sat_to_ast.resize(proxy + 1, None);
@@ -112,6 +353,23 @@ impl SMT {
         if let Some(proxy) = self.get_proxy(expr.borrow()) { proxy } else { self.create_proxy(expr.borrow().clone()) }
     }
 
+    pub fn decide(&mut self, expr: &BoolExpr) -> Result<(), BoolExpr> {
+        match expr {
+            BoolExpr::Var(v) => self.decide_lit(Lit::new(*v, false)),
+            BoolExpr::Not(not) => match not.as_ref() {
+                BoolExpr::Var(v) => self.decide_lit(Lit::new(*v, true)),
+                _ => panic!("Unsupported expression type for decision: {}", expr),
+            },
+            _ => panic!("Unsupported expression type for decision: {}", expr),
+        }
+    }
+
+    fn decide_lit(&mut self, lit: Lit) -> Result<(), BoolExpr> {
+        self.trail_lim.push(self.trail.len());
+        self.enqueue(lit, None);
+        self.propagate()
+    }
+
     pub fn assert<T: Borrow<BoolExpr>>(&mut self, expr: T) -> bool {
         trace!("Asserting: {}", expr.borrow());
         match self.mk_expr(expr.borrow()) {
@@ -125,7 +383,7 @@ impl SMT {
                 let proxy = self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr");
                 self.enqueue(Lit::new(proxy, true), None)
             }
-            _ => todo!(),
+            _ => unreachable!(),
         }
     }
 
@@ -153,7 +411,7 @@ impl SMT {
                     BoolExpr::True => BoolExpr::False,
                     BoolExpr::False => BoolExpr::True,
                     BoolExpr::Var(var) => BoolExpr::Not(Box::new(BoolExpr::Var(var))),
-                    BoolExpr::Not(inner_inner) => *inner_inner,
+                    BoolExpr::Not(inner_inner) => self.mk_expr(&inner_inner.as_ref()),
                     _ => unreachable!(),
                 }
             }
@@ -263,7 +521,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let slack = self.new_real();
+                    let slack = self.mk_real();
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -275,7 +533,51 @@ impl SMT {
         }
     }
 
+    fn mk_bool_eq(&mut self, e1: &BoolExpr, e2: &BoolExpr) -> BoolExpr {
+        let e1 = self.mk_expr(e1);
+        let e2 = self.mk_expr(e2);
+        if e1 == e2 {
+            return BoolExpr::True;
+        }
+        let eq = BoolExpr::Eq(Box::new(Expr::Bool(e1.clone())), Box::new(Expr::Bool(e2.clone())));
+        if let Some(proxy) = self.get_proxy(&eq) {
+            BoolExpr::Var(proxy)
+        } else {
+            let proxy = self.create_proxy(eq);
+            let lit_e1 = match e1 {
+                BoolExpr::Var(v) => Lit::new(v, false),
+                BoolExpr::Not(not) => match not.as_ref() {
+                    BoolExpr::Var(v) => Lit::new(*v, true),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            };
+            let lit_e2 = match e2 {
+                BoolExpr::Var(v) => Lit::new(v, false),
+                BoolExpr::Not(not) => match not.as_ref() {
+                    BoolExpr::Var(v) => Lit::new(*v, true),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            };
+
+            // (¬p ∨ ¬e1 ∨ e2)
+            self.add_clause([Lit::new(proxy, true), !lit_e1, lit_e2]).unwrap();
+            // (¬p ∨ e1 ∨ ¬e2)
+            self.add_clause([Lit::new(proxy, true), lit_e1, !lit_e2]).unwrap();
+            // (p ∨ ¬e1 ∨ ¬e2)
+            self.add_clause([Lit::new(proxy, false), !lit_e1, !lit_e2]).unwrap();
+            // (p ∨ e1 ∨ e2)
+            self.add_clause([Lit::new(proxy, false), lit_e1, lit_e2]).unwrap();
+
+            BoolExpr::Var(proxy)
+        }
+    }
+
     fn mk_arith_eq(&mut self, e1: &ArithExpr, e2: &ArithExpr) -> BoolExpr {
+        if e1 == e2 {
+            return BoolExpr::True;
+        }
         let (vars, const_term) = self.diff(e1, e2);
 
         match vars.len() {
@@ -289,7 +591,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let slack = self.new_real();
+                    let slack = self.mk_real();
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -316,7 +618,7 @@ impl SMT {
                 let slack = if let Some(&slack) = self.lin_to_slack.get(&vars) {
                     slack
                 } else {
-                    let slack = self.new_real();
+                    let slack = self.mk_real();
                     self.tableau.insert(slack, vars.clone());
                     self.lin_to_slack.insert(vars, slack);
                     slack
@@ -344,6 +646,112 @@ impl SMT {
 
         vars.retain(|_, c| *c != 0);
         (vars, diff.const_term)
+    }
+
+    pub fn propagate(&mut self) -> Result<(), BoolExpr> {
+        while let Some(lit) = self.prop_q.pop_front() {
+            let falsified = !lit;
+            let falsified_index = falsified.index();
+            let watches = mem::take(&mut self.watches[falsified_index]);
+            for i in 0..watches.len() {
+                let mut clause_idx = watches[i];
+                // Keep the first watched literal as the other watcher and the second as the falsified one.
+                if self.clauses[clause_idx].lits[0] == falsified {
+                    self.clauses[clause_idx].lits.swap(0, 1);
+                }
+
+                // Check if clause is already satisfied
+                if self.lit_value(&self.clauses[clause_idx].lits[0]) == Some(true) {
+                    self.watches[lit.index()].push(clause_idx);
+                    continue;
+                }
+
+                // Find a replacement watcher that is not currently false.
+                let mut found_replacement = false;
+                for j in 2..self.clauses[clause_idx].lits.len() {
+                    let next_lit = self.clauses[clause_idx].lits[j];
+                    if self.lit_value(&next_lit) != Some(false) {
+                        self.clauses[clause_idx].lits.swap(1, j);
+                        self.watches[next_lit.index()].push(clause_idx);
+                        found_replacement = true;
+                        break;
+                    }
+                }
+
+                if found_replacement {
+                    continue;
+                }
+
+                // If we reach here, the clause is either unit or unsatisfied
+                self.watches[falsified_index].push(clause_idx); // Re-add the clause to the watch list
+                if !self.enqueue(self.clauses[clause_idx].lits[0], Some(clause_idx)) {
+                    for c_i in watches.iter().skip(i + 1) {
+                        self.watches[falsified_index].push(*c_i);
+                    }
+                    self.prop_q.clear();
+
+                    let mut seen: HashSet<usize> = HashSet::new();
+                    let mut counter: usize = 0;
+                    let mut p: Option<(Lit, Option<usize>)> = None;
+                    let mut learnt = Vec::new();
+                    learnt.push(Lit::new(0, false)); // Placeholder for the asserting literal
+                    let mut backtrack_level: usize = 0;
+
+                    loop {
+                        // 1. Process the current clause (either the conflict or a reason)
+                        for lit in &self.clauses[clause_idx].lits {
+                            // Skip the variable we are currently resolving away
+                            if Some(lit.var()) == p.map(|l| l.0.var()) {
+                                continue;
+                            }
+
+                            if !seen.contains(&lit.var()) {
+                                seen.insert(lit.var());
+                                if self.level(lit.var()).expect("Variable should have a level") == self.decision_level() {
+                                    counter += 1;
+                                } else {
+                                    // This literal comes from a previous decision level
+                                    learnt.push(*lit);
+                                    backtrack_level = backtrack_level.max(self.level(lit.var()).expect("Variable should have a level"));
+                                }
+                            }
+                        }
+
+                        // 2. Find the next variable from the trail assigned at this level
+                        p = loop {
+                            let lit = *self.trail.last().expect("There should be a literal");
+                            let reason = self.reason[lit.var()];
+                            self.undo_one();
+                            if seen.contains(&lit.var()) {
+                                break Some((lit, reason));
+                            }
+                        };
+                        counter -= 1;
+
+                        if counter == 0 {
+                            // 3. We have found the asserting literal
+                            learnt[0] = !p.expect("There should be a literal").0;
+                            break;
+                        }
+
+                        // 4. Update clause to the reason of the variable we just resolved away
+                        clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
+                    }
+
+                    self.cancel_until(backtrack_level);
+                    let mut lits = Vec::with_capacity(learnt.len());
+                    for lit in learnt {
+                        if lit.sign() {
+                            lits.push(BoolExpr::Not(Box::new(BoolExpr::Var(lit.var()))));
+                        } else {
+                            lits.push(BoolExpr::Var(lit.var()));
+                        }
+                    }
+                    return Err(BoolExpr::Or(lits));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {

@@ -144,8 +144,8 @@ impl fmt::Display for Rational {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InfRational {
-    rat: rug::Rational,
-    inf: rug::Rational,
+    pub rat: rug::Rational,
+    pub inf: rug::Rational,
 }
 
 impl InfRational {
