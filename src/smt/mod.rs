@@ -765,39 +765,34 @@ impl SMT {
                 self.prop_q.push_back(lit);
                 true
             }
-            Some(value) => {
-                if value == !lit.sign() {
-                    trace!("Conflict detected for literal {}", lit);
-                    false
-                } else {
-                    true
-                }
-            }
+            Some(value) => value == !lit.sign(),
         }
     }
 
     fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
-        let clause_index = self.clauses.len();
-        let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>() };
-        trace!("Adding clause {}: {}", clause_index, clause);
-        if clause.lits.is_empty() {
-            return Err(clause.lits);
-        } else if clause.lits.len() == 1 {
-            self.cancel_until(0);
-            if !self.enqueue(clause.lits[0], Some(clause_index)) {
-                return Err(clause.lits);
+        let mut lits = lits.into_iter().collect::<Vec<_>>();
+        match lits.len() {
+            0 => return Err(lits),
+            1 => {
+                self.cancel_until(0);
+                if !self.enqueue(lits[0], None) {
+                    return Err(lits);
+                }
             }
-        } else {
-            clause.lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(None).is_some());
-            for lit in &clause.lits[0..2] {
-                self.watches[lit.index()].push(clause_index);
+            _ => {
+                let clause_index = self.clauses.len();
+                lits.sort_by_key(|l| self.bools.get(l.var()).copied().unwrap_or(None).is_some());
+                let clause = Clause { lits: lits.clone() };
+                trace!("Adding clause {}: {}", clause_index, clause);
+                for lit in &clause.lits[0..2] {
+                    self.watches[lit.index()].push(clause_index);
+                }
+                self.clauses.push(clause);
+                if self.lit_value(&lits[0]).is_none() && self.lit_value(&lits[1]) == Some(false) && !self.enqueue(lits[0], Some(clause_index)) {
+                    return Err(lits);
+                }
             }
-            if self.lit_value(&clause.lits[0]).is_none() && self.lit_value(&clause.lits[1]) == Some(false) && !self.enqueue(clause.lits[0], Some(clause_index)) {
-                return Err(clause.lits);
-            }
-            self.clauses.push(clause);
         }
-
         Ok(())
     }
 
