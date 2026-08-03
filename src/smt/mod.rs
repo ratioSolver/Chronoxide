@@ -375,10 +375,7 @@ impl SMT {
         match self.mk_expr(expr.borrow()) {
             BoolExpr::True => true,
             BoolExpr::False => false,
-            BoolExpr::Var(_) => {
-                let proxy = self.get_proxy(expr.borrow()).expect("Proxy should exist after mk_expr");
-                self.enqueue(Lit::new(proxy, false), None)
-            }
+            BoolExpr::Var(var) => self.enqueue(Lit::new(var, false), None),
             BoolExpr::Not(inner) => {
                 let proxy = self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr");
                 self.enqueue(Lit::new(proxy, true), None)
@@ -391,20 +388,7 @@ impl SMT {
         match expr {
             BoolExpr::True => BoolExpr::True,
             BoolExpr::False => BoolExpr::False,
-            BoolExpr::Var(_) => {
-                let proxy = self.get_or_create_proxy(expr);
-                if let Some(level) = self.level(proxy)
-                    && *level == 0
-                {
-                    match self.bools.get(proxy).expect("Variable index out of bounds") {
-                        Some(true) => BoolExpr::True,
-                        Some(false) => BoolExpr::False,
-                        None => BoolExpr::Var(proxy),
-                    }
-                } else {
-                    BoolExpr::Var(proxy)
-                }
-            }
+            BoolExpr::Var(var) => BoolExpr::Var(*var),
             BoolExpr::Not(inner) => {
                 let inner_expr = self.mk_expr(inner.as_ref());
                 match inner_expr {
@@ -419,6 +403,11 @@ impl SMT {
             BoolExpr::Or(or) => self.mk_or(or),
             BoolExpr::Le(e1, e2) => self.mk_le(e1, e2, false),
             BoolExpr::Lt(e1, e2) => self.mk_le(e1, e2, true),
+            BoolExpr::Eq(e1, e2) => match (e1.as_ref(), e2.as_ref()) {
+                (Expr::Bool(b1), Expr::Bool(b2)) => self.mk_bool_eq(b1, b2),
+                (Expr::Arith(a1), Expr::Arith(a2)) => self.mk_arith_eq(a1, a2),
+                _ => panic!("Unsupported expression types for equality: {} and {}", e1, e2),
+            },
             BoolExpr::Ge(e1, e2) => self.mk_ge(e1, e2, false),
             BoolExpr::Gt(e1, e2) => self.mk_ge(e1, e2, true),
             _ => todo!(),
@@ -432,7 +421,7 @@ impl SMT {
             match expr {
                 BoolExpr::True => continue,
                 BoolExpr::False => return BoolExpr::False,
-                BoolExpr::Var(_) => lits.push(Lit::new(self.get_proxy(&expr).expect("Proxy should exist after mk_expr"), false)),
+                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
                 BoolExpr::Not(inner) => lits.push(Lit::new(self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr"), true)),
                 _ => unreachable!(),
             }
@@ -453,9 +442,7 @@ impl SMT {
                 } else {
                     let proxy = self.create_proxy(and);
                     for lit in &lits {
-                        if self.add_clause([Lit::new(proxy, true), *lit]).is_err() {
-                            return BoolExpr::False;
-                        }
+                        self.add_clause([Lit::new(proxy, true), *lit]).expect("Adding clause should not fail");
                     }
                     BoolExpr::Var(proxy)
                 }
@@ -470,7 +457,7 @@ impl SMT {
             match expr {
                 BoolExpr::True => return BoolExpr::True,
                 BoolExpr::False => continue,
-                BoolExpr::Var(_) => lits.push(Lit::new(self.get_proxy(&expr).expect("Proxy should exist after mk_expr"), false)),
+                BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
                 BoolExpr::Not(inner) => lits.push(Lit::new(self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr"), true)),
                 _ => unreachable!(),
             }
@@ -491,14 +478,10 @@ impl SMT {
                 } else {
                     let proxy = self.create_proxy(or);
                     for lit in &lits {
-                        if self.add_clause([Lit::new(proxy, false), !*lit]).is_err() {
-                            return BoolExpr::False;
-                        }
+                        self.add_clause([Lit::new(proxy, false), !*lit]).expect("Adding clause should not fail");
                     }
                     lits.push(Lit::new(proxy, true));
-                    if self.add_clause(lits).is_err() {
-                        return BoolExpr::False;
-                    }
+                    self.add_clause(lits).expect("Adding clause should not fail");
                     BoolExpr::Var(proxy)
                 }
             }
@@ -562,13 +545,13 @@ impl SMT {
             };
 
             // (¬p ∨ ¬e1 ∨ e2)
-            self.add_clause([Lit::new(proxy, true), !lit_e1, lit_e2]).unwrap();
+            self.add_clause([Lit::new(proxy, true), !lit_e1, lit_e2]).expect("Adding clause should not fail");
             // (¬p ∨ e1 ∨ ¬e2)
-            self.add_clause([Lit::new(proxy, true), lit_e1, !lit_e2]).unwrap();
+            self.add_clause([Lit::new(proxy, true), lit_e1, !lit_e2]).expect("Adding clause should not fail");
             // (p ∨ ¬e1 ∨ ¬e2)
-            self.add_clause([Lit::new(proxy, false), !lit_e1, !lit_e2]).unwrap();
+            self.add_clause([Lit::new(proxy, false), !lit_e1, !lit_e2]).expect("Adding clause should not fail");
             // (p ∨ e1 ∨ e2)
-            self.add_clause([Lit::new(proxy, false), lit_e1, lit_e2]).unwrap();
+            self.add_clause([Lit::new(proxy, false), lit_e1, lit_e2]).expect("Adding clause should not fail");
 
             BoolExpr::Var(proxy)
         }
@@ -797,7 +780,8 @@ impl SMT {
     }
 
     fn lit_value(&self, lit: &Lit) -> Option<bool> {
-        if lit.sign() { self.bools[lit.var()].map(|v| !v) } else { self.bools[lit.var()] }
+        let val = self.bools.get(lit.var()).expect("Variable index out of bounds");
+        if lit.sign() { val.map(|v| !v) } else { *val }
     }
 
     fn level(&self, var: usize) -> &Option<usize> {
@@ -835,14 +819,54 @@ struct Clause {
 impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lits: Vec<String> = self.lits.iter().map(|l| l.to_string()).collect();
-        write!(f, "{}", lits.join(" ∨ "))
+        write!(f, "({})", lits.join(" ∨ "))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tracing::{Level, subscriber};
+
     use super::*;
-    use crate::smt::ast::BoolExpr;
+    use crate::smt::ast::{BoolExpr, or};
+
+    #[test]
+    fn test_smt_creation() {
+        let mut smt = SMT::new();
+        smt.new_bool();
+        smt.new_bool();
+        smt.new_int();
+        smt.new_real();
+        assert_eq!(smt.bools.len(), 2);
+        assert_eq!(smt.ints.len(), 2);
+        assert_eq!(smt.reals.len(), 2);
+        smt.new_enum([1, 2, 3]);
+        assert_eq!(smt.enums.len(), 1);
+    }
+
+    #[test]
+    fn test_eval_bool() {
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        smt.assert(&b1);
+        smt.assert(&!(b2.clone()));
+        assert_eq!(smt.eval_bool(&b1), Some(BoolExpr::True));
+        assert_eq!(smt.eval_bool(&b2), Some(BoolExpr::False));
+    }
+
+    #[test]
+    fn test_add_clause() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+        let mut smt = SMT::new();
+        let b1 = smt.new_bool();
+        let b2 = smt.new_bool();
+        let clause = or([b1.clone(), b2.clone()]);
+        smt.assert(&clause);
+        assert_eq!(smt.clauses.len(), 1);
+    }
 
     #[test]
     fn test_ast_to_sat_constants() {
@@ -858,11 +882,11 @@ mod tests {
     #[test]
     fn test_ast_to_sat_var_caching() {
         let mut solver = SMT::new();
+        let v0 = solver.new_bool();
+        let not_v0 = !v0;
 
-        let not_expr = BoolExpr::Not(Box::new(BoolExpr::Var(0)));
-
-        let res1 = solver.mk_expr(&not_expr);
-        let res2 = solver.mk_expr(&not_expr);
+        let res1 = solver.mk_expr(&not_v0);
+        let res2 = solver.mk_expr(&not_v0);
 
         assert_eq!(res1, res2, "mk_expr should return the same proxy for the same expression");
     }
@@ -870,26 +894,30 @@ mod tests {
     #[test]
     fn test_ast_to_sat_and_reduction() {
         let mut solver = SMT::new();
+        let v0 = solver.new_bool();
 
         assert_eq!(solver.mk_expr(&BoolExpr::And(vec![])), BoolExpr::True);
-        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![BoolExpr::Var(0)])), BoolExpr::Var(0));
-        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![BoolExpr::Var(0), BoolExpr::False])), BoolExpr::False);
+        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![v0.clone()])), v0.clone());
+        assert_eq!(solver.mk_expr(&BoolExpr::And(vec![v0, BoolExpr::False])), BoolExpr::False);
     }
 
     #[test]
     fn test_ast_to_sat_or_reduction() {
         let mut solver = SMT::new();
+        let v0 = solver.new_bool();
 
         assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![])), BoolExpr::False);
-        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![BoolExpr::Var(0)])), BoolExpr::Var(0));
-        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![BoolExpr::Var(0), BoolExpr::True])), BoolExpr::True);
+        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![v0.clone()])), v0.clone());
+        assert_eq!(solver.mk_expr(&BoolExpr::Or(vec![v0, BoolExpr::True])), BoolExpr::True);
     }
 
     #[test]
     fn test_ast_to_sat_tseitin_and_proxy() {
         let mut solver = SMT::new();
+        let v0 = solver.new_bool();
+        let v1 = solver.new_bool();
 
-        let and_expr = BoolExpr::And(vec![BoolExpr::Var(0), BoolExpr::Var(1)]);
+        let and_expr = BoolExpr::And(vec![v0, v1]);
         let res = solver.mk_expr(&and_expr);
 
         if let BoolExpr::Var(proxy_id) = res {
@@ -907,10 +935,11 @@ mod tests {
     fn test_ast_to_sat_double_negation() {
         let mut solver = SMT::new();
 
-        let not_v1 = BoolExpr::Not(Box::new(BoolExpr::Var(0)));
-        let double_not = BoolExpr::Not(Box::new(not_v1));
+        let v0 = solver.new_bool();
+        let not_v0 = !v0.clone();
+        let double_not = !not_v0;
 
         let res = solver.mk_expr(&double_not);
-        assert_eq!(res, BoolExpr::Var(0), "The double negation is not simplified correctly");
+        assert_eq!(res, v0, "The double negation is not simplified correctly");
     }
 }
