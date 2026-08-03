@@ -231,9 +231,9 @@ impl SMT {
             }
             BoolExpr::Lb(var, inf_rational) => {
                 let (lb, _, ub) = self.eval_arith(&ArithExpr::RealVar(*var));
-                if ub < Rational::Finite(inf_rational.rat.clone()) || (ub == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf > rug::Rational::from(0)) {
+                if ub < Rational::Finite(inf_rational.rat.clone()) || (ub == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf > 0) {
                     Some(BoolExpr::False)
-                } else if lb >= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf <= rug::Rational::from(0)) {
+                } else if lb >= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf <= 0) {
                     Some(BoolExpr::True)
                 } else {
                     None
@@ -251,9 +251,9 @@ impl SMT {
             }
             BoolExpr::Ub(var, inf_rational) => {
                 let (lb, _, ub) = self.eval_arith(&ArithExpr::RealVar(*var));
-                if lb > Rational::Finite(inf_rational.rat.clone()) || (lb == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf < rug::Rational::from(0)) {
+                if lb > Rational::Finite(inf_rational.rat.clone()) || (lb == Rational::Finite(inf_rational.rat.clone()) && inf_rational.inf < 0) {
                     Some(BoolExpr::False)
-                } else if ub <= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf >= rug::Rational::from(0)) {
+                } else if ub <= Rational::Finite(inf_rational.rat.clone()) && (inf_rational.inf >= 0) {
                     Some(BoolExpr::True)
                 } else {
                     None
@@ -434,7 +434,7 @@ impl SMT {
                     BoolExpr::True => BoolExpr::False,
                     BoolExpr::False => BoolExpr::True,
                     BoolExpr::Var(var) => BoolExpr::Not(Box::new(BoolExpr::Var(var))),
-                    BoolExpr::Not(inner_inner) => self.mk_expr(&inner_inner.as_ref()),
+                    BoolExpr::Not(inner_inner) => self.mk_expr(inner_inner.as_ref()),
                     _ => unreachable!(),
                 }
             }
