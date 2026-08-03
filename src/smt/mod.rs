@@ -372,6 +372,45 @@ impl SMT {
 
     pub fn assert<T: Borrow<BoolExpr>>(&mut self, expr: T) -> bool {
         trace!("Asserting: {}", expr.borrow());
+        match expr.borrow() {
+            BoolExpr::True => return true,
+            BoolExpr::False => return false,
+            BoolExpr::Var(var) => return self.enqueue(Lit::new(*var, false), None),
+            BoolExpr::Not(inner) => {
+                if let BoolExpr::Var(var) = inner.as_ref() {
+                    return self.enqueue(Lit::new(*var, true), None);
+                }
+            }
+            BoolExpr::And(and) => {
+                for sub_expr in and {
+                    if !self.assert(sub_expr) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            BoolExpr::Or(or) => {
+                let mut lits = Vec::with_capacity(or.len());
+                for sub_expr in or {
+                    match self.mk_expr(sub_expr) {
+                        BoolExpr::True => return true,
+                        BoolExpr::False => continue,
+                        BoolExpr::Var(var) => lits.push(Lit::new(var, false)),
+                        BoolExpr::Not(inner) => {
+                            let proxy = self.get_proxy(inner.as_ref()).expect("Proxy should exist after mk_expr");
+                            lits.push(Lit::new(proxy, true));
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                if lits.is_empty() {
+                    return false;
+                }
+                self.add_clause(lits).expect("Adding clause should not fail");
+                return true;
+            }
+            _ => {}
+        }
         match self.mk_expr(expr.borrow()) {
             BoolExpr::True => true,
             BoolExpr::False => false,
