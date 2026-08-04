@@ -29,7 +29,7 @@ impl SatSolver {
         }
     }
 
-    pub(super) fn mk_bool(&mut self) -> usize {
+    pub(super) fn mk_var(&mut self) -> usize {
         let idx = self.assigns.len();
         self.assigns.push(None);
         self.watches.push(Vec::new());
@@ -306,15 +306,15 @@ mod tests {
         subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
 
         let mut sat = SatSolver::new();
-        let b1 = sat.mk_bool();
-        let b2 = sat.mk_bool();
-        let b3 = sat.mk_bool();
-        let b4 = sat.mk_bool();
-        let b5 = sat.mk_bool();
-        let b6 = sat.mk_bool();
-        let b7 = sat.mk_bool();
-        let b8 = sat.mk_bool();
-        let b9 = sat.mk_bool();
+        let b1 = sat.mk_var();
+        let b2 = sat.mk_var();
+        let b3 = sat.mk_var();
+        let b4 = sat.mk_var();
+        let b5 = sat.mk_var();
+        let b6 = sat.mk_var();
+        let b7 = sat.mk_var();
+        let b8 = sat.mk_var();
+        let b9 = sat.mk_var();
 
         // [(b1 ∨ b2) ∧ (b1 ∨ b3 ∨ b7) ∧ (¬b2 ∨ ¬b3 ∨ b4) ∧ (¬b4 ∨ b5 ∨ b8) ∧ (¬b4 ∨ b6 ∨ b9) ∧ (¬b5 ∨ ¬b6)]
         sat.add_clause([Lit::new(b1, false), Lit::new(b2, false)]).expect("Should be able to add clause");
