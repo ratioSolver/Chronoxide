@@ -1,4 +1,3 @@
-use crate::smt::ast::BoolExpr;
 use std::{
     collections::{HashSet, VecDeque},
     fmt, mem, ops,
@@ -221,6 +220,24 @@ impl SatSolver {
     }
 }
 
+impl fmt::Display for SatSolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Assignments:")?;
+        for (i, val) in self.assigns.iter().enumerate() {
+            if let Some(v) = val {
+                writeln!(f, "  b{} = {}", i, v)?;
+            } else {
+                writeln!(f, "  b{} = unassigned", i)?;
+            }
+        }
+        writeln!(f, "Clauses:")?;
+        for (i, clause) in self.clauses.iter().enumerate() {
+            writeln!(f, "  {}: {}", i, clause)?;
+        }
+        Ok(())
+    }
+}
+
 // Compact encoding: x = var*2 + sign_bit, where sign_bit=1 means negated (MiniSat convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Lit {
@@ -253,22 +270,6 @@ impl ops::Not for Lit {
 
     fn not(self) -> Self {
         Lit { x: self.x ^ 1 }
-    }
-}
-
-impl From<&BoolExpr> for Lit {
-    fn from(expr: &BoolExpr) -> Self {
-        match expr {
-            BoolExpr::Var(v) => Lit::new(*v, false),
-            BoolExpr::Not(inner) => {
-                if let BoolExpr::Var(v) = inner.as_ref() {
-                    Lit::new(*v, true)
-                } else {
-                    panic!("Unsupported expression type for conversion to literal: {}", expr);
-                }
-            }
-            _ => panic!("Unsupported expression type for conversion to literal: {}", expr),
-        }
     }
 }
 
@@ -332,5 +333,7 @@ mod tests {
         assert_eq!(bt_level, 3);
         sat.cancel_until(bt_level);
         sat.add_clause(conflict_clause).expect("Should be able to add learnt clause");
+
+        trace!("Final SAT Solver State:\n{}", sat);
     }
 }
