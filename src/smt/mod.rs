@@ -33,6 +33,7 @@ pub struct SMT {
     ubs: Vec<Rational>,                                           // Current assignments of upper bounds
     lin_to_slack: HashMap<BTreeMap<usize, rug::Rational>, usize>, // Mapping from linear constraints to their corresponding slack variable
     tableau: BTreeMap<usize, BTreeMap<usize, rug::Rational>>,     // Tableau for linear constraints
+    bound_trail: Vec<BoolExpr>,                                   // Trail of bound updates for backtracking
     enums: Vec<HashMap<i32, usize>>,                              // Enum variables
 }
 
@@ -61,6 +62,7 @@ impl SMT {
             ubs: Vec::new(),
             lin_to_slack: HashMap::new(),
             tableau: BTreeMap::new(),
+            bound_trail: Vec::new(),
             enums: Vec::new(),
         }
     }
@@ -711,69 +713,73 @@ impl SMT {
                         self.watches[falsified_index].push(*c_i);
                     }
                     self.prop_q.clear();
-
-                    let mut seen: HashSet<usize> = HashSet::new();
-                    let mut counter: usize = 0;
-                    let mut p: Option<(Lit, Option<usize>)> = None;
-                    let mut learnt = Vec::new();
-                    learnt.push(Lit::new(0, false)); // Placeholder for the asserting literal
-                    let mut backtrack_level: usize = 0;
-
-                    loop {
-                        // 1. Process the current clause (either the conflict or a reason)
-                        for lit in &self.clauses[clause_idx].lits {
-                            // Skip the variable we are currently resolving away
-                            if Some(lit.var()) == p.map(|l| l.0.var()) {
-                                continue;
-                            }
-
-                            if !seen.contains(&lit.var()) {
-                                seen.insert(lit.var());
-                                if self.level(lit.var()).expect("Variable should have a level") == self.decision_level() {
-                                    counter += 1;
-                                } else {
-                                    // This literal comes from a previous decision level
-                                    learnt.push(*lit);
-                                    backtrack_level = backtrack_level.max(self.level(lit.var()).expect("Variable should have a level"));
-                                }
-                            }
-                        }
-
-                        // 2. Find the next variable from the trail assigned at this level
-                        p = loop {
-                            let lit = *self.trail.last().expect("There should be a literal");
-                            let reason = self.reason[lit.var()];
-                            self.undo_one();
-                            if seen.contains(&lit.var()) {
-                                break Some((lit, reason));
-                            }
-                        };
-                        counter -= 1;
-
-                        if counter == 0 {
-                            // 3. We have found the asserting literal
-                            learnt[0] = !p.expect("There should be a literal").0;
-                            break;
-                        }
-
-                        // 4. Update clause to the reason of the variable we just resolved away
-                        clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
-                    }
-
-                    self.cancel_until(backtrack_level);
-                    let mut lits = Vec::with_capacity(learnt.len());
-                    for lit in learnt {
-                        if lit.sign() {
-                            lits.push(BoolExpr::Not(Box::new(BoolExpr::Var(lit.var()))));
-                        } else {
-                            lits.push(BoolExpr::Var(lit.var()));
-                        }
-                    }
-                    return Err(BoolExpr::Or(lits));
+                    let conflict_expr = self.analyze_conflict(clause_idx);
+                    return Err(conflict_expr);
                 }
             }
         }
         Ok(())
+    }
+
+    fn analyze_conflict(&mut self, mut clause_idx: usize) -> BoolExpr {
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut counter: usize = 0;
+        let mut p: Option<(Lit, Option<usize>)> = None;
+        let mut learnt = Vec::new();
+        learnt.push(Lit::new(0, false)); // Placeholder for the asserting literal
+        let mut backtrack_level: usize = 0;
+
+        loop {
+            // 1. Process the current clause (either the conflict or a reason)
+            for lit in &self.clauses[clause_idx].lits {
+                // Skip the variable we are currently resolving away
+                if Some(lit.var()) == p.map(|l| l.0.var()) {
+                    continue;
+                }
+
+                if !seen.contains(&lit.var()) {
+                    seen.insert(lit.var());
+                    if self.level(lit.var()).expect("Variable should have a level") == self.decision_level() {
+                        counter += 1;
+                    } else {
+                        // This literal comes from a previous decision level
+                        learnt.push(*lit);
+                        backtrack_level = backtrack_level.max(self.level(lit.var()).expect("Variable should have a level"));
+                    }
+                }
+            }
+
+            // 2. Find the next variable from the trail assigned at this level
+            p = loop {
+                let lit = *self.trail.last().expect("There should be a literal");
+                let reason = self.reason[lit.var()];
+                self.undo_one();
+                if seen.contains(&lit.var()) {
+                    break Some((lit, reason));
+                }
+            };
+            counter -= 1;
+
+            if counter == 0 {
+                // 3. We have found the asserting literal
+                learnt[0] = !p.expect("There should be a literal").0;
+                break;
+            }
+
+            // 4. Update clause to the reason of the variable we just resolved away
+            clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
+        }
+
+        self.cancel_until(backtrack_level);
+        let mut lits = Vec::with_capacity(learnt.len());
+        for lit in learnt {
+            if lit.sign() {
+                lits.push(BoolExpr::Not(Box::new(BoolExpr::Var(lit.var()))));
+            } else {
+                lits.push(BoolExpr::Var(lit.var()));
+            }
+        }
+        return BoolExpr::Or(lits);
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
@@ -785,6 +791,14 @@ impl SMT {
                 self.reason[lit.var()] = reason;
                 self.trail.push(lit);
                 self.prop_q.push_back(lit);
+                if let Some(expr) = &self.sat_to_ast[lit.var()] {
+                    match expr {
+                        BoolExpr::Lb(..) | BoolExpr::ArithEq(..) | BoolExpr::Ub(..) => {
+                            self.bound_trail.push(expr.clone());
+                        }
+                        _ => {}
+                    }
+                }
                 true
             }
             Some(value) => value == !lit.sign(),
