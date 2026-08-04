@@ -22,6 +22,12 @@ pub struct SmtSolver {
     lra: LraTheory,
 }
 
+impl Default for SmtSolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmtSolver {
     pub fn new() -> Self {
         Self { registry: ProxyRegistry::new(), sat: SatSolver::new(), lra: LraTheory::new() }

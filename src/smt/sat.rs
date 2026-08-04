@@ -142,7 +142,7 @@ impl SatSolver {
             clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
         }
 
-        return (backtrack_level, learnt);
+        (backtrack_level, learnt)
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
