@@ -187,8 +187,12 @@ impl SatSolver {
         Ok(())
     }
 
+    pub(super) fn value(&self, var: usize) -> &Option<bool> {
+        self.assigns.get(var).expect("Variable index out of bounds")
+    }
+
     fn lit_value(&self, lit: &Lit) -> Option<bool> {
-        let val = self.assigns.get(lit.var()).expect("Variable index out of bounds");
+        let val = self.value(lit.var());
         if lit.sign() { val.map(|v| !v) } else { *val }
     }
 
