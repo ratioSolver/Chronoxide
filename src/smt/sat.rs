@@ -10,7 +10,7 @@ pub(super) struct SatSolver {
     watches: Vec<Vec<usize>>,   // Watch lists for each literal (positive and negative)
     reason: Vec<Option<usize>>, // Reason for each variable's assignment
     prop_q: VecDeque<Lit>,      // Queue of literals to propagate
-    trail: Vec<Lit>,            // Trail of assigned literals for backtracking
+    pub(super) trail: Vec<Lit>, // Trail of assigned literals for backtracking
     trail_lim: Vec<usize>,      // Indices in the trail where decisions were made
     level: Vec<Option<usize>>,  // Decision level for each variable
 }

@@ -11,8 +11,8 @@ use std::{
 pub(super) struct LraTheory {
     ints: Vec<bool>,                                                       // true = integer variable, false = real variable
     reals: Vec<InfRational>,                                               // Current assignments
-    lbs: Vec<(Option<Lit>, InfRational)>,                                  // Current lower bounds
-    ubs: Vec<(Option<Lit>, InfRational)>,                                  // Current upper bounds
+    pub(super) lbs: Vec<(Option<Lit>, InfRational)>,                       // Current lower bounds
+    pub(super) ubs: Vec<(Option<Lit>, InfRational)>,                       // Current upper bounds
     pub(super) lin_to_slack: HashMap<BTreeMap<usize, RugRational>, usize>, // Mapping from linear constraints to their slack variable
     pub(super) tableau: BTreeMap<usize, BTreeMap<usize, RugRational>>,     // Tableau: basic variable -> linear expression over non-basic variables
     t_watches: Vec<HashSet<usize>>,                                        // For each variable, the set of tableau rows containing it
@@ -330,7 +330,7 @@ impl LraTheory {
         self.trail_lim.push(self.bound_trail.len());
     }
 
-    pub(super) fn backtrack_until(&mut self, level: usize) {
+    pub(super) fn cancel_until(&mut self, level: usize) {
         if level >= self.trail_lim.len() {
             return;
         }

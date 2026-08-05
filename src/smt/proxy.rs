@@ -22,4 +22,9 @@ impl ProxyRegistry {
         }
         self.sat_to_ast[sat_var] = Some(expr);
     }
+
+    pub(super) fn get_ast(&self, lit: crate::smt::sat::Lit) -> Option<&BoolExpr> {
+        let var = lit.var();
+        if var < self.sat_to_ast.len() { self.sat_to_ast[var].as_ref() } else { None }
+    }
 }

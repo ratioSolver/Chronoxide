@@ -20,6 +20,7 @@ pub struct SmtSolver {
     registry: ProxyRegistry,
     sat: SatSolver,
     lra: LraTheory,
+    notified_len: usize,
 }
 
 impl Default for SmtSolver {
@@ -30,7 +31,102 @@ impl Default for SmtSolver {
 
 impl SmtSolver {
     pub fn new() -> Self {
-        Self { registry: ProxyRegistry::new(), sat: SatSolver::new(), lra: LraTheory::new() }
+        Self {
+            registry: ProxyRegistry::new(),
+            sat: SatSolver::new(),
+            lra: LraTheory::new(),
+            notified_len: 0,
+        }
+    }
+
+    pub fn propagate(&mut self) -> Result<(), Vec<BoolExpr>> {
+        if let Err((bt_level, conflict_clause)) = self.sat.propagate() {
+            self.sat.cancel_until(bt_level);
+            self.lra.cancel_until(bt_level);
+            self.notified_len = self.sat.trail.len();
+            let conflict_clause = conflict_clause
+                .into_iter()
+                .map(|lit| {
+                    let var = lit.var();
+                    if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
+                })
+                .collect();
+            return Err(conflict_clause);
+        }
+
+        while self.notified_len < self.sat.trail.len() {
+            let lit = self.sat.trail[self.notified_len];
+            if let Some(expr) = self.registry.get_ast(lit) {
+                if let Err(lemma) = match expr {
+                    BoolExpr::Ub(var, bound) => {
+                        if !self.lra.set_ub(Some(lit), *var, bound.clone()) {
+                            let mut lemma = Vec::with_capacity(2);
+                            lemma.push(!lit);
+                            if let Some(guard_lit) = self.lra.lbs[*var].0 {
+                                lemma.push(!guard_lit);
+                            }
+                            Err(lemma)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    BoolExpr::ArithEq(var, val) => {
+                        if !self.lra.set_lb(Some(lit), *var, val.clone()) {
+                            let mut lemma = Vec::with_capacity(2);
+                            lemma.push(!lit);
+                            if let Some(guard_lit) = self.lra.ubs[*var].0 {
+                                lemma.push(!guard_lit);
+                            }
+                            Err(lemma)
+                        } else if !self.lra.set_ub(Some(lit), *var, val.clone()) {
+                            let mut lemma = Vec::with_capacity(2);
+                            lemma.push(!lit);
+                            if let Some(guard_lit) = self.lra.lbs[*var].0 {
+                                lemma.push(!guard_lit);
+                            }
+                            Err(lemma)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    BoolExpr::Lb(var, bound) => {
+                        if !self.lra.set_lb(Some(lit), *var, bound.clone()) {
+                            let mut lemma = Vec::with_capacity(2);
+                            lemma.push(!lit);
+                            if let Some(guard_lit) = self.lra.ubs[*var].0 {
+                                lemma.push(!guard_lit);
+                            }
+                            Err(lemma)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
+                } {
+                    let conflict_clause = lemma
+                        .into_iter()
+                        .map(|lit| {
+                            let var = lit.var();
+                            if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
+                        })
+                        .collect();
+                    return Err(conflict_clause);
+                }
+            }
+            self.notified_len += 1;
+        }
+
+        if let Err(conflict_clause) = self.lra.check() {
+            let conflict_clause = conflict_clause
+                .into_iter()
+                .map(|lit| {
+                    let var = lit.var();
+                    if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
+                })
+                .collect();
+            return Err(conflict_clause);
+        }
+        Ok(())
     }
 
     fn mk_le(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
