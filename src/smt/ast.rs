@@ -1,4 +1,4 @@
-use crate::smt::rational::{InfRational, Rational};
+use crate::smt::rational::InfRational;
 use std::{fmt, ops};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -14,8 +14,8 @@ impl From<bool> for Expr {
     }
 }
 
-impl From<Rational> for Expr {
-    fn from(r: Rational) -> Self {
+impl From<rug::Rational> for Expr {
+    fn from(r: rug::Rational) -> Self {
         Expr::Arith(ArithExpr::from(r))
     }
 }
@@ -106,23 +106,23 @@ impl fmt::Display for EnumExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArithExpr {
-    Const(Rational),
+    Const(rug::Rational),
     IntVar(usize),
     RealVar(usize),
     Add(Vec<ArithExpr>),
-    Sub(Box<ArithExpr>, Box<ArithExpr>),
     Mul(Vec<ArithExpr>),
     Div(Box<ArithExpr>, Box<ArithExpr>),
+    Neg(Box<ArithExpr>),
 }
 
 impl From<i32> for ArithExpr {
     fn from(n: i32) -> Self {
-        ArithExpr::Const(Rational::Finite(rug::Rational::from(n)))
+        ArithExpr::Const(rug::Rational::from(n))
     }
 }
 
-impl From<Rational> for ArithExpr {
-    fn from(r: Rational) -> Self {
+impl From<rug::Rational> for ArithExpr {
+    fn from(r: rug::Rational) -> Self {
         ArithExpr::Const(r)
     }
 }
@@ -134,10 +134,19 @@ impl fmt::Display for ArithExpr {
             ArithExpr::IntVar(n) => write!(f, "i{}", n),
             ArithExpr::RealVar(n) => write!(f, "r{}", n),
             ArithExpr::Add(es) => {
-                let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
-                write!(f, "({})", es_str.join(" + "))
+                let mut it = es.iter();
+                let Some(first) = it.next() else { return write!(f, "()") };
+
+                write!(f, "({}", first)?;
+                for term in it {
+                    match term {
+                        ArithExpr::Neg(inner) => write!(f, " - {}", inner)?,
+                        _ => write!(f, " + {}", term)?,
+                    }
+                }
+                write!(f, ")")
             }
-            ArithExpr::Sub(e1, e2) => write!(f, "({} - {})", e1, e2),
+            ArithExpr::Neg(e) => write!(f, "-{}", e),
             ArithExpr::Mul(es) => {
                 let es_str: Vec<String> = es.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", es_str.join(" * "))
@@ -258,7 +267,6 @@ pub fn mul(es: impl IntoIterator<Item = ArithExpr>) -> ArithExpr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smt::rational::Rational;
 
     // --- BoolExpr Display ---
 
@@ -306,7 +314,7 @@ mod tests {
 
     #[test]
     fn arith_display_lit() {
-        assert_eq!(ArithExpr::Const(Rational::Finite(rug::Rational::from(5))).to_string(), "5");
+        assert_eq!(ArithExpr::Const(rug::Rational::from(5)).to_string(), "5");
     }
 
     #[test]
@@ -323,7 +331,7 @@ mod tests {
 
     #[test]
     fn arith_display_sub() {
-        let e = ArithExpr::Sub(Box::new(ArithExpr::IntVar(0)), Box::new(ArithExpr::IntVar(1)));
+        let e = add([ArithExpr::IntVar(0), ArithExpr::Neg(Box::new(ArithExpr::IntVar(1)))]);
         assert_eq!(e.to_string(), "(i0 - i1)");
     }
 

@@ -1,20 +1,18 @@
 pub mod ast;
-mod lin;
 mod lra;
 mod proxy;
 mod rational;
 mod sat;
 
-use std::collections::BTreeMap;
-
 use crate::smt::{
     ast::{ArithExpr, BoolExpr},
-    lin::Lin,
     lra::LraTheory,
     proxy::ProxyRegistry,
     rational::{InfRational, Rational},
     sat::SatSolver,
 };
+use rug::Assign;
+use std::collections::BTreeMap;
 
 pub struct SmtSolver {
     registry: ProxyRegistry,
@@ -103,21 +101,88 @@ impl SmtSolver {
     }
 
     fn diff(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
-        let diff = Lin::from(e1) - Lin::from(e2);
         let mut vars = BTreeMap::new();
+        let mut const_term = rug::Rational::from(0);
 
-        for (var, coeff) in diff.vars {
-            if let Some(basic) = self.lra.tableau.get(&var) {
-                for (&sub_var, sub_coeff) in basic {
-                    *vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0)) += coeff.clone() * sub_coeff;
-                }
-            } else {
-                *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += coeff;
-            }
-        }
+        let pos_one = rug::Rational::from(1);
+        let neg_one = rug::Rational::from(-1);
+
+        let mut temp = rug::Rational::new();
+
+        self.accumulate_expr(e1, &pos_one, &mut vars, &mut const_term, &mut temp);
+        self.accumulate_expr(e2, &neg_one, &mut vars, &mut const_term, &mut temp);
 
         vars.retain(|_, c| *c != 0);
-        (vars, diff.const_term)
+
+        (vars, const_term)
+    }
+
+    fn accumulate_expr(&self, expr: &ArithExpr, scale: &rug::Rational, vars: &mut BTreeMap<usize, rug::Rational>, const_term: &mut rug::Rational, temp: &mut rug::Rational) {
+        match expr {
+            ArithExpr::Const(c) => {
+                temp.assign(c * scale);
+                *const_term += &*temp;
+            }
+            ArithExpr::IntVar(var) | ArithExpr::RealVar(var) => {
+                self.accumulate_var(*var, scale, vars, temp);
+            }
+            ArithExpr::Add(terms) => {
+                for term in terms {
+                    self.accumulate_expr(term, scale, vars, const_term, temp);
+                }
+            }
+            ArithExpr::Mul(terms) => {
+                if terms.len() != 2 {
+                    panic!("Only binary multiplication is supported in linear arithmetic");
+                }
+                let (first, second) = (&terms[0], &terms[1]);
+
+                // Ricorsione intelligente: accettiamo (Costante * SottoEspressione)
+                match (first, second) {
+                    (ArithExpr::Const(c), sub_expr) | (sub_expr, ArithExpr::Const(c)) => {
+                        let mut new_scale = rug::Rational::new();
+                        new_scale.assign(c * scale);
+                        self.accumulate_expr(sub_expr, &new_scale, vars, const_term, temp);
+                    }
+                    _ => {
+                        panic!("Non-linear arithmetic: multiplication between two non-constant expressions is not supported");
+                    }
+                }
+            }
+            ArithExpr::Div(numerator, denominator) => {
+                // Il denominatore DEVE essere una costante per preservare la linearità
+                if let ArithExpr::Const(c) = &**denominator {
+                    if c.is_zero() {
+                        panic!("Division by zero detected in AST");
+                    }
+                    let mut div_scale = rug::Rational::new();
+                    div_scale.assign(scale / c);
+                    self.accumulate_expr(numerator, &div_scale, vars, const_term, temp);
+                } else {
+                    panic!("Non-linear arithmetic: division by a non-constant expression is not supported");
+                }
+            }
+            ArithExpr::Neg(sub_expr) => {
+                let mut neg_scale = rug::Rational::new();
+                neg_scale.assign(scale * -1);
+                self.accumulate_expr(sub_expr, &neg_scale, vars, const_term, temp);
+            }
+            _ => {
+                panic!("Unsupported arithmetic expression in linear arithmetic: {:?}", expr);
+            }
+        }
+    }
+
+    fn accumulate_var(&self, var: usize, scale: &rug::Rational, vars: &mut BTreeMap<usize, rug::Rational>, temp: &mut rug::Rational) {
+        if let Some(basic_row) = self.lra.tableau.get(&var) {
+            for (&sub_var, sub_coeff) in basic_row {
+                let entry = vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0));
+                temp.assign(sub_coeff * scale);
+                *entry += &*temp;
+            }
+        } else {
+            *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += scale;
+        }
     }
 
     fn get_or_create_slack(&mut self, vars: BTreeMap<usize, rug::Rational>) -> usize {
