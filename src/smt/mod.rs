@@ -228,8 +228,8 @@ impl SmtSolver {
 
         while self.notified_len < self.sat.trail.len() {
             let lit = self.sat.trail[self.notified_len];
-            if let Some(expr) = self.registry.get_ast(lit) {
-                if let Err(lemma) = match expr {
+            if let Some(expr) = self.registry.get_ast(lit)
+                && let Err(lemma) = match expr {
                     BoolExpr::Ub(var, bound) => {
                         if !self.lra.set_ub(Some(lit), *var, bound.clone()) {
                             let mut lemma = Vec::with_capacity(2);
@@ -274,16 +274,16 @@ impl SmtSolver {
                         }
                     }
                     _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
-                } {
-                    let conflict_clause = lemma
-                        .into_iter()
-                        .map(|lit| {
-                            let var = lit.var();
-                            if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
-                        })
-                        .collect();
-                    return Err(conflict_clause);
                 }
+            {
+                let conflict_clause = lemma
+                    .into_iter()
+                    .map(|lit| {
+                        let var = lit.var();
+                        if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
+                    })
+                    .collect();
+                return Err(conflict_clause);
             }
             self.notified_len += 1;
         }
