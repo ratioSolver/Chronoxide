@@ -302,9 +302,6 @@ mod tests {
 
     #[test]
     fn test_conflict_analysis() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut sat = SatSolver::new();
         let b1 = sat.mk_var();
         let b2 = sat.mk_var();
@@ -335,9 +332,10 @@ mod tests {
         assert!(result.is_err());
         let (bt_level, conflict_clause) = result.unwrap_err();
         assert_eq!(bt_level, 3);
+        assert!(conflict_clause.contains(&Lit::new(b4, true)));
+        assert!(conflict_clause.contains(&Lit::new(b8, false)));
+        assert!(conflict_clause.contains(&Lit::new(b9, false)));
         sat.cancel_until(bt_level);
         sat.add_clause(conflict_clause).expect("Should be able to add learnt clause");
-
-        trace!("Final SAT Solver State:\n{}", sat);
     }
 }

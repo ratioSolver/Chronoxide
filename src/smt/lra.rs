@@ -83,7 +83,7 @@ impl LraTheory {
         *self.ints.get(var).expect("variable index out of bounds")
     }
 
-    pub(super) fn set_lb(&mut self, lit: Lit, var: usize, new_lb: InfRational) -> bool {
+    pub(super) fn set_lb(&mut self, lit: Option<Lit>, var: usize, new_lb: InfRational) -> bool {
         assert!(var < self.reals.len(), "variable index out of bounds: {var}");
 
         if &new_lb <= self.lb(var) {
@@ -97,7 +97,7 @@ impl LraTheory {
         let (c_lit, val) = self.lbs[var].clone();
         self.bound_trail.push(BoundUpdate::LowerBound { lit: c_lit, var, val });
 
-        self.lbs[var] = (Some(lit), new_lb.clone());
+        self.lbs[var] = (lit, new_lb.clone());
 
         if self.value(var) < &new_lb && !self.is_basic(var) {
             self.update(var, new_lb);
@@ -106,7 +106,7 @@ impl LraTheory {
         true
     }
 
-    pub(super) fn set_ub(&mut self, lit: Lit, var: usize, new_ub: InfRational) -> bool {
+    pub(super) fn set_ub(&mut self, lit: Option<Lit>, var: usize, new_ub: InfRational) -> bool {
         assert!(var < self.reals.len(), "variable index out of bounds: {var}");
 
         if &new_ub >= self.ub(var) {
@@ -120,7 +120,7 @@ impl LraTheory {
         let (c_lit, val) = self.ubs[var].clone();
         self.bound_trail.push(BoundUpdate::UpperBound { lit: c_lit, var, val });
 
-        self.ubs[var] = (Some(lit), new_ub.clone());
+        self.ubs[var] = (lit, new_ub.clone());
 
         if self.value(var) > &new_ub && !self.is_basic(var) {
             self.update(var, new_ub);
@@ -357,4 +357,135 @@ impl LraTheory {
 enum BoundUpdate {
     LowerBound { lit: Option<Lit>, var: usize, val: InfRational },
     UpperBound { lit: Option<Lit>, var: usize, val: InfRational },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rug::Rational as RugRational;
+
+    /// Helper per creare rapidamente un InfRational senza parte infinitesimale
+    fn real(val: i32) -> InfRational {
+        InfRational::new(Rational::Finite(RugRational::from(val)), RugRational::from(0))
+    }
+
+    fn add_test_row(theory: &mut LraTheory, basic_var: usize, terms: &[(usize, i32)]) {
+        let mut row = BTreeMap::new();
+        for &(var, coeff) in terms {
+            row.insert(var, RugRational::from(coeff));
+            theory.t_watches[var].insert(basic_var);
+        }
+        theory.tableau.insert(basic_var, row);
+    }
+
+    #[test]
+    fn test_pure_pivot_algebra() {
+        let mut lra = LraTheory::new();
+
+        let x = lra.mk_real(); // 0
+        let y = lra.mk_real(); // 1
+        let s = lra.mk_real(); // 2 (slack)
+
+        add_test_row(&mut lra, s, &[(x, 2), (y, -3)]);
+
+        assert!(lra.is_basic(s));
+        assert!(!lra.is_basic(x));
+        assert!(lra.t_watches[x].contains(&s));
+
+        lra.pivot(y, s);
+
+        assert!(!lra.is_basic(s));
+        assert!(lra.is_basic(y));
+        assert!(!lra.t_watches[y].contains(&s), "y should not be watching s after pivoting");
+        assert!(lra.t_watches[x].contains(&y), "x should now be watched by y after pivoting");
+        assert!(lra.t_watches[s].contains(&y), "s should now be watched by y after pivoting");
+
+        let row_y = lra.tableau.get(&y).expect("y must have a row in the tableau");
+        assert_eq!(row_y.get(&x).unwrap(), &RugRational::from((2, 3)));
+        assert_eq!(row_y.get(&s).unwrap(), &RugRational::from((-1, 3)));
+    }
+
+    #[test]
+    fn test_pivot_and_update_maintains_equality() {
+        let mut lra = LraTheory::new();
+
+        let x = lra.mk_real();
+        let y = lra.mk_real();
+        let s = lra.mk_real();
+
+        add_test_row(&mut lra, s, &[(x, 1), (y, 1)]);
+
+        lra.reals[x] = real(5);
+        lra.reals[y] = real(3);
+        lra.reals[s] = real(8);
+
+        lra.set_lb(None, s, real(0));
+        lra.set_ub(None, s, real(10));
+
+        lra.pivot_and_update(y, s, real(6));
+
+        assert_eq!(lra.value(s), &real(6));
+        assert_eq!(lra.value(x), &real(5));
+        assert_eq!(lra.value(y), &real(1), "y should have absorbed the delta of -2");
+    }
+
+    #[test]
+    fn test_check_resolves_out_of_bounds() {
+        let mut lra = LraTheory::new();
+
+        let x = lra.mk_real();
+        let y = lra.mk_real();
+        let s = lra.mk_real();
+
+        add_test_row(&mut lra, s, &[(x, 1), (y, 1)]); // s = x + y
+
+        lra.set_lb(None, x, real(0));
+        lra.set_ub(None, x, real(10));
+        lra.set_lb(None, y, real(-10));
+        lra.set_ub(None, y, real(10));
+
+        lra.set_ub(None, s, real(5));
+
+        lra.set_lb(None, x, real(6));
+
+        assert!(lra.value(s) > lra.ub(s));
+
+        let result = lra.check();
+
+        assert!(result.is_ok(), "check should resolve the out-of-bounds situation");
+
+        assert_eq!(lra.value(s), &real(5));
+        assert_eq!(lra.value(y), &real(-1));
+
+        assert!(!lra.is_basic(s));
+        assert!(lra.value(s) <= lra.ub(s));
+    }
+
+    #[test]
+    fn test_check_detects_conflict() {
+        let mut lra = LraTheory::new();
+
+        let x = lra.mk_real();
+        let y = lra.mk_real();
+        let s = lra.mk_real();
+
+        add_test_row(&mut lra, s, &[(x, 1), (y, 1)]);
+
+        lra.set_lb(Some(Lit::new(1, false)), x, real(3));
+        assert_eq!(lra.value(s), &real(3));
+
+        lra.set_lb(Some(Lit::new(2, false)), y, real(4));
+        assert_eq!(lra.value(s), &real(7));
+
+        lra.set_ub(Some(Lit::new(3, false)), s, real(5));
+
+        let result = lra.check();
+
+        assert!(result.is_err());
+        let conflict = result.unwrap_err();
+
+        assert!(conflict.contains(&Lit::new(1, true)));
+        assert!(conflict.contains(&Lit::new(2, true)));
+        assert!(conflict.contains(&Lit::new(3, true)));
+    }
 }
