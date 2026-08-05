@@ -25,10 +25,52 @@ impl ops::Neg for Rational {
     }
 }
 
+impl ops::Neg for &Rational {
+    type Output = Rational;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Rational::NegativeInf => Rational::PositiveInf,
+            Rational::Finite(r) => Rational::Finite(-r.clone()),
+            Rational::PositiveInf => Rational::NegativeInf,
+        }
+    }
+}
+
 impl ops::Add for Rational {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
+                panic!("undefined operation: -inf + +inf")
+            }
+            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
+            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
+            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 + r2),
+        }
+    }
+}
+
+impl ops::Add for &Rational {
+    type Output = Rational;
+
+    fn add(self, other: &Rational) -> Self::Output {
+        match (self, other) {
+            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
+                panic!("undefined operation: -inf + +inf")
+            }
+            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
+            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
+            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1.clone() + r2.clone()),
+        }
+    }
+}
+
+impl ops::Add<&Rational> for Rational {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self::Output {
         match (self, other) {
             (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
                 panic!("undefined operation: -inf + +inf")
@@ -51,6 +93,22 @@ impl ops::Sub for Rational {
 
     fn sub(self, other: Self) -> Self::Output {
         self + (-other)
+    }
+}
+
+impl ops::Sub<&Rational> for Rational {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self::Output {
+        self + (-other)
+    }
+}
+
+impl ops::Sub<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn sub(self, other: &Rational) -> Self::Output {
+        self + &(-other)
     }
 }
 
@@ -142,15 +200,78 @@ impl fmt::Display for Rational {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct InfRational {
-    pub rat: rug::Rational,
+    pub rat: Rational,
     pub inf: rug::Rational,
 }
 
 impl InfRational {
-    pub fn new(rat: rug::Rational, inf: rug::Rational) -> Self {
+    pub fn new(rat: Rational, inf: rug::Rational) -> Self {
         InfRational { rat, inf }
+    }
+}
+
+impl ops::Add for InfRational {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        InfRational { rat: self.rat + other.rat, inf: self.inf + other.inf }
+    }
+}
+
+impl ops::Add<&InfRational> for InfRational {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self::Output {
+        InfRational { rat: self.rat + &other.rat, inf: self.inf + &other.inf }
+    }
+}
+
+impl ops::AddAssign for InfRational {
+    fn add_assign(&mut self, other: Self) {
+        self.rat += other.rat;
+        self.inf += other.inf;
+    }
+}
+
+impl ops::Sub for InfRational {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        InfRational { rat: self.rat - other.rat, inf: self.inf - other.inf }
+    }
+}
+
+impl ops::Sub<&InfRational> for InfRational {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self::Output {
+        InfRational { rat: self.rat - &other.rat, inf: self.inf - &other.inf }
+    }
+}
+
+impl ops::Sub<&InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn sub(self, other: &InfRational) -> Self::Output {
+        InfRational { rat: &self.rat - &other.rat, inf: self.inf.clone() - &other.inf }
+    }
+}
+
+impl ops::Mul<&rug::Rational> for InfRational {
+    type Output = InfRational;
+
+    fn mul(self, k: &rug::Rational) -> Self::Output {
+        InfRational { rat: self.rat * Rational::Finite(k.clone()), inf: self.inf * k.clone() }
+    }
+}
+
+impl ops::Mul<rug::Rational> for InfRational {
+    type Output = InfRational;
+
+    fn mul(self, k: rug::Rational) -> Self::Output {
+        self * &k
     }
 }
 
@@ -313,6 +434,23 @@ mod tests {
         assert_eq!(int(0) - Rational::NegativeInf, Rational::PositiveInf);
     }
 
+    #[test]
+    fn sub_ref_ref() {
+        let a = int(5);
+        let b = int(3);
+        assert_eq!(&a - &b, int(2));
+        assert_eq!(&Rational::PositiveInf - &int(100), Rational::PositiveInf);
+        assert_eq!(&Rational::NegativeInf - &int(100), Rational::NegativeInf);
+        assert_eq!(&int(0) - &Rational::PositiveInf, Rational::NegativeInf);
+    }
+
+    #[test]
+    #[should_panic]
+    fn sub_ref_ref_undefined_panics() {
+        let ni = Rational::NegativeInf;
+        let _ = &ni - &ni;
+    }
+
     // --- Mul ---
 
     #[test]
@@ -434,5 +572,28 @@ mod tests {
     #[should_panic(expected = "±inf / ±inf")]
     fn div_inf_by_inf_panics() {
         let _ = Rational::PositiveInf / Rational::PositiveInf;
+    }
+
+    // --- InfRational ---
+
+    #[test]
+    fn infrational_sub_ref_ref() {
+        let a = InfRational::new(int(5), rug::Rational::from(1));
+        let b = InfRational::new(int(3), rug::Rational::from(1));
+        let c = &a - &b;
+        assert_eq!(c.rat, int(2));
+        assert_eq!(c.inf, rug::Rational::from(0));
+    }
+
+    #[test]
+    fn infrational_total_order() {
+        let a = InfRational::new(int(5), rug::Rational::from(0));
+        let b = InfRational::new(int(5), rug::Rational::from(1)); // 5 + eps
+        let c = InfRational::new(int(6), rug::Rational::from(-1)); // 6 - eps
+        assert!(a < b);
+        assert!(b < c);
+        let mut v = vec![c.clone(), a.clone(), b.clone()];
+        v.sort();
+        assert_eq!(v, vec![a, b, c]);
     }
 }

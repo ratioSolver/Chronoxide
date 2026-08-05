@@ -12,7 +12,7 @@ use crate::smt::{
     lin::Lin,
     lra::LraTheory,
     proxy::ProxyRegistry,
-    rational::InfRational,
+    rational::{InfRational, Rational},
     sat::SatSolver,
 };
 
@@ -42,7 +42,7 @@ impl SmtSolver {
                 let (&var, coeff) = vars.iter().next().unwrap();
 
                 let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
-                let bound = InfRational::new(-const_term.clone() / coeff, eps_val / coeff);
+                let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), eps_val / coeff);
                 let bound = if coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
                 if let Some(&sat_var) = self.registry.get_proxy(&bound) {
                     BoolExpr::Var(sat_var)
@@ -63,7 +63,7 @@ impl SmtSolver {
                 };
 
                 let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
-                let bound = BoolExpr::Ub(slack, InfRational::new(-const_term, eps_val));
+                let bound = BoolExpr::Ub(slack, InfRational::new(Rational::Finite(-const_term), eps_val));
                 if let Some(&sat_var) = self.registry.get_proxy(&bound) {
                     BoolExpr::Var(sat_var)
                 } else {
