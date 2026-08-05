@@ -177,14 +177,15 @@ impl LraTheory {
                     } else {
                         let mut conflict = Vec::new();
                         for (vr, vl) in &self.tableau[&leaving] {
-                            if vl.is_positive() {
-                                if let Some(guard_lit) = self.ubs[*vr].0 {
-                                    conflict.push(!guard_lit);
-                                }
+                            if vl.is_positive()
+                                && let Some(guard_lit) = self.ubs[*vr].0
+                            {
+                                conflict.push(!guard_lit);
                             } else if vl.is_negative()
-                                && let Some(guard_lit) = self.lbs[*vr].0 {
-                                    conflict.push(!guard_lit);
-                                }
+                                && let Some(guard_lit) = self.lbs[*vr].0
+                            {
+                                conflict.push(!guard_lit);
+                            }
                         }
                         if let Some(guard_lit) = self.lbs[leaving].0 {
                             conflict.push(!guard_lit);
@@ -199,14 +200,15 @@ impl LraTheory {
                     } else {
                         let mut conflict = Vec::new();
                         for (vr, vl) in &self.tableau[&leaving] {
-                            if vl.is_positive() {
-                                if let Some(guard_lit) = self.lbs[*vr].0 {
-                                    conflict.push(!guard_lit);
-                                }
+                            if vl.is_positive()
+                                && let Some(guard_lit) = self.lbs[*vr].0
+                            {
+                                conflict.push(!guard_lit);
                             } else if vl.is_negative()
-                                && let Some(guard_lit) = self.ubs[*vr].0 {
-                                    conflict.push(!guard_lit);
-                                }
+                                && let Some(guard_lit) = self.ubs[*vr].0
+                            {
+                                conflict.push(!guard_lit);
+                            }
                         }
                         if let Some(guard_lit) = self.ubs[leaving].0 {
                             conflict.push(!guard_lit);
