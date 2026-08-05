@@ -520,6 +520,67 @@ impl ops::MulAssign<&rug::Rational> for InfRational {
     }
 }
 
+impl ops::Div<rug::Rational> for InfRational {
+    type Output = Self;
+
+    fn div(self, rhs: rug::Rational) -> Self::Output {
+        self / &rhs
+    }
+}
+
+impl ops::Div<&rug::Rational> for InfRational {
+    type Output = Self;
+
+    fn div(self, rhs: &rug::Rational) -> Self::Output {
+        if rhs.is_zero() {
+            panic!("undefined operation: InfRational / 0");
+        }
+
+        InfRational::new(self.rat / Rational::Finite(rhs.clone()), self.inf / rhs)
+    }
+}
+
+impl ops::Div<rug::Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn div(self, rhs: rug::Rational) -> Self::Output {
+        self / &rhs
+    }
+}
+
+impl ops::Div<&rug::Rational> for &InfRational {
+    type Output = InfRational;
+
+    fn div(self, rhs: &rug::Rational) -> Self::Output {
+        if rhs.is_zero() {
+            panic!("undefined operation: InfRational / 0");
+        }
+
+        InfRational::new(&self.rat / Rational::Finite(rhs.clone()), (&self.inf / rhs).complete())
+    }
+}
+
+impl ops::DivAssign<rug::Rational> for InfRational {
+    fn div_assign(&mut self, rhs: rug::Rational) {
+        *self /= &rhs;
+    }
+}
+
+impl ops::DivAssign<&rug::Rational> for InfRational {
+    fn div_assign(&mut self, rhs: &rug::Rational) {
+        if rhs.is_zero() {
+            panic!("undefined operation: InfRational / 0");
+        }
+
+        self.rat /= Rational::Finite(rhs.clone());
+        self.inf /= rhs;
+
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
+    }
+}
+
 impl fmt::Display for InfRational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.inf.is_zero() {

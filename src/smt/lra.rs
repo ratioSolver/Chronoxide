@@ -2,7 +2,10 @@ use crate::smt::{
     rational::{InfRational, Rational},
     sat::Lit,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    mem,
+};
 
 pub(super) struct LraTheory {
     ints: Vec<bool>,                                                         // Distinguish between integer and real variables
@@ -109,6 +112,72 @@ impl LraTheory {
         }
 
         self.reals[var] = new_value;
+    }
+
+    fn pivot(&mut self, entering: usize, leaving: usize) {
+        assert!(self.is_basic(leaving), "Leaving variable must be basic");
+        assert!(!self.is_basic(entering), "Entering variable must be non-basic");
+
+        // Remove the leaving variable from the watches of all variables in its tableau row
+        for &var in self.tableau[&leaving].keys() {
+            self.t_watches[var].remove(&leaving);
+        }
+
+        // Rewrite the leaving variable's row to express it in terms of the entering variable
+        let mut new_row = self.tableau.remove(&leaving).expect("Leaving variable must have a tableau row");
+        let pivot_coeff = new_row.remove(&entering).expect("Entering variable must be in the leaving variable's row");
+        let neg_pivot = -pivot_coeff.clone();
+        for row_coeff in new_row.values_mut() {
+            *row_coeff /= &neg_pivot;
+        }
+        new_row.insert(leaving, pivot_coeff.recip());
+
+        // Substitute the new row into all other rows that contain the entering variable
+        let watches = mem::take(&mut self.t_watches[entering]);
+        for watch in &watches {
+            if watch != &leaving
+                && let Some(row) = self.tableau.get_mut(watch)
+            {
+                let coeff = row.remove(&entering).unwrap();
+                for (v, c) in &new_row {
+                    if let Some(old_coeff) = row.get_mut(v) {
+                        *old_coeff += c * coeff.clone();
+                        if old_coeff.is_zero() {
+                            row.remove(v);
+                            self.t_watches[*v].remove(watch);
+                        }
+                    } else {
+                        row.insert(*v, c * coeff.clone());
+                        self.t_watches[*v].insert(*watch);
+                    }
+                }
+            }
+        }
+
+        // Add the new row to the tableau
+        for v in new_row.keys() {
+            self.t_watches[*v].insert(entering);
+        }
+        self.tableau.insert(entering, new_row);
+    }
+
+    fn pivot_and_update(&mut self, entering: usize, leaving: usize, new_value: InfRational) {
+        assert!(self.is_basic(leaving), "Leaving variable must be basic");
+        assert!(!self.is_basic(entering), "Entering variable must be non-basic");
+
+        let theta = (new_value.clone() - self.value(leaving)) / &self.tableau[&leaving][&entering];
+        self.reals[leaving] = new_value;
+        self.reals[entering] += &theta;
+
+        for &watch in &self.t_watches[entering] {
+            if watch != leaving
+                && let Some(row) = self.tableau.get_mut(&watch)
+            {
+                self.reals[watch] += &theta * &row[&entering];
+            }
+        }
+
+        self.pivot(entering, leaving);
     }
 
     pub(super) fn push(&mut self) {
