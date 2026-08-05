@@ -1,15 +1,108 @@
+use rug::Complete;
 use std::{fmt, ops};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Rational {
     NegativeInf,
     Finite(rug::Rational),
     PositiveInf,
 }
 
+impl Rational {
+    pub fn zero() -> Self {
+        Self::Finite(rug::Rational::from(0))
+    }
+
+    pub fn is_finite(&self) -> bool {
+        matches!(self, Self::Finite(_))
+    }
+
+    fn finite_sign(r: &rug::Rational) -> i8 {
+        if r.is_positive() {
+            1
+        } else if r.is_negative() {
+            -1
+        } else {
+            0
+        }
+    }
+
+    fn add_ref(lhs: &Self, rhs: &Self) -> Self {
+        use Rational::*;
+
+        match (lhs, rhs) {
+            (NegativeInf, PositiveInf) | (PositiveInf, NegativeInf) => {
+                panic!("undefined operation: -inf + +inf")
+            }
+            (NegativeInf, _) | (_, NegativeInf) => NegativeInf,
+            (PositiveInf, _) | (_, PositiveInf) => PositiveInf,
+            (Finite(a), Finite(b)) => Finite((a + b).complete()),
+        }
+    }
+
+    fn mul_ref(lhs: &Self, rhs: &Self) -> Self {
+        use Rational::*;
+
+        match (lhs, rhs) {
+            (Finite(a), Finite(b)) => Finite((a * b).complete()),
+
+            (NegativeInf, Finite(r)) | (Finite(r), NegativeInf) => match Self::finite_sign(r) {
+                1 => NegativeInf,
+                -1 => PositiveInf,
+                _ => panic!("undefined operation: -inf * 0"),
+            },
+
+            (PositiveInf, Finite(r)) | (Finite(r), PositiveInf) => match Self::finite_sign(r) {
+                1 => PositiveInf,
+                -1 => NegativeInf,
+                _ => panic!("undefined operation: +inf * 0"),
+            },
+
+            (NegativeInf, NegativeInf) | (PositiveInf, PositiveInf) => PositiveInf,
+            (NegativeInf, PositiveInf) | (PositiveInf, NegativeInf) => NegativeInf,
+        }
+    }
+
+    fn div_ref(lhs: &Self, rhs: &Self) -> Self {
+        use Rational::*;
+
+        match (lhs, rhs) {
+            (Finite(a), Finite(b)) => {
+                if b.is_zero() {
+                    match Self::finite_sign(a) {
+                        1 => PositiveInf,
+                        -1 => NegativeInf,
+                        _ => panic!("undefined operation: 0 / 0"),
+                    }
+                } else {
+                    Finite((a / b).complete())
+                }
+            }
+
+            (NegativeInf, Finite(r)) => match Self::finite_sign(r) {
+                1 => NegativeInf,
+                -1 => PositiveInf,
+                _ => panic!("undefined operation: -inf / 0"),
+            },
+
+            (PositiveInf, Finite(r)) => match Self::finite_sign(r) {
+                1 => PositiveInf,
+                -1 => NegativeInf,
+                _ => panic!("undefined operation: +inf / 0"),
+            },
+
+            (Finite(_), NegativeInf) | (Finite(_), PositiveInf) => Rational::zero(),
+
+            (NegativeInf, NegativeInf) | (NegativeInf, PositiveInf) | (PositiveInf, NegativeInf) | (PositiveInf, PositiveInf) => {
+                panic!("undefined operation: ±inf / ±inf")
+            }
+        }
+    }
+}
+
 impl Default for Rational {
     fn default() -> Self {
-        Rational::Finite(rug::Rational::from(0))
+        Self::zero()
     }
 }
 
@@ -17,10 +110,12 @@ impl ops::Neg for Rational {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
+        use Rational::*;
+
         match self {
-            Rational::NegativeInf => Rational::PositiveInf,
-            Rational::Finite(r) => Rational::Finite(-r),
-            Rational::PositiveInf => Rational::NegativeInf,
+            NegativeInf => PositiveInf,
+            Finite(r) => Finite(-r),
+            PositiveInf => NegativeInf,
         }
     }
 }
@@ -29,10 +124,12 @@ impl ops::Neg for &Rational {
     type Output = Rational;
 
     fn neg(self) -> Self::Output {
+        use Rational::*;
+
         match self {
-            Rational::NegativeInf => Rational::PositiveInf,
-            Rational::Finite(r) => Rational::Finite(-r.clone()),
-            Rational::PositiveInf => Rational::NegativeInf,
+            NegativeInf => PositiveInf,
+            Finite(r) => Finite(-r.clone()),
+            PositiveInf => NegativeInf,
         }
     }
 }
@@ -40,153 +137,176 @@ impl ops::Neg for &Rational {
 impl ops::Add for Rational {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self::Output {
-        match (self, other) {
-            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
-                panic!("undefined operation: -inf + +inf")
-            }
-            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
-            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
-            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 + r2),
-        }
-    }
-}
-
-impl ops::Add for &Rational {
-    type Output = Rational;
-
-    fn add(self, other: &Rational) -> Self::Output {
-        match (self, other) {
-            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
-                panic!("undefined operation: -inf + +inf")
-            }
-            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
-            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
-            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1.clone() + r2.clone()),
-        }
+    fn add(self, rhs: Self) -> Self::Output {
+        Rational::add_ref(&self, &rhs)
     }
 }
 
 impl ops::Add<&Rational> for Rational {
     type Output = Self;
 
-    fn add(self, other: &Self) -> Self::Output {
-        match (self, other) {
-            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => {
-                panic!("undefined operation: -inf + +inf")
-            }
-            (Rational::NegativeInf, _) | (_, Rational::NegativeInf) => Rational::NegativeInf,
-            (Rational::PositiveInf, _) | (_, Rational::PositiveInf) => Rational::PositiveInf,
-            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 + r2),
-        }
+    fn add(self, rhs: &Rational) -> Self::Output {
+        Rational::add_ref(&self, rhs)
+    }
+}
+
+impl ops::Add<Rational> for &Rational {
+    type Output = Rational;
+
+    fn add(self, rhs: Rational) -> Self::Output {
+        Rational::add_ref(self, &rhs)
+    }
+}
+
+impl ops::Add<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn add(self, rhs: &Rational) -> Self::Output {
+        Rational::add_ref(self, rhs)
     }
 }
 
 impl ops::AddAssign for Rational {
-    fn add_assign(&mut self, other: Self) {
-        *self = std::mem::take(self) + other;
+    fn add_assign(&mut self, rhs: Self) {
+        *self = Rational::add_ref(self, &rhs);
+    }
+}
+
+impl ops::AddAssign<&Rational> for Rational {
+    fn add_assign(&mut self, rhs: &Rational) {
+        *self = Rational::add_ref(self, rhs);
     }
 }
 
 impl ops::Sub for Rational {
     type Output = Self;
 
-    fn sub(self, other: Self) -> Self::Output {
-        self + (-other)
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + (-rhs)
     }
 }
 
 impl ops::Sub<&Rational> for Rational {
     type Output = Self;
 
-    fn sub(self, other: &Self) -> Self::Output {
-        self + (-other)
+    fn sub(self, rhs: &Rational) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+impl ops::Sub<Rational> for &Rational {
+    type Output = Rational;
+
+    fn sub(self, rhs: Rational) -> Self::Output {
+        self + (-rhs)
     }
 }
 
 impl ops::Sub<&Rational> for &Rational {
     type Output = Rational;
 
-    fn sub(self, other: &Rational) -> Self::Output {
-        self + &(-other)
+    fn sub(self, rhs: &Rational) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+impl ops::SubAssign for Rational {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = Rational::add_ref(self, &(-rhs));
+    }
+}
+
+impl ops::SubAssign<&Rational> for Rational {
+    fn sub_assign(&mut self, rhs: &Rational) {
+        *self = Rational::add_ref(self, &(-rhs));
     }
 }
 
 impl ops::Mul for Rational {
     type Output = Self;
 
-    fn mul(self, other: Self) -> Self::Output {
-        match (self, other) {
-            (Rational::NegativeInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::NegativeInf) => {
-                if r.is_positive() {
-                    Rational::NegativeInf
-                } else if r.is_negative() {
-                    Rational::PositiveInf
-                } else {
-                    panic!("undefined operation: -inf * 0")
-                }
-            }
-            (Rational::PositiveInf, Rational::Finite(r)) | (Rational::Finite(r), Rational::PositiveInf) => {
-                if r.is_positive() {
-                    Rational::PositiveInf
-                } else if r.is_negative() {
-                    Rational::NegativeInf
-                } else {
-                    panic!("undefined operation: +inf * 0")
-                }
-            }
-            (Rational::NegativeInf, Rational::NegativeInf) | (Rational::PositiveInf, Rational::PositiveInf) => Rational::PositiveInf,
-            (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => Rational::NegativeInf,
-            (Rational::Finite(r1), Rational::Finite(r2)) => Rational::Finite(r1 * r2),
-        }
+    fn mul(self, rhs: Self) -> Self::Output {
+        Rational::mul_ref(&self, &rhs)
+    }
+}
+
+impl ops::Mul<&Rational> for Rational {
+    type Output = Self;
+
+    fn mul(self, rhs: &Rational) -> Self::Output {
+        Rational::mul_ref(&self, rhs)
+    }
+}
+
+impl ops::Mul<Rational> for &Rational {
+    type Output = Rational;
+
+    fn mul(self, rhs: Rational) -> Self::Output {
+        Rational::mul_ref(self, &rhs)
+    }
+}
+
+impl ops::Mul<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn mul(self, rhs: &Rational) -> Self::Output {
+        Rational::mul_ref(self, rhs)
     }
 }
 
 impl ops::MulAssign for Rational {
-    fn mul_assign(&mut self, other: Self) {
-        *self = std::mem::take(self) * other;
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = Rational::mul_ref(self, &rhs);
+    }
+}
+
+impl ops::MulAssign<&Rational> for Rational {
+    fn mul_assign(&mut self, rhs: &Rational) {
+        *self = Rational::mul_ref(self, rhs);
     }
 }
 
 impl ops::Div for Rational {
     type Output = Self;
 
-    fn div(self, other: Self) -> Self::Output {
-        match (self, other) {
-            (Rational::NegativeInf, Rational::Finite(r)) => {
-                if r.is_positive() {
-                    Rational::NegativeInf
-                } else if r.is_negative() {
-                    Rational::PositiveInf
-                } else {
-                    panic!("undefined operation: -inf / 0")
-                }
-            }
-            (Rational::PositiveInf, Rational::Finite(r)) => {
-                if r.is_positive() {
-                    Rational::PositiveInf
-                } else if r.is_negative() {
-                    Rational::NegativeInf
-                } else {
-                    panic!("undefined operation: +inf / 0")
-                }
-            }
-            (Rational::Finite(_), Rational::NegativeInf) | (Rational::Finite(_), Rational::PositiveInf) => Rational::Finite(rug::Rational::from(0)),
-            (Rational::NegativeInf, Rational::NegativeInf) | (Rational::PositiveInf, Rational::PositiveInf) | (Rational::NegativeInf, Rational::PositiveInf) | (Rational::PositiveInf, Rational::NegativeInf) => panic!("undefined operation: ±inf / ±inf"),
-            (Rational::Finite(r1), Rational::Finite(r2)) => {
-                if r2.is_zero() {
-                    if r1.is_positive() {
-                        Rational::PositiveInf
-                    } else if r1.is_negative() {
-                        Rational::NegativeInf
-                    } else {
-                        panic!("undefined operation: 0 / 0")
-                    }
-                } else {
-                    Rational::Finite(r1 / r2)
-                }
-            }
-        }
+    fn div(self, rhs: Self) -> Self::Output {
+        Rational::div_ref(&self, &rhs)
+    }
+}
+
+impl ops::Div<&Rational> for Rational {
+    type Output = Self;
+
+    fn div(self, rhs: &Rational) -> Self::Output {
+        Rational::div_ref(&self, rhs)
+    }
+}
+
+impl ops::Div<Rational> for &Rational {
+    type Output = Rational;
+
+    fn div(self, rhs: Rational) -> Self::Output {
+        Rational::div_ref(self, &rhs)
+    }
+}
+
+impl ops::Div<&Rational> for &Rational {
+    type Output = Rational;
+
+    fn div(self, rhs: &Rational) -> Self::Output {
+        Rational::div_ref(self, rhs)
+    }
+}
+
+impl ops::DivAssign for Rational {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = Rational::div_ref(self, &rhs);
+    }
+}
+
+impl ops::DivAssign<&Rational> for Rational {
+    fn div_assign(&mut self, rhs: &Rational) {
+        *self = Rational::div_ref(self, rhs);
     }
 }
 
@@ -194,84 +314,209 @@ impl fmt::Display for Rational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Rational::NegativeInf => write!(f, "-inf"),
-            Rational::Finite(r) => write!(f, "{}", r),
+            Rational::Finite(r) => write!(f, "{r}"),
             Rational::PositiveInf => write!(f, "+inf"),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InfRational {
-    pub rat: Rational,
-    pub inf: rug::Rational,
+    rat: Rational,
+    inf: rug::Rational,
 }
 
 impl InfRational {
     pub fn new(rat: Rational, inf: rug::Rational) -> Self {
-        InfRational { rat, inf }
+        let inf = if rat.is_finite() { inf } else { rug::Rational::from(0) };
+
+        Self { rat, inf }
+    }
+
+    pub fn rational_part(&self) -> &Rational {
+        &self.rat
+    }
+
+    pub fn infinitesimal_part(&self) -> &rug::Rational {
+        &self.inf
+    }
+
+    pub fn into_parts(self) -> (Rational, rug::Rational) {
+        (self.rat, self.inf)
+    }
+}
+
+impl Default for InfRational {
+    fn default() -> Self {
+        Self::new(Rational::zero(), rug::Rational::from(0))
+    }
+}
+
+impl ops::Neg for InfRational {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self::new(-self.rat, -self.inf)
+    }
+}
+
+impl ops::Neg for &InfRational {
+    type Output = InfRational;
+
+    fn neg(self) -> Self::Output {
+        InfRational::new(-&self.rat, -self.inf.clone())
     }
 }
 
 impl ops::Add for InfRational {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self::Output {
-        InfRational { rat: self.rat + other.rat, inf: self.inf + other.inf }
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.rat + rhs.rat, self.inf + rhs.inf)
     }
 }
 
 impl ops::Add<&InfRational> for InfRational {
     type Output = Self;
 
-    fn add(self, other: &Self) -> Self::Output {
-        InfRational { rat: self.rat + &other.rat, inf: self.inf + &other.inf }
+    fn add(self, rhs: &InfRational) -> Self::Output {
+        Self::new(self.rat + &rhs.rat, self.inf + &rhs.inf)
+    }
+}
+
+impl ops::Add<InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn add(self, rhs: InfRational) -> Self::Output {
+        InfRational::new(&self.rat + rhs.rat, &self.inf + rhs.inf)
+    }
+}
+
+impl ops::Add<&InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn add(self, rhs: &InfRational) -> Self::Output {
+        InfRational::new(&self.rat + &rhs.rat, (&self.inf + &rhs.inf).complete())
     }
 }
 
 impl ops::AddAssign for InfRational {
-    fn add_assign(&mut self, other: Self) {
-        self.rat += other.rat;
-        self.inf += other.inf;
+    fn add_assign(&mut self, rhs: Self) {
+        self.rat += rhs.rat;
+        self.inf += rhs.inf;
+
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
+    }
+}
+
+impl ops::AddAssign<&InfRational> for InfRational {
+    fn add_assign(&mut self, rhs: &InfRational) {
+        self.rat += &rhs.rat;
+        self.inf += &rhs.inf;
+
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
     }
 }
 
 impl ops::Sub for InfRational {
     type Output = Self;
 
-    fn sub(self, other: Self) -> Self::Output {
-        InfRational { rat: self.rat - other.rat, inf: self.inf - other.inf }
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.rat - rhs.rat, self.inf - rhs.inf)
     }
 }
 
 impl ops::Sub<&InfRational> for InfRational {
     type Output = Self;
 
-    fn sub(self, other: &Self) -> Self::Output {
-        InfRational { rat: self.rat - &other.rat, inf: self.inf - &other.inf }
+    fn sub(self, rhs: &InfRational) -> Self::Output {
+        Self::new(self.rat - &rhs.rat, self.inf - &rhs.inf)
+    }
+}
+
+impl ops::Sub<InfRational> for &InfRational {
+    type Output = InfRational;
+
+    fn sub(self, rhs: InfRational) -> Self::Output {
+        InfRational::new(&self.rat - rhs.rat, &self.inf - rhs.inf)
     }
 }
 
 impl ops::Sub<&InfRational> for &InfRational {
     type Output = InfRational;
 
-    fn sub(self, other: &InfRational) -> Self::Output {
-        InfRational { rat: &self.rat - &other.rat, inf: self.inf.clone() - &other.inf }
+    fn sub(self, rhs: &InfRational) -> Self::Output {
+        InfRational::new(&self.rat - &rhs.rat, (&self.inf - &rhs.inf).complete())
     }
 }
 
-impl ops::Mul<&rug::Rational> for InfRational {
-    type Output = InfRational;
+impl ops::SubAssign for InfRational {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.rat -= rhs.rat;
+        self.inf -= rhs.inf;
 
-    fn mul(self, k: &rug::Rational) -> Self::Output {
-        InfRational { rat: self.rat * Rational::Finite(k.clone()), inf: self.inf * k.clone() }
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
+    }
+}
+
+impl ops::SubAssign<&InfRational> for InfRational {
+    fn sub_assign(&mut self, rhs: &InfRational) {
+        self.rat -= &rhs.rat;
+        self.inf -= &rhs.inf;
+
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
     }
 }
 
 impl ops::Mul<rug::Rational> for InfRational {
+    type Output = Self;
+
+    fn mul(self, rhs: rug::Rational) -> Self::Output {
+        self * &rhs
+    }
+}
+
+impl ops::Mul<&rug::Rational> for InfRational {
+    type Output = Self;
+
+    fn mul(mut self, rhs: &rug::Rational) -> Self::Output {
+        self.rat *= Rational::Finite(rhs.clone());
+        self.inf *= rhs;
+
+        Self::new(self.rat, self.inf)
+    }
+}
+
+impl ops::Mul<&rug::Rational> for &InfRational {
     type Output = InfRational;
 
-    fn mul(self, k: rug::Rational) -> Self::Output {
-        self * &k
+    fn mul(self, rhs: &rug::Rational) -> Self::Output {
+        InfRational::new(&self.rat * Rational::Finite(rhs.clone()), (&self.inf * rhs).complete())
+    }
+}
+
+impl ops::MulAssign<rug::Rational> for InfRational {
+    fn mul_assign(&mut self, rhs: rug::Rational) {
+        *self *= &rhs;
+    }
+}
+
+impl ops::MulAssign<&rug::Rational> for InfRational {
+    fn mul_assign(&mut self, rhs: &rug::Rational) {
+        self.rat *= Rational::Finite(rhs.clone());
+        self.inf *= rhs;
+
+        if !self.rat.is_finite() {
+            self.inf = rug::Rational::from(0);
+        }
     }
 }
 
