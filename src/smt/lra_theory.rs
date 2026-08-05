@@ -1,6 +1,6 @@
 use crate::smt::{
     rational::{InfRational, Rational},
-    sat::Lit,
+    sat_solver::Lit,
 };
 use rug::Rational as RugRational;
 use std::{

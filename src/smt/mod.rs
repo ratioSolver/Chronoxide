@@ -1,23 +1,26 @@
 pub mod ast;
-mod lra;
+mod enum_theory;
+mod lra_theory;
 mod proxy;
 mod rational;
-mod sat;
+mod sat_solver;
 
 use crate::smt::{
-    ast::{ArithExpr, BoolExpr},
-    lra::LraTheory,
+    ast::{ArithExpr, BoolExpr, EnumExpr, Expr},
+    enum_theory::EnumTheory,
+    lra_theory::LraTheory,
     proxy::ProxyRegistry,
     rational::{InfRational, Rational},
-    sat::SatSolver,
+    sat_solver::{Lit, SatSolver},
 };
 use rug::Assign;
 use std::collections::BTreeMap;
 
 pub struct SmtSolver {
     registry: ProxyRegistry,
-    sat: SatSolver,
-    lra: LraTheory,
+    sat_solver: SatSolver,
+    lra_theory: LraTheory,
+    enum_theory: EnumTheory,
     notified_len: usize,
 }
 
@@ -31,9 +34,155 @@ impl SmtSolver {
     pub fn new() -> Self {
         Self {
             registry: ProxyRegistry::new(),
-            sat: SatSolver::new(),
-            lra: LraTheory::new(),
+            sat_solver: SatSolver::new(),
+            lra_theory: LraTheory::new(),
+            enum_theory: EnumTheory::new(),
             notified_len: 0,
+        }
+    }
+
+    fn encode_bool(&mut self, expr: &BoolExpr) -> Lit {
+        match expr {
+            BoolExpr::True => self.sat_solver.true_lit(),
+            BoolExpr::False => !self.sat_solver.true_lit(),
+            BoolExpr::Var(v) => Lit::new(*v, true),
+            BoolExpr::Not(inner) => !self.encode_bool(inner),
+            BoolExpr::And(terms) => {
+                let mut lits = Vec::with_capacity(terms.len());
+                for term in terms {
+                    lits.push(self.encode_bool(term));
+                }
+
+                let proxy_var = self.sat_solver.mk_var();
+                let proxy_lit = Lit::new(proxy_var, true);
+
+                for &lit in &lits {
+                    self.sat_solver.add_clause(vec![!proxy_lit, lit]);
+                }
+
+                let mut big_clause: Vec<Lit> = lits.into_iter().map(|l| !l).collect();
+                big_clause.push(proxy_lit);
+                self.sat_solver.add_clause(big_clause);
+
+                proxy_lit
+            }
+            BoolExpr::Or(terms) => {
+                let mut lits = Vec::with_capacity(terms.len());
+                for term in terms {
+                    lits.push(self.encode_bool(term));
+                }
+
+                let proxy_var = self.sat_solver.mk_var();
+                let proxy_lit = Lit::new(proxy_var, true);
+
+                for &lit in &lits {
+                    self.sat_solver.add_clause(vec![!lit, proxy_lit]);
+                }
+
+                let mut big_clause = lits;
+                big_clause.push(!proxy_lit);
+                self.sat_solver.add_clause(big_clause);
+
+                proxy_lit
+            }
+            BoolExpr::Lt(e1, e2) => {
+                let proxy_expr = self.mk_le(e1, e2, true);
+                self.encode_bool(&proxy_expr)
+            }
+            BoolExpr::Le(e1, e2) => {
+                let proxy_expr = self.mk_le(e1, e2, false);
+                self.encode_bool(&proxy_expr)
+            }
+            BoolExpr::Ge(e1, e2) => {
+                let proxy_expr = self.mk_ge(e1, e2, false);
+                self.encode_bool(&proxy_expr)
+            }
+            BoolExpr::Gt(e1, e2) => {
+                let proxy_expr = self.mk_ge(e1, e2, true);
+                self.encode_bool(&proxy_expr)
+            }
+            BoolExpr::Eq(e1, e2) => {
+                self.encode_eq(e1, e2) // Vedi spiegazione sotto
+            }
+            BoolExpr::Lb(_, _) | BoolExpr::Ub(_, _) | BoolExpr::ArithEq(_, _) => {
+                let proxy = self.get_or_create_proxy(expr.clone());
+                self.encode_bool(&proxy)
+            }
+        }
+    }
+
+    fn encode_eq(&mut self, expr1: &Expr, expr2: &Expr) -> Lit {
+        match (expr1, expr2) {
+            (Expr::Arith(a1), Expr::Arith(a2)) => {
+                let proxy_expr = self.mk_arith_eq(a1, a2);
+                self.encode_bool(&proxy_expr)
+            }
+            (Expr::Bool(b1), Expr::Bool(b2)) => {
+                let l1 = self.encode_bool(b1);
+                let l2 = self.encode_bool(b2);
+
+                let proxy_var = self.sat_solver.mk_var();
+                let p = Lit::new(proxy_var, true);
+
+                self.sat_solver.add_clause(vec![!p, l1, !l2]).expect("Failed to add clause");
+                self.sat_solver.add_clause(vec![!p, !l1, l2]).expect("Failed to add clause");
+
+                self.sat_solver.add_clause(vec![p, l1, l2]).expect("Failed to add clause");
+                self.sat_solver.add_clause(vec![p, !l1, !l2]).expect("Failed to add clause");
+
+                p
+            }
+            (Expr::Enum(e1), Expr::Enum(e2)) => {
+                let proxy_expr = self.mk_enum_eq(e1, e2);
+                self.encode_bool(&proxy_expr)
+            }
+            _ => panic!("Type mismatch in Eq: cannot compare different domains.\nLeft: {:?}\nRight: {:?}", expr1, expr2),
+        }
+    }
+
+    pub fn mk_enum_eq(&mut self, e1: &EnumExpr, e2: &EnumExpr) -> BoolExpr {
+        match (e1, e2) {
+            (EnumExpr::Const(c1), EnumExpr::Const(c2)) => BoolExpr::from(c1 == c2),
+            (EnumExpr::Var(v), EnumExpr::Const(c)) | (EnumExpr::Const(c), EnumExpr::Var(v)) => {
+                let proxy_var = self.get_enum_proxy(*v, *c);
+                BoolExpr::Var(proxy_var)
+            }
+            (EnumExpr::Var(v1), EnumExpr::Var(v2)) => {
+                if v1 == v2 {
+                    return BoolExpr::True;
+                }
+
+                let domain1 = self.enum_theory.domains.get(v1).cloned().unwrap_or_default();
+                let domain2 = self.enum_theory.domains.get(v2).cloned().unwrap_or_default();
+
+                let common_values: Vec<i32> = domain1.intersection(&domain2).copied().collect();
+
+                if common_values.is_empty() {
+                    return BoolExpr::False;
+                }
+
+                let mut or_terms = Vec::with_capacity(common_values.len());
+                for val in common_values {
+                    let p1 = self.get_enum_proxy(*v1, val);
+                    let p2 = self.get_enum_proxy(*v2, val);
+
+                    or_terms.push(BoolExpr::And(vec![BoolExpr::Var(p1), BoolExpr::Var(p2)]));
+                }
+
+                BoolExpr::Or(or_terms)
+            }
+        }
+    }
+
+    fn get_enum_proxy(&mut self, var: usize, val: i32) -> usize {
+        self.enum_theory.register_domain_value(var, val);
+
+        if let Some(&proxy) = self.enum_theory.var_eq_const_proxies.get(&(var, val)) {
+            proxy
+        } else {
+            let new_proxy = self.sat_solver.mk_var();
+            self.enum_theory.var_eq_const_proxies.insert((var, val), new_proxy);
+            new_proxy
         }
     }
 
@@ -174,7 +323,7 @@ impl SmtSolver {
     }
 
     fn accumulate_var(&self, var: usize, scale: &rug::Rational, vars: &mut BTreeMap<usize, rug::Rational>, temp: &mut rug::Rational) {
-        if let Some(basic_row) = self.lra.tableau.get(&var) {
+        if let Some(basic_row) = self.lra_theory.tableau.get(&var) {
             for (&sub_var, sub_coeff) in basic_row {
                 let entry = vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0));
                 temp.assign(sub_coeff * scale);
@@ -186,17 +335,17 @@ impl SmtSolver {
     }
 
     fn get_or_create_slack(&mut self, vars: BTreeMap<usize, rug::Rational>) -> usize {
-        if let Some(&slack) = self.lra.lin_to_slack.get(&vars) {
+        if let Some(&slack) = self.lra_theory.lin_to_slack.get(&vars) {
             slack
         } else {
-            let slack = self.lra.mk_real();
-            self.lra.tableau.insert(slack, vars.clone());
+            let slack = self.lra_theory.mk_real();
+            self.lra_theory.tableau.insert(slack, vars.clone());
 
             for &var in vars.keys() {
-                self.lra.t_watches[var].insert(slack);
+                self.lra_theory.t_watches[var].insert(slack);
             }
 
-            self.lra.lin_to_slack.insert(vars, slack);
+            self.lra_theory.lin_to_slack.insert(vars, slack);
             slack
         }
     }
@@ -205,17 +354,17 @@ impl SmtSolver {
         if let Some(&sat_var) = self.registry.get_proxy(&bound) {
             BoolExpr::Var(sat_var)
         } else {
-            let sat_var = self.sat.mk_var();
+            let sat_var = self.sat_solver.mk_var();
             self.registry.register_proxy(bound, sat_var);
             BoolExpr::Var(sat_var)
         }
     }
 
     pub fn propagate(&mut self) -> Result<(), Vec<BoolExpr>> {
-        if let Err((bt_level, conflict_clause)) = self.sat.propagate() {
-            self.sat.cancel_until(bt_level);
-            self.lra.cancel_until(bt_level);
-            self.notified_len = self.sat.trail.len();
+        if let Err((bt_level, conflict_clause)) = self.sat_solver.propagate() {
+            self.sat_solver.cancel_until(bt_level);
+            self.lra_theory.cancel_until(bt_level);
+            self.notified_len = self.sat_solver.trail.len();
             let conflict_clause = conflict_clause
                 .into_iter()
                 .map(|lit| {
@@ -226,15 +375,15 @@ impl SmtSolver {
             return Err(conflict_clause);
         }
 
-        while self.notified_len < self.sat.trail.len() {
-            let lit = self.sat.trail[self.notified_len];
+        while self.notified_len < self.sat_solver.trail.len() {
+            let lit = self.sat_solver.trail[self.notified_len];
             if let Some(expr) = self.registry.get_ast(lit)
                 && let Err(lemma) = match expr {
                     BoolExpr::Ub(var, bound) => {
-                        if !self.lra.set_ub(Some(lit), *var, bound.clone()) {
+                        if !self.lra_theory.set_ub(Some(lit), *var, bound.clone()) {
                             let mut lemma = Vec::with_capacity(2);
                             lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra.lbs[*var].0 {
+                            if let Some(guard_lit) = self.lra_theory.lbs[*var].0 {
                                 lemma.push(!guard_lit);
                             }
                             Err(lemma)
@@ -243,17 +392,17 @@ impl SmtSolver {
                         }
                     }
                     BoolExpr::ArithEq(var, val) => {
-                        if !self.lra.set_lb(Some(lit), *var, val.clone()) {
+                        if !self.lra_theory.set_lb(Some(lit), *var, val.clone()) {
                             let mut lemma = Vec::with_capacity(2);
                             lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra.ubs[*var].0 {
+                            if let Some(guard_lit) = self.lra_theory.ubs[*var].0 {
                                 lemma.push(!guard_lit);
                             }
                             Err(lemma)
-                        } else if !self.lra.set_ub(Some(lit), *var, val.clone()) {
+                        } else if !self.lra_theory.set_ub(Some(lit), *var, val.clone()) {
                             let mut lemma = Vec::with_capacity(2);
                             lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra.lbs[*var].0 {
+                            if let Some(guard_lit) = self.lra_theory.lbs[*var].0 {
                                 lemma.push(!guard_lit);
                             }
                             Err(lemma)
@@ -262,10 +411,10 @@ impl SmtSolver {
                         }
                     }
                     BoolExpr::Lb(var, bound) => {
-                        if !self.lra.set_lb(Some(lit), *var, bound.clone()) {
+                        if !self.lra_theory.set_lb(Some(lit), *var, bound.clone()) {
                             let mut lemma = Vec::with_capacity(2);
                             lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra.ubs[*var].0 {
+                            if let Some(guard_lit) = self.lra_theory.ubs[*var].0 {
                                 lemma.push(!guard_lit);
                             }
                             Err(lemma)
@@ -288,7 +437,7 @@ impl SmtSolver {
             self.notified_len += 1;
         }
 
-        if let Err(conflict_clause) = self.lra.check() {
+        if let Err(conflict_clause) = self.lra_theory.check() {
             let conflict_clause = conflict_clause
                 .into_iter()
                 .map(|lit| {

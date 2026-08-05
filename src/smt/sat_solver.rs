@@ -13,11 +13,12 @@ pub(super) struct SatSolver {
     pub(super) trail: Vec<Lit>, // Trail of assigned literals for backtracking
     trail_lim: Vec<usize>,      // Indices in the trail where decisions were made
     level: Vec<Option<usize>>,  // Decision level for each variable
+    true_var: usize,            // Index of the variable representing the constant true (used for unit propagation)
 }
 
 impl SatSolver {
     pub(super) fn new() -> Self {
-        SatSolver {
+        let mut sat = SatSolver {
             assigns: Vec::new(),
             clauses: Vec::new(),
             watches: Vec::new(),
@@ -26,7 +27,19 @@ impl SatSolver {
             trail: Vec::new(),
             trail_lim: Vec::new(),
             level: Vec::new(),
-        }
+            true_var: 0,
+        };
+        sat.true_var = sat.mk_var();
+        sat.add_clause([Lit::new(sat.true_var, false)]).expect("Should be able to add true clause");
+        sat
+    }
+
+    pub fn true_lit(&self) -> Lit {
+        Lit::new(self.true_var, false)
+    }
+
+    pub fn false_lit(&self) -> Lit {
+        !self.true_lit()
     }
 
     pub(super) fn mk_var(&mut self) -> usize {
