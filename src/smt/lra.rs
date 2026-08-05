@@ -181,11 +181,10 @@ impl LraTheory {
                                 if let Some(guard_lit) = self.ubs[*vr].0 {
                                     conflict.push(!guard_lit);
                                 }
-                            } else if vl.is_negative() {
-                                if let Some(guard_lit) = self.lbs[*vr].0 {
+                            } else if vl.is_negative()
+                                && let Some(guard_lit) = self.lbs[*vr].0 {
                                     conflict.push(!guard_lit);
                                 }
-                            }
                         }
                         if let Some(guard_lit) = self.lbs[leaving].0 {
                             conflict.push(!guard_lit);
@@ -204,11 +203,10 @@ impl LraTheory {
                                 if let Some(guard_lit) = self.lbs[*vr].0 {
                                     conflict.push(!guard_lit);
                                 }
-                            } else if vl.is_negative() {
-                                if let Some(guard_lit) = self.ubs[*vr].0 {
+                            } else if vl.is_negative()
+                                && let Some(guard_lit) = self.ubs[*vr].0 {
                                     conflict.push(!guard_lit);
                                 }
-                            }
                         }
                         if let Some(guard_lit) = self.ubs[leaving].0 {
                             conflict.push(!guard_lit);
