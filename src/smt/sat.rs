@@ -296,8 +296,6 @@ impl fmt::Display for Clause {
 
 #[cfg(test)]
 mod tests {
-    use tracing::{Level, subscriber};
-
     use super::*;
 
     #[test]
