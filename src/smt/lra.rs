@@ -94,9 +94,7 @@ impl LraTheory {
             return false;
         }
 
-        let (Some(c_lit), val) = self.lbs[var].clone() else {
-            panic!("lower bound should have a guard literal");
-        };
+        let (c_lit, val) = self.lbs[var].clone();
         self.bound_trail.push(BoundUpdate::LowerBound { lit: c_lit, var, val });
 
         self.lbs[var] = (Some(lit), new_lb.clone());
@@ -119,9 +117,7 @@ impl LraTheory {
             return false;
         }
 
-        let (Some(c_lit), val) = self.ubs[var].clone() else {
-            panic!("upper bound should have a guard literal");
-        };
+        let (c_lit, val) = self.ubs[var].clone();
         self.bound_trail.push(BoundUpdate::UpperBound { lit: c_lit, var, val });
 
         self.ubs[var] = (Some(lit), new_ub.clone());
@@ -182,12 +178,18 @@ impl LraTheory {
                         let mut conflict = Vec::new();
                         for (vr, vl) in &self.tableau[&leaving] {
                             if vl.is_positive() {
-                                conflict.push(self.ubs[*vr].0.expect("upper bound should have a guard literal"));
+                                if let Some(guard_lit) = self.ubs[*vr].0 {
+                                    conflict.push(!guard_lit);
+                                }
                             } else if vl.is_negative() {
-                                conflict.push(self.lbs[*vr].0.expect("lower bound should have a guard literal"));
+                                if let Some(guard_lit) = self.lbs[*vr].0 {
+                                    conflict.push(!guard_lit);
+                                }
                             }
                         }
-                        conflict.push(self.lbs[leaving].0.expect("lower bound should have a guard literal"));
+                        if let Some(guard_lit) = self.lbs[leaving].0 {
+                            conflict.push(!guard_lit);
+                        }
                         return Err(conflict);
                     }
                 }
@@ -199,12 +201,18 @@ impl LraTheory {
                         let mut conflict = Vec::new();
                         for (vr, vl) in &self.tableau[&leaving] {
                             if vl.is_positive() {
-                                conflict.push(self.lbs[*vr].0.expect("lower bound should have a guard literal"));
+                                if let Some(guard_lit) = self.lbs[*vr].0 {
+                                    conflict.push(!guard_lit);
+                                }
                             } else if vl.is_negative() {
-                                conflict.push(self.ubs[*vr].0.expect("upper bound should have a guard literal"));
+                                if let Some(guard_lit) = self.ubs[*vr].0 {
+                                    conflict.push(!guard_lit);
+                                }
                             }
                         }
-                        conflict.push(self.ubs[leaving].0.expect("upper bound should have a guard literal"));
+                        if let Some(guard_lit) = self.ubs[leaving].0 {
+                            conflict.push(!guard_lit);
+                        }
                         return Err(conflict);
                     }
                 }
@@ -334,10 +342,10 @@ impl LraTheory {
 
             match update {
                 BoundUpdate::LowerBound { lit, var, val } => {
-                    self.lbs[var] = (Some(lit), val);
+                    self.lbs[var] = (lit, val);
                 }
                 BoundUpdate::UpperBound { lit, var, val } => {
-                    self.ubs[var] = (Some(lit), val);
+                    self.ubs[var] = (lit, val);
                 }
             }
         }
@@ -347,6 +355,6 @@ impl LraTheory {
 }
 
 enum BoundUpdate {
-    LowerBound { lit: Lit, var: usize, val: InfRational },
-    UpperBound { lit: Lit, var: usize, val: InfRational },
+    LowerBound { lit: Option<Lit>, var: usize, val: InfRational },
+    UpperBound { lit: Option<Lit>, var: usize, val: InfRational },
 }
