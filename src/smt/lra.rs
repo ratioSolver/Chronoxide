@@ -15,7 +15,7 @@ pub(super) struct LraTheory {
     pub(super) ubs: Vec<(Option<Lit>, InfRational)>,                       // Current upper bounds
     pub(super) lin_to_slack: HashMap<BTreeMap<usize, RugRational>, usize>, // Mapping from linear constraints to their slack variable
     pub(super) tableau: BTreeMap<usize, BTreeMap<usize, RugRational>>,     // Tableau: basic variable -> linear expression over non-basic variables
-    t_watches: Vec<HashSet<usize>>,                                        // For each variable, the set of tableau rows containing it
+    pub(super) t_watches: Vec<HashSet<usize>>,                             // For each variable, the set of tableau rows containing it
     bound_trail: Vec<BoundUpdate>,                                         // Trail of bound updates for backtracking
     trail_lim: Vec<usize>,                                                 // Trail limits
 }
