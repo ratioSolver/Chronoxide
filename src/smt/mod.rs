@@ -85,71 +85,56 @@ impl SmtSolver {
 
                 proxy_lit
             }
-            BoolExpr::Lt(e1, e2) => {
-                let proxy_expr = self.mk_le(e1, e2, true);
-                self.encode_bool(&proxy_expr)
-            }
-            BoolExpr::Le(e1, e2) => {
-                let proxy_expr = self.mk_le(e1, e2, false);
-                self.encode_bool(&proxy_expr)
-            }
-            BoolExpr::Ge(e1, e2) => {
-                let proxy_expr = self.mk_ge(e1, e2, false);
-                self.encode_bool(&proxy_expr)
-            }
-            BoolExpr::Gt(e1, e2) => {
-                let proxy_expr = self.mk_ge(e1, e2, true);
-                self.encode_bool(&proxy_expr)
-            }
+            BoolExpr::Lt(e1, e2) => self.mk_le(e1, e2, true),
+            BoolExpr::Le(e1, e2) => self.mk_le(e1, e2, false),
+            BoolExpr::Ge(e1, e2) => self.mk_ge(e1, e2, false),
+            BoolExpr::Gt(e1, e2) => self.mk_ge(e1, e2, true),
             BoolExpr::Eq(e1, e2) => {
                 self.encode_eq(e1, e2) // Vedi spiegazione sotto
             }
-            BoolExpr::Lb(_, _) | BoolExpr::Ub(_, _) | BoolExpr::ArithEq(_, _) => {
-                let proxy = self.get_or_create_proxy(expr.clone());
-                self.encode_bool(&proxy)
-            }
+            BoolExpr::Lb(_, _) | BoolExpr::Ub(_, _) | BoolExpr::ArithEq(_, _) => self.get_or_create_proxy(expr.clone()),
         }
     }
 
     fn encode_eq(&mut self, expr1: &Expr, expr2: &Expr) -> Lit {
         match (expr1, expr2) {
-            (Expr::Arith(a1), Expr::Arith(a2)) => {
-                let proxy_expr = self.mk_arith_eq(a1, a2);
-                self.encode_bool(&proxy_expr)
-            }
+            (Expr::Arith(a1), Expr::Arith(a2)) => self.mk_arith_eq(a1, a2),
             (Expr::Bool(b1), Expr::Bool(b2)) => {
                 let l1 = self.encode_bool(b1);
                 let l2 = self.encode_bool(b2);
-
                 let proxy_var = self.sat_solver.mk_var();
                 let p = Lit::new(proxy_var, true);
 
                 self.sat_solver.add_clause(vec![!p, l1, !l2]).expect("Failed to add clause");
                 self.sat_solver.add_clause(vec![!p, !l1, l2]).expect("Failed to add clause");
-
                 self.sat_solver.add_clause(vec![p, l1, l2]).expect("Failed to add clause");
                 self.sat_solver.add_clause(vec![p, !l1, !l2]).expect("Failed to add clause");
 
                 p
             }
-            (Expr::Enum(e1), Expr::Enum(e2)) => {
-                let proxy_expr = self.mk_enum_eq(e1, e2);
-                self.encode_bool(&proxy_expr)
-            }
+            (Expr::Enum(e1), Expr::Enum(e2)) => self.mk_enum_eq(e1, e2),
             _ => panic!("Type mismatch in Eq: cannot compare different domains.\nLeft: {:?}\nRight: {:?}", expr1, expr2),
         }
     }
 
-    pub fn mk_enum_eq(&mut self, e1: &EnumExpr, e2: &EnumExpr) -> BoolExpr {
+    fn mk_enum_eq(&mut self, e1: &EnumExpr, e2: &EnumExpr) -> Lit {
         match (e1, e2) {
-            (EnumExpr::Const(c1), EnumExpr::Const(c2)) => BoolExpr::from(c1 == c2),
+            (EnumExpr::Const(c1), EnumExpr::Const(c2)) => {
+                if c1 == c2 {
+                    self.sat_solver.true_lit()
+                } else {
+                    !self.sat_solver.true_lit()
+                }
+            }
+
             (EnumExpr::Var(v), EnumExpr::Const(c)) | (EnumExpr::Const(c), EnumExpr::Var(v)) => {
                 let proxy_var = self.get_enum_proxy(*v, *c);
-                BoolExpr::Var(proxy_var)
+                Lit::new(proxy_var, true)
             }
+
             (EnumExpr::Var(v1), EnumExpr::Var(v2)) => {
                 if v1 == v2 {
-                    return BoolExpr::True;
+                    return self.sat_solver.true_lit();
                 }
 
                 let domain1 = self.enum_theory.domains.get(v1).cloned().unwrap_or_default();
@@ -158,7 +143,7 @@ impl SmtSolver {
                 let common_values: Vec<i32> = domain1.intersection(&domain2).copied().collect();
 
                 if common_values.is_empty() {
-                    return BoolExpr::False;
+                    return !self.sat_solver.true_lit();
                 }
 
                 let mut or_terms = Vec::with_capacity(common_values.len());
@@ -169,7 +154,8 @@ impl SmtSolver {
                     or_terms.push(BoolExpr::And(vec![BoolExpr::Var(p1), BoolExpr::Var(p2)]));
                 }
 
-                BoolExpr::Or(or_terms)
+                let or_expr = BoolExpr::Or(or_terms);
+                self.encode_bool(&or_expr)
             }
         }
     }
@@ -186,11 +172,17 @@ impl SmtSolver {
         }
     }
 
-    fn mk_le(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
+    fn mk_le(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> Lit {
         let (vars, const_term) = self.diff(e1, e2);
 
         match vars.len() {
-            0 => BoolExpr::from(if strict { const_term.is_negative() } else { const_term.is_negative() || const_term.is_zero() }),
+            0 => {
+                if if strict { const_term.is_negative() } else { const_term.is_negative() || const_term.is_zero() } {
+                    self.sat_solver.true_lit()
+                } else {
+                    self.sat_solver.false_lit()
+                }
+            }
             1 => {
                 let (&var, coeff) = vars.iter().next().unwrap();
                 let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
@@ -207,14 +199,20 @@ impl SmtSolver {
         }
     }
 
-    fn mk_arith_eq(&mut self, e1: &ArithExpr, e2: &ArithExpr) -> BoolExpr {
+    fn mk_arith_eq(&mut self, e1: &ArithExpr, e2: &ArithExpr) -> Lit {
         if e1 == e2 {
-            return BoolExpr::True;
+            return self.sat_solver.true_lit();
         }
         let (vars, const_term) = self.diff(e1, e2);
 
         match vars.len() {
-            0 => BoolExpr::from(const_term.is_zero()),
+            0 => {
+                if const_term.is_zero() {
+                    self.sat_solver.true_lit()
+                } else {
+                    self.sat_solver.false_lit()
+                }
+            }
             1 => {
                 let (&var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), rug::Rational::from(0));
@@ -228,11 +226,17 @@ impl SmtSolver {
         }
     }
 
-    fn mk_ge(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> BoolExpr {
+    fn mk_ge(&mut self, e1: &ArithExpr, e2: &ArithExpr, strict: bool) -> Lit {
         let (vars, const_term) = self.diff(e1, e2);
 
         match vars.len() {
-            0 => BoolExpr::from(if strict { const_term.is_positive() } else { const_term.is_positive() || const_term.is_zero() }),
+            0 => {
+                if if strict { const_term.is_positive() } else { const_term.is_positive() || const_term.is_zero() } {
+                    self.sat_solver.true_lit()
+                } else {
+                    self.sat_solver.false_lit()
+                }
+            }
             1 => {
                 let (&var, coeff) = vars.iter().next().unwrap();
                 let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
@@ -350,13 +354,13 @@ impl SmtSolver {
         }
     }
 
-    fn get_or_create_proxy(&mut self, bound: BoolExpr) -> BoolExpr {
+    fn get_or_create_proxy(&mut self, bound: BoolExpr) -> Lit {
         if let Some(&sat_var) = self.registry.get_proxy(&bound) {
-            BoolExpr::Var(sat_var)
+            Lit::new(sat_var, false)
         } else {
             let sat_var = self.sat_solver.mk_var();
             self.registry.register_proxy(bound, sat_var);
-            BoolExpr::Var(sat_var)
+            Lit::new(sat_var, false)
         }
     }
 
