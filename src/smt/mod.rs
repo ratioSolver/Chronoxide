@@ -243,50 +243,51 @@ impl SmtSolver {
                 if c1 == c2 {
                     self.sat_solver.true_lit()
                 } else {
-                    !self.sat_solver.true_lit()
+                    self.sat_solver.false_lit()
                 }
             }
-
-            (EnumExpr::Var(v), EnumExpr::Const(c)) | (EnumExpr::Const(c), EnumExpr::Var(v)) => {
-                let proxy_var = self.get_enum_proxy(*v, *c);
-                Lit::new(proxy_var, true)
-            }
-
+            (EnumExpr::Var(v), EnumExpr::Const(c)) | (EnumExpr::Const(c), EnumExpr::Var(v)) => self.get_or_create_proxy(TheoryConstraint::EnumEq(*v, *c)),
             (EnumExpr::Var(v1), EnumExpr::Var(v2)) => {
                 if v1 == v2 {
                     return self.sat_solver.true_lit();
                 }
 
-                let domain1 = self.enum_theory.domains.get(*v1).cloned().unwrap_or_default();
-                let domain2 = self.enum_theory.domains.get(*v2).cloned().unwrap_or_default();
+                let domain1 = self.enum_theory.initial_domains[*v1].clone();
+                let domain2 = self.enum_theory.initial_domains[*v2].clone();
+                let common: Vec<i32> = domain1.intersection(&domain2).copied().collect();
 
-                let common_values: Vec<i32> = domain1.intersection(&domain2).copied().collect();
-
-                if common_values.is_empty() {
-                    return !self.sat_solver.true_lit();
+                if common.is_empty() {
+                    return self.sat_solver.false_lit();
                 }
 
-                let mut or_terms = Vec::with_capacity(common_values.len());
-                for val in common_values {
-                    let p1 = self.get_enum_proxy(*v1, val);
-                    let p2 = self.get_enum_proxy(*v2, val);
+                let mut lits = Vec::with_capacity(common.len());
+                for val in common {
+                    let p1 = self.get_or_create_proxy(TheoryConstraint::EnumEq(*v1, val));
+                    let p2 = self.get_or_create_proxy(TheoryConstraint::EnumEq(*v2, val));
 
-                    or_terms.push(BoolExpr::And(vec![BoolExpr::Var(p1), BoolExpr::Var(p2)]));
+                    let and_proxy_var = self.sat_solver.mk_var();
+                    let and_proxy = Lit::new(and_proxy_var, false);
+
+                    self.sat_solver.add_clause(vec![!and_proxy, p1]).unwrap();
+                    self.sat_solver.add_clause(vec![!and_proxy, p2]).unwrap();
+                    self.sat_solver.add_clause(vec![!p1, !p2, and_proxy]).unwrap();
+
+                    lits.push(and_proxy);
                 }
 
-                let or_expr = BoolExpr::Or(or_terms);
-                self.encode_bool(&or_expr)
+                let or_proxy_var = self.sat_solver.mk_var();
+                let or_proxy = Lit::new(or_proxy_var, false);
+
+                for &lit in &lits {
+                    self.sat_solver.add_clause(vec![!lit, or_proxy]).unwrap();
+                }
+
+                let mut big_clause = lits;
+                big_clause.push(!or_proxy);
+                self.sat_solver.add_clause(big_clause).unwrap();
+
+                or_proxy
             }
-        }
-    }
-
-    fn get_enum_proxy(&mut self, var: usize, val: i32) -> usize {
-        if let Some(&proxy) = self.enum_theory.var_eq_const_proxies.get(&(var, val)) {
-            proxy
-        } else {
-            let new_proxy = self.sat_solver.mk_var();
-            self.enum_theory.var_eq_const_proxies.insert((var, val), new_proxy);
-            new_proxy
         }
     }
 
@@ -481,6 +482,7 @@ impl SmtSolver {
     pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
         self.sat_solver.push();
         self.lra_theory.push();
+        self.enum_theory.push();
         self.sat_solver.enqueue_decision(lit);
         self.propagate()
     }
@@ -489,6 +491,7 @@ impl SmtSolver {
         if let Err((bt_level, conflict)) = self.sat_solver.propagate() {
             self.sat_solver.cancel_until(bt_level);
             self.lra_theory.cancel_until(bt_level);
+            self.enum_theory.cancel_until(bt_level);
             self.notified_len = self.sat_solver.trail.len();
             return Err(Self::build_conflict(conflict));
         }
@@ -502,7 +505,8 @@ impl SmtSolver {
                     (TheoryConstraint::LraLb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(-1) })),
                     (TheoryConstraint::LraLb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()),
                     (TheoryConstraint::LraUb(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_negative() { rug::Rational::from(0) } else { rug::Rational::from(1) })),
-                    _ => panic!("Unexpected constraint type or polarity in propagation"),
+                    (TheoryConstraint::EnumEq(var, val), false) => self.enum_theory.set_eq(Some(lit), *var, *val, true),
+                    (TheoryConstraint::EnumEq(var, val), true) => self.enum_theory.set_eq(Some(lit), *var, *val, false),
                 };
 
                 if let Err(lemma) = theory_result {
