@@ -1,4 +1,3 @@
-use crate::smt::rational::InfRational;
 use std::{fmt, ops};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,9 +39,9 @@ pub enum BoolExpr {
     Or(Vec<BoolExpr>),
     Lt(ArithExpr, ArithExpr),
     Le(ArithExpr, ArithExpr),
-    Eq(Box<Expr>, Box<Expr>),
     Ge(ArithExpr, ArithExpr),
     Gt(ArithExpr, ArithExpr),
+    Eq(Box<Expr>, Box<Expr>),
 }
 
 impl From<bool> for BoolExpr {
@@ -76,9 +75,9 @@ impl fmt::Display for BoolExpr {
             }
             BoolExpr::Lt(a1, a2) => write!(f, "{} < {}", a1, a2),
             BoolExpr::Le(a1, a2) => write!(f, "{} ≤ {}", a1, a2),
-            BoolExpr::Eq(e1, e2) => write!(f, "{} = {}", e1, e2),
             BoolExpr::Ge(a1, a2) => write!(f, "{} ≥ {}", a1, a2),
             BoolExpr::Gt(a1, a2) => write!(f, "{} > {}", a1, a2),
+            BoolExpr::Eq(e1, e2) => write!(f, "{} = {}", e1, e2),
         }
     }
 }

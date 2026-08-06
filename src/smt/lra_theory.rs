@@ -383,10 +383,6 @@ impl SparseRow {
         self.terms.binary_search_by_key(var, |&(v, _)| v).ok().map(|idx| &self.terms[idx].1)
     }
 
-    pub fn get_mut(&mut self, var: &usize) -> Option<&mut RugRational> {
-        self.terms.binary_search_by_key(var, |&(v, _)| v).ok().map(|idx| &mut self.terms[idx].1)
-    }
-
     pub fn insert(&mut self, var: usize, coeff: RugRational) {
         match self.terms.binary_search_by_key(&var, |&(v, _)| v) {
             Ok(idx) => self.terms[idx].1 = coeff,
