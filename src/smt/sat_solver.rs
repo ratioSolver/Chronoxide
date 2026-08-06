@@ -5,15 +5,17 @@ use std::{
 use tracing::trace;
 
 pub(super) struct SatSolver {
-    assigns: Vec<Option<bool>>, // Current assignments of boolean variables (None = unassigned, Some(true/false) = assigned)
-    clauses: Vec<Clause>,       // List of clauses in the solver
-    watches: Vec<Vec<usize>>,   // Watch lists for each literal (positive and negative)
-    reason: Vec<Option<usize>>, // Reason for each variable's assignment
-    prop_q: VecDeque<Lit>,      // Queue of literals to propagate
-    pub(super) trail: Vec<Lit>, // Trail of assigned literals for backtracking
-    trail_lim: Vec<usize>,      // Indices in the trail where decisions were made
-    level: Vec<Option<usize>>,  // Decision level for each variable
-    true_var: usize,            // Index of the variable representing the constant true (used for unit propagation)
+    assigns: Vec<Option<bool>>,  // Current assignments of boolean variables (None = unassigned, Some(true/false) = assigned)
+    clauses: Vec<Clause>,        // List of clauses in the solver
+    watches: Vec<Vec<usize>>,    // Watch lists for each literal (positive and negative)
+    reason: Vec<Option<usize>>,  // Reason for each variable's assignment
+    seen: Vec<bool>,             // Temporary storage for conflict analysis
+    analyze_toclear: Vec<usize>, // Temporary storage for conflict analysis
+    prop_q: VecDeque<Lit>,       // Queue of literals to propagate
+    pub(super) trail: Vec<Lit>,  // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,       // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,   // Decision level for each variable
+    true_var: usize,             // Index of the variable representing the constant true (used for unit propagation)
 }
 
 impl SatSolver {
@@ -23,6 +25,8 @@ impl SatSolver {
             clauses: Vec::new(),
             watches: Vec::new(),
             reason: Vec::new(),
+            seen: Vec::new(),
+            analyze_toclear: Vec::new(),
             prop_q: VecDeque::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -48,6 +52,7 @@ impl SatSolver {
         self.watches.push(Vec::new());
         self.watches.push(Vec::new()); // For the negated literal
         self.reason.push(None);
+        self.seen.push(false);
         self.level.push(None);
         idx
     }
@@ -106,56 +111,100 @@ impl SatSolver {
         Ok(())
     }
 
-    fn analyze_conflict(&mut self, mut clause_idx: usize) -> (usize, Vec<Lit>) {
-        let mut seen: HashSet<usize> = HashSet::new();
-        let mut counter: usize = 0;
-        let mut p: Option<(Lit, Option<usize>)> = None;
-        let mut learnt = Vec::new();
-        learnt.push(Lit::new(0, false)); // Placeholder for the asserting literal
-        let mut backtrack_level: usize = 0;
+    fn analyze_conflict(&mut self, mut confl: usize) -> (usize, Vec<Lit>) {
+        let mut path_c = 0;
+        let mut p_lit = None; // Option<Lit>
+        let mut learnt = vec![Lit::new(0, false)];
+        let mut index = self.trail.len();
+
+        self.analyze_toclear.clear();
 
         loop {
-            // 1. Process the current clause (either the conflict or a reason)
-            for lit in &self.clauses[clause_idx].lits {
-                // Skip the variable we are currently resolving away
-                if Some(lit.var()) == p.map(|l| l.0.var()) {
-                    continue;
-                }
+            let clause = &self.clauses[confl];
+            let start_idx = if p_lit.is_none() { 0 } else { 1 };
 
-                if !seen.contains(&lit.var()) {
-                    seen.insert(lit.var());
-                    if self.level(lit.var()).expect("Variable should have a level") == self.decision_level() {
-                        counter += 1;
+            for j in start_idx..clause.lits.len() {
+                let q = clause.lits[j];
+                let var = q.var();
+
+                if !self.seen[var] && self.level(var).unwrap_or(0) > 0 {
+                    self.seen[var] = true;
+                    self.analyze_toclear.push(var);
+
+                    if self.level(var).unwrap_or(0) >= self.decision_level() {
+                        path_c += 1;
                     } else {
-                        // This literal comes from a previous decision level
-                        learnt.push(*lit);
-                        backtrack_level = backtrack_level.max(self.level(lit.var()).expect("Variable should have a level"));
+                        learnt.push(q);
                     }
                 }
             }
 
-            // 2. Find the next variable from the trail assigned at this level
-            p = loop {
-                let lit = *self.trail.last().expect("There should be a literal");
-                let reason = self.reason[lit.var()];
-                self.undo_one();
-                if seen.contains(&lit.var()) {
-                    break Some((lit, reason));
+            loop {
+                index -= 1;
+                if self.seen[self.trail[index].var()] {
+                    break;
                 }
-            };
-            counter -= 1;
-
-            if counter == 0 {
-                // 3. We have found the asserting literal
-                learnt[0] = !p.expect("There should be a literal").0;
-                break;
             }
 
-            // 4. Update clause to the reason of the variable we just resolved away
-            clause_idx = p.expect("There should be a literal").1.expect("There should be a reason");
+            let next_p = self.trail[index];
+            p_lit = Some(next_p);
+            confl = self.reason[next_p.var()].unwrap_or_default();
+            self.seen[next_p.var()] = false; 
+            path_c -= 1;
+
+            if path_c == 0 {
+                break;
+            }
         }
 
-        (backtrack_level, learnt)
+        learnt[0] = !p_lit.unwrap();
+
+        let mut j = 1;
+        for i in 1..learnt.len() {
+            let var = learnt[i].var();
+            let mut redundant = false;
+
+            if let Some(reason_idx) = self.reason[var] {
+                redundant = true;
+                let c = &self.clauses[reason_idx];
+                for k in 1..c.lits.len() {
+                    let v = c.lits[k].var();
+                    if !self.seen[v] && self.level(v).unwrap_or(0) > 0 {
+                        redundant = false; // C'è una dipendenza esterna
+                        break;
+                    }
+                }
+            }
+
+            if !redundant {
+                learnt[j] = learnt[i];
+                j += 1;
+            }
+        }
+        learnt.truncate(j);
+
+        let mut bt_level = 0;
+        if learnt.len() > 1 {
+            let mut max_i = 1;
+            let mut max_level = self.level(learnt[1].var()).unwrap_or(0);
+
+            for i in 2..learnt.len() {
+                let l = self.level(learnt[i].var()).unwrap_or(0);
+                if l > max_level {
+                    max_level = l;
+                    max_i = i;
+                }
+            }
+
+            learnt.swap(1, max_i);
+            bt_level = max_level;
+        }
+
+        for &var in &self.analyze_toclear {
+            self.seen[var] = false;
+        }
+
+        (bt_level, learnt)
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<usize>) -> bool {
@@ -172,6 +221,7 @@ impl SatSolver {
             Some(value) => value,
         }
     }
+
     pub(super) fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
         let mut simplified_lits = Vec::new();
 
@@ -216,9 +266,12 @@ impl SatSolver {
                     self.watches[lit.index()].push(clause_index);
                 }
                 self.clauses.push(clause);
-
-                if self.lit_value(&simplified_lits[0]).is_none() && self.lit_value(&simplified_lits[1]) == Some(false) && !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                if self.lit_value(&simplified_lits[0]) == Some(false) {
                     return Err(simplified_lits);
+                } else if self.lit_value(&simplified_lits[1]) == Some(false) {
+                    if !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                        return Err(simplified_lits);
+                    }
                 }
             }
         }
