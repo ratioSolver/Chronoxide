@@ -92,12 +92,11 @@ impl EnumTheory {
                 }
 
                 for &v in &self.initial_domains[var] {
-                    if v != val {
-                        if let Some(&reason) = self.removal_reasons.get(&(var, v)) {
-                            if !conflict.contains(&!reason) {
-                                conflict.push(!reason);
-                            }
-                        }
+                    if v != val
+                        && let Some(&reason) = self.removal_reasons.get(&(var, v))
+                        && !conflict.contains(&!reason)
+                    {
+                        conflict.push(!reason);
                     }
                 }
                 return Err(conflict);
