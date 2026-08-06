@@ -499,7 +499,7 @@ impl SmtSolver {
         while self.notified_len < self.sat_solver.trail.len() {
             let lit = self.sat_solver.trail[self.notified_len];
 
-            if let Some(constraint) = self.registry.get_constraint(lit) {
+            if let Some(constraint) = self.registry.get_constraint(lit).or_else(|| self.registry.get_constraint(!lit)) {
                 let theory_result = match (constraint, lit.sign()) {
                     (TheoryConstraint::LraUb(var, bound), false) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()),
                     (TheoryConstraint::LraLb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(-1) })),
@@ -722,21 +722,20 @@ mod tests {
 
     #[test]
     fn test_enum_exhaustive_denial_integration() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut solver = SmtSolver::new();
         let e = solver.new_enum(vec![1, 2]);
 
         // (e != 1) AND (e != 2)
         let expr = and(vec![!(eq_enum(e.clone(), cst_enum(1))), !(eq_enum(e, cst_enum(2)))]);
 
-        assert!(solver.assert(&expr).is_ok());
-        assert!(!solver.check_sat(), "The solver should detect that the enum variable cannot take a value outside its domain");
+        assert!(solver.assert(&expr).is_err());
     }
 
     #[test]
     fn test_enum_var_to_var_equality() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
         let mut solver = SmtSolver::new();
         let e1 = solver.new_enum(vec![1, 2, 3]);
         let e2 = solver.new_enum(vec![3, 4, 5]);
@@ -747,9 +746,7 @@ mod tests {
         assert!(solver.check_sat(), "Solver should find a valid assignment for e1 and e2 where they are equal (SAT)");
 
         let not_3 = !(eq_enum(e1.clone(), cst_enum(3)));
-        assert!(solver.assert(&not_3).is_ok());
-
-        assert!(!solver.check_sat(), "Solver should detect that e1 cannot be equal to e2 without being 3 (UNSAT)");
+        assert!(solver.assert(&not_3).is_err());
     }
 
     #[test]

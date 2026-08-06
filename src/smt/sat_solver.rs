@@ -56,6 +56,7 @@ impl SatSolver {
 
     pub(super) fn push(&mut self) {
         self.trail_lim.push(self.trail.len());
+        trace!("Pushed decision level {}", self.decision_level());
     }
 
     pub(super) fn enqueue_decision(&mut self, lit: Lit) -> bool {
@@ -294,21 +295,16 @@ impl SatSolver {
         self.trail_lim.len()
     }
 
-    fn undo_one(&mut self) {
-        if let Some(lit) = self.trail.pop() {
-            trace!("Undoing assignment of {}", lit);
-            self.assigns[lit.var()] = None;
-            self.reason[lit.var()] = None;
-            self.level[lit.var()] = None;
-        }
-    }
-
     pub(super) fn cancel_until(&mut self, level: usize) {
         trace!("Canceling until level {}", level);
         while self.decision_level() > level {
             let lim = self.trail_lim.pop().unwrap();
             while self.trail.len() > lim {
-                self.undo_one();
+                let lit = self.trail.pop().expect("Trail underflow while canceling until level");
+                trace!("Undoing assignment of {}", lit);
+                self.assigns[lit.var()] = None;
+                self.reason[lit.var()] = None;
+                self.level[lit.var()] = None;
             }
         }
     }
