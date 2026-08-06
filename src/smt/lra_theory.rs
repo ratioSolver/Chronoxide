@@ -223,6 +223,7 @@ impl LraTheory {
                         if let Some(guard_lit) = self.ubs[leaving].0 {
                             conflict.push(!guard_lit);
                         }
+                        self.minimize_conflict(&mut conflict);
                         return Err(conflict);
                     }
                 }
@@ -230,6 +231,17 @@ impl LraTheory {
                 return Ok(()); // all basic variables are within bounds, we are done
             }
         }
+    }
+
+    fn minimize_conflict(&self, conflict: &mut Vec<Lit>) {
+        if conflict.len() <= 1 {
+            return;
+        }
+
+        conflict.sort_unstable();
+        conflict.dedup();
+
+        conflict.retain(|_lit| true);
     }
 
     fn pivot(&mut self, entering: usize, leaving: usize) {
