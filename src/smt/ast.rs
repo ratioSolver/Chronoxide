@@ -255,6 +255,9 @@ pub fn to_cnf(expr: &BoolExpr) -> BoolExpr {
 pub fn cst_arith(val: i32) -> ArithExpr {
     ArithExpr::Const(rug::Rational::from(val))
 }
+pub fn cst_frac(num: i32, denom: i32) -> ArithExpr {
+    ArithExpr::Const(rug::Rational::from((num, denom)))
+}
 pub fn cst_enum(val: i32) -> EnumExpr {
     EnumExpr::Const(val)
 }

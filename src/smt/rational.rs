@@ -17,6 +17,18 @@ impl Rational {
         matches!(self, Self::Finite(_))
     }
 
+    pub fn is_positive(&self) -> bool {
+        matches!(self, Self::Finite(r) if r.is_positive()) || matches!(self, Self::PositiveInf)
+    }
+
+    pub fn is_negative(&self) -> bool {
+        matches!(self, Self::Finite(r) if r.is_negative()) || matches!(self, Self::NegativeInf)
+    }
+
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Self::Finite(r) if r.is_integer())
+    }
+
     fn finite_sign(r: &rug::Rational) -> i8 {
         if r.is_positive() {
             1

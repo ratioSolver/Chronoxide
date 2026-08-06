@@ -522,6 +522,33 @@ impl SmtSolver {
         Ok(())
     }
 
+    pub fn get_bool_val(&self, expr: &BoolExpr) -> Option<bool> {
+        match expr {
+            BoolExpr::True => Some(true),
+            BoolExpr::False => Some(false),
+            BoolExpr::Var(v) => self.sat_solver.value(*v).clone(),
+            _ => None,
+        }
+    }
+
+    pub fn get_arith_val(&self, expr: &ArithExpr) -> Option<InfRational> {
+        match expr {
+            ArithExpr::Const(c) => Some(InfRational::new(Rational::Finite(c.clone()), rug::Rational::from(0))),
+            ArithExpr::RealVar(v) | ArithExpr::IntVar(v) => Some(self.lra_theory.value(*v).clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_enum_val(&self, expr: &EnumExpr) -> Option<i32> {
+        match expr {
+            EnumExpr::Const(c) => Some(*c),
+            EnumExpr::Var(v) => {
+                let domain = &self.enum_theory.active_domains[*v];
+                if domain.len() == 1 { domain.iter().next().copied() } else { None }
+            }
+        }
+    }
+
     /// Explores the search space to find a valid model or prove UNSAT.
     pub fn check_sat(&mut self) -> bool {
         // 1. Initial root-level propagation
@@ -570,7 +597,55 @@ impl SmtSolver {
                 }
             } else {
                 // All variables are assigned and no conflicts were found.
-                return true; // SAT
+                if let Err((var, frac_val)) = self.lra_theory.check_ints() {
+                    if let Some((cut_row, f0)) = self.lra_theory.generate_gomory_cut(var) {
+                        let cut_slack = self.get_or_create_slack(cut_row);
+
+                        let bound = InfRational::new(Rational::Finite(f0), rug::Rational::from(0));
+                        let cut_lit = self.get_or_create_proxy(TheoryConstraint::LraLb(cut_slack, bound));
+
+                        let learned_lemma = vec![cut_lit];
+
+                        self.sat_solver.cancel_until(0);
+                        self.lra_theory.cancel_until(0);
+                        self.enum_theory.cancel_until(0);
+                        self.notified_len = self.sat_solver.trail.len();
+
+                        if self.sat_solver.add_clause(learned_lemma).is_err() {
+                            return false;
+                        }
+
+                        continue;
+                    }
+
+                    let Rational::Finite(inner_frac) = frac_val else {
+                        unreachable!("Fractional variable in Branch & Bound must be finite");
+                    };
+                    let mut floor_val = inner_frac.clone();
+                    floor_val.floor_mut();
+
+                    let mut ceil_val = inner_frac.clone();
+                    ceil_val.ceil_mut();
+
+                    let ub = InfRational::new(Rational::Finite(floor_val), rug::Rational::from(0));
+                    let lb = InfRational::new(Rational::Finite(ceil_val), rug::Rational::from(0));
+
+                    let lit_ub = self.get_or_create_proxy(TheoryConstraint::LraUb(var, ub));
+                    let lit_lb = self.get_or_create_proxy(TheoryConstraint::LraLb(var, lb));
+
+                    let learned_branch = vec![lit_ub, lit_lb];
+
+                    self.sat_solver.cancel_until(0);
+                    self.lra_theory.cancel_until(0);
+                    self.enum_theory.cancel_until(0);
+                    self.notified_len = self.sat_solver.trail.len();
+
+                    if self.sat_solver.add_clause(learned_branch).is_err() {
+                        return false;
+                    }
+                } else {
+                    return true;
+                }
             }
         }
     }
@@ -579,7 +654,7 @@ impl SmtSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smt::ast::{add, and, cst_arith, cst_enum, eq_arith, eq_enum, gt, lt, mul, or};
+    use crate::smt::ast::{add, and, cst_arith, cst_enum, cst_frac, eq_arith, eq_enum, gt, lt, mul, or};
     use tracing::{Level, subscriber};
 
     #[test]
@@ -759,5 +834,29 @@ mod tests {
         assert!(solver.assert(&expr).is_ok());
 
         assert!(solver.check_sat(), "Solver should backtrack and explore e == 2 (SAT)");
+    }
+
+    #[test]
+    fn test_integer_branch_and_bound_unsat() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_int();
+
+        let eq_expr = eq_arith(mul([cst_arith(2), x.clone()]), cst_arith(3));
+
+        assert!(solver.assert(&eq_expr).is_ok());
+
+        assert!(!solver.check_sat(), "There is no integer solution to 2x = 3, should be UNSAT");
+    }
+
+    #[test]
+    fn test_integer_branch_and_bound_sat() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_int();
+
+        let expr = and([gt(x.clone(), cst_frac(12, 10)), lt(x.clone(), cst_frac(28, 10))]);
+
+        assert!(solver.assert(&expr).is_ok());
+
+        assert!(solver.check_sat(), "There is an integer solution to the constraints, should be SAT");
     }
 }

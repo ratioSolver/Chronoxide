@@ -329,6 +329,56 @@ impl LraTheory {
         self.pivot(entering, leaving);
     }
 
+    pub(super) fn check_ints(&self) -> Result<(), (usize, Rational)> {
+        for (var, &is_int) in self.ints.iter().enumerate() {
+            if is_int {
+                let val = self.value(var);
+                if !val.infinitesimal_part().is_zero() || !val.rational_part().is_integer() {
+                    return Err((var, val.rational_part().clone()));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn fract_part(val: &rug::Rational) -> rug::Rational {
+        let mut floor = val.clone();
+        floor.floor_mut();
+
+        let mut f = val.clone();
+        f -= floor;
+        f
+    }
+
+    pub(super) fn generate_gomory_cut(&mut self, basic_var: usize) -> Option<(SparseRow, rug::Rational)> {
+        let Rational::Finite(val) = self.value(basic_var).rational_part() else { unreachable!("basic variable should have a finite rational value") };
+        let f0 = Self::fract_part(val);
+
+        if f0.is_zero() {
+            return None;
+        }
+
+        let row = self.tableau.get(&basic_var)?;
+        let mut cut_row = SparseRow::new();
+
+        for (nb_var, coeff) in row.iter() {
+            if !self.ints[*nb_var] {
+                return None;
+            }
+
+            let fj = Self::fract_part(coeff);
+            if !fj.is_zero() {
+                cut_row.add_coeff(*nb_var, &fj);
+            }
+        }
+
+        if cut_row.is_empty() {
+            return None;
+        }
+
+        Some((cut_row, f0))
+    }
+
     pub(super) fn push(&mut self) {
         self.trail_lim.push(self.bound_trail.len());
     }
