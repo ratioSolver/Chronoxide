@@ -492,16 +492,6 @@ impl SmtSolver {
             .collect()
     }
 
-    fn negate_ub(bound: &InfRational) -> InfRational {
-        let (rat, inf) = bound.clone().into_parts();
-        InfRational::new(rat, rug::Rational::from(if inf < 0 { 0 } else { 1 }))
-    }
-
-    fn negate_lb(bound: &InfRational) -> InfRational {
-        let (rat, inf) = bound.clone().into_parts();
-        InfRational::new(rat, rug::Rational::from(if inf > 0 { 0 } else { -1 }))
-    }
-
     pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
         self.sat_solver.push();
         self.lra_theory.push();
@@ -522,9 +512,9 @@ impl SmtSolver {
             if let Some(expr) = self.registry.get_ast(lit)
                 && let Err(lemma) = match (expr, lit.sign()) {
                     (BoolExpr::Ub(var, bound), false) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
-                    (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, Self::negate_ub(bound)).map(|_| ()),
+                    (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_negative() { rug::Rational::from(0) } else { rug::Rational::from(-1) })).map(|_| ()),
                     (BoolExpr::Lb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
-                    (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, Self::negate_lb(bound)).map(|_| ()),
+                    (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(1) })).map(|_| ()),
                     (BoolExpr::ArithEq(var, val), false) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
                     (BoolExpr::ArithEq(_, _), true) => unreachable!("Negated arithmetic equalities are not supported on the SAT trail"),
                     _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
