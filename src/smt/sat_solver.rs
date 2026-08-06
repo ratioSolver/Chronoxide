@@ -214,10 +214,8 @@ impl SatSolver {
                 }
                 self.clauses.push(clause);
 
-                if self.lit_value(&simplified_lits[0]).is_none() && self.lit_value(&simplified_lits[1]) == Some(false) {
-                    if !self.enqueue(simplified_lits[0], Some(clause_index)) {
-                        return Err(simplified_lits);
-                    }
+                if self.lit_value(&simplified_lits[0]).is_none() && self.lit_value(&simplified_lits[1]) == Some(false) && !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                    return Err(simplified_lits);
                 }
             }
         }

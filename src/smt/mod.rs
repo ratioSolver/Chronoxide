@@ -104,22 +104,13 @@ impl SmtSolver {
                 };
                 if vars.len() == 1 {
                     let (&var, coeff) = vars.iter().next().unwrap();
-
-                    let bound_val = Rational::Finite(rug::Rational::from(-const_term.clone()) / coeff);
-                    let bound_eps = eps_val / coeff;
-                    let bound = InfRational::new(bound_val, bound_eps);
-
+                    let bound = InfRational::new(Rational::Finite((-const_term.clone()) / coeff), eps_val / coeff);
                     let expr = if is_upper_bound == coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
-
                     self.assert_internal(&expr, true)
                 } else {
                     let slack = self.get_or_create_slack(vars);
-
-                    let bound_val = Rational::Finite(rug::Rational::from(-const_term));
-                    let bound = InfRational::new(bound_val, eps_val);
-
+                    let bound = InfRational::new(Rational::Finite(-const_term), eps_val);
                     let expr = if is_upper_bound { BoolExpr::Ub(slack, bound) } else { BoolExpr::Lb(slack, bound) };
-
                     self.assert_internal(&expr, true)
                 }
             }
@@ -154,11 +145,11 @@ impl SmtSolver {
                     if polarity {
                         if vars.len() == 1 {
                             let (&var, coeff) = vars.iter().next().unwrap();
-                            let bound = InfRational::new(Rational::Finite(rug::Rational::from(-const_term) / coeff), rug::Rational::from(0));
+                            let bound = InfRational::new(Rational::Finite((-const_term) / coeff), rug::Rational::from(0));
                             self.assert_internal(&BoolExpr::ArithEq(var, bound), true)
                         } else {
                             let slack = self.get_or_create_slack(vars);
-                            let bound = InfRational::new(Rational::Finite(rug::Rational::from(-const_term)), rug::Rational::from(0));
+                            let bound = InfRational::new(Rational::Finite(-const_term), rug::Rational::from(0));
                             self.assert_internal(&BoolExpr::ArithEq(slack, bound), true)
                         }
                     } else {
@@ -338,15 +329,13 @@ impl SmtSolver {
             }
             1 => {
                 let (&var, coeff) = vars.iter().next().unwrap();
-                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
-                let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), eps_val / coeff);
+                let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) } / coeff);
                 let bound = if coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
-                let eps_val = if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) };
-                let bound = BoolExpr::Ub(slack, InfRational::new(Rational::Finite(-const_term), eps_val));
+                let bound = BoolExpr::Ub(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
         }
@@ -392,15 +381,13 @@ impl SmtSolver {
             }
             1 => {
                 let (&var, coeff) = vars.iter().next().unwrap();
-                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
-                let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), eps_val / coeff);
+                let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) } / coeff);
                 let bound = if coeff.is_positive() { BoolExpr::Lb(var, bound) } else { BoolExpr::Ub(var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
-                let eps_val = if strict { rug::Rational::from(1) } else { rug::Rational::from(0) };
-                let bound = BoolExpr::Lb(slack, InfRational::new(Rational::Finite(-const_term), eps_val));
+                let bound = BoolExpr::Lb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
         }
