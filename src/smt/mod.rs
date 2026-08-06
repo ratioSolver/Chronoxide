@@ -40,6 +40,22 @@ impl SmtSolver {
         }
     }
 
+    pub fn new_bool(&mut self) -> BoolExpr {
+        BoolExpr::Var(self.sat_solver.mk_var())
+    }
+
+    pub fn new_int(&mut self) -> ArithExpr {
+        ArithExpr::IntVar(self.lra_theory.mk_int())
+    }
+
+    pub fn new_real(&mut self) -> ArithExpr {
+        ArithExpr::RealVar(self.lra_theory.mk_real())
+    }
+
+    pub fn new_enum(&mut self, domain: impl IntoIterator<Item = i32>) -> EnumExpr {
+        EnumExpr::Var(self.enum_theory.mk_var(domain.into_iter().collect()))
+    }
+
     pub fn assert(&mut self, expr: &BoolExpr) -> Result<(), Vec<BoolExpr>> {
         if !self.assert_internal(expr, true) {
             return Err(vec![BoolExpr::False]);
@@ -153,13 +169,6 @@ impl SmtSolver {
         }
     }
 
-    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
-        self.sat_solver.push();
-        self.lra_theory.push();
-        self.sat_solver.enqueue_decision(lit);
-        self.propagate()
-    }
-
     fn encode_bool(&mut self, expr: &BoolExpr) -> Lit {
         match expr {
             BoolExpr::True => self.sat_solver.true_lit(),
@@ -256,8 +265,8 @@ impl SmtSolver {
                     return self.sat_solver.true_lit();
                 }
 
-                let domain1 = self.enum_theory.domains.get(v1).cloned().unwrap_or_default();
-                let domain2 = self.enum_theory.domains.get(v2).cloned().unwrap_or_default();
+                let domain1 = self.enum_theory.domains.get(*v1).cloned().unwrap_or_default();
+                let domain2 = self.enum_theory.domains.get(*v2).cloned().unwrap_or_default();
 
                 let common_values: Vec<i32> = domain1.intersection(&domain2).copied().collect();
 
@@ -280,8 +289,6 @@ impl SmtSolver {
     }
 
     fn get_enum_proxy(&mut self, var: usize, val: i32) -> usize {
-        self.enum_theory.register_domain_value(var, val);
-
         if let Some(&proxy) = self.enum_theory.var_eq_const_proxies.get(&(var, val)) {
             proxy
         } else {
@@ -473,6 +480,13 @@ impl SmtSolver {
             self.registry.register_proxy(bound, sat_var);
             Lit::new(sat_var, false)
         }
+    }
+
+    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
+        self.sat_solver.push();
+        self.lra_theory.push();
+        self.sat_solver.enqueue_decision(lit);
+        self.propagate()
     }
 
     pub fn propagate(&mut self) -> Result<(), Vec<BoolExpr>> {

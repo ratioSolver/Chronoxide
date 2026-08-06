@@ -127,6 +127,14 @@ impl From<rug::Rational> for ArithExpr {
     }
 }
 
+impl ops::Neg for ArithExpr {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        ArithExpr::Neg(Box::new(self))
+    }
+}
+
 impl fmt::Display for ArithExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
