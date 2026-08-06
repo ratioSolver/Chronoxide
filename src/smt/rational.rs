@@ -29,6 +29,10 @@ impl Rational {
         matches!(self, Self::Finite(r) if r.is_integer())
     }
 
+    pub fn is_zero(&self) -> bool {
+        matches!(self, Self::Finite(r) if r.is_zero())
+    }
+
     fn finite_sign(r: &rug::Rational) -> i8 {
         if r.is_positive() {
             1
