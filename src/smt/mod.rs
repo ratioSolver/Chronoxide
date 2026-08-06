@@ -8,13 +8,12 @@ mod sat_solver;
 use crate::smt::{
     ast::{ArithExpr, BoolExpr, EnumExpr, Expr},
     enum_theory::EnumTheory,
-    lra_theory::LraTheory,
+    lra_theory::{LraTheory, SparseRow},
     proxy::ProxyRegistry,
     rational::{InfRational, Rational},
     sat_solver::{Lit, SatSolver},
 };
 use rug::Assign;
-use std::collections::BTreeMap;
 
 pub struct SmtSolver {
     registry: ProxyRegistry,
@@ -42,25 +41,22 @@ impl SmtSolver {
     }
 
     pub fn assert(&mut self, expr: &BoolExpr) -> Result<(), Vec<BoolExpr>> {
-        self.assert_internal(expr, true)?;
+        if !self.assert_internal(expr, true) {
+            return Err(vec![BoolExpr::False]);
+        }
         self.propagate()
     }
 
-    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
-        self.sat_solver.push();
-        self.lra_theory.push();
-        self.sat_solver.enqueue_decision(lit);
-        self.propagate()
-    }
-
-    fn assert_internal(&mut self, expr: &BoolExpr, polarity: bool) -> Result<(), Vec<BoolExpr>> {
+    fn assert_internal(&mut self, expr: &BoolExpr, polarity: bool) -> bool {
         match (expr, polarity) {
             (BoolExpr::Not(inner), _) => self.assert_internal(inner, !polarity),
             (BoolExpr::And(args), true) | (BoolExpr::Or(args), false) => {
                 for arg in args {
-                    self.assert_internal(arg, polarity)?;
+                    if !self.assert_internal(arg, polarity) {
+                        return false;
+                    }
                 }
-                Ok(())
+                true
             }
             (BoolExpr::Or(args), true) | (BoolExpr::And(args), false) => {
                 let mut clause = Vec::with_capacity(args.len());
@@ -71,48 +67,40 @@ impl SmtSolver {
                     }
                     clause.push(lit);
                 }
-
-                if self.sat_solver.add_clause(clause).is_err() {
-                    return Err(vec![BoolExpr::False]);
-                }
-                Ok(())
+                self.sat_solver.add_clause(clause).is_ok()
             }
+            (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_lb(None, *var, bound.clone()).is_ok(),
+            (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_ub(None, *var, bound.clone()).is_ok(),
+            (BoolExpr::ArithEq(var, val), true) => self.lra_theory.set_lb(None, *var, val.clone()).is_ok() && self.lra_theory.set_ub(None, *var, val.clone()).is_ok(),
             (BoolExpr::Lt(e1, e2), _) | (BoolExpr::Le(e1, e2), _) | (BoolExpr::Ge(e1, e2), _) | (BoolExpr::Gt(e1, e2), _) => {
                 let (vars, const_term) = self.diff(e1, e2);
                 if vars.is_empty() {
                     let is_sat = match expr {
                         BoolExpr::Lt(_, _) => const_term.is_negative(),
                         BoolExpr::Le(_, _) => const_term.is_negative() || const_term.is_zero(),
-                        BoolExpr::Ge(_, _) => !const_term.is_negative(), // >= 0
+                        BoolExpr::Ge(_, _) => !const_term.is_negative(),
                         BoolExpr::Gt(_, _) => const_term.is_positive(),
                         _ => unreachable!(),
                     };
-                    let final_sat = if polarity { is_sat } else { !is_sat };
-                    return if final_sat { Ok(()) } else { Err(vec![BoolExpr::False]) };
+                    return if polarity { is_sat } else { !is_sat };
                 }
+
                 let (is_upper_bound, eps_val) = match (expr, polarity) {
-                    // Lt (< 0)
                     (BoolExpr::Lt(_, _), true) => (true, rug::Rational::from(-1)),
-                    (BoolExpr::Lt(_, _), false) => (false, rug::Rational::from(0)), // !(x < y) => x >= y
-
-                    // Le (<= 0)
+                    (BoolExpr::Lt(_, _), false) => (false, rug::Rational::from(0)),
                     (BoolExpr::Le(_, _), true) => (true, rug::Rational::from(0)),
-                    (BoolExpr::Le(_, _), false) => (false, rug::Rational::from(1)), // !(x <= y) => x > y
-
-                    // Ge (>= 0)
+                    (BoolExpr::Le(_, _), false) => (false, rug::Rational::from(1)),
                     (BoolExpr::Ge(_, _), true) => (false, rug::Rational::from(0)),
-                    (BoolExpr::Ge(_, _), false) => (true, rug::Rational::from(-1)), // !(x >= y) => x < y
-
-                    // Gt (> 0)
+                    (BoolExpr::Ge(_, _), false) => (true, rug::Rational::from(-1)),
                     (BoolExpr::Gt(_, _), true) => (false, rug::Rational::from(1)),
-                    (BoolExpr::Gt(_, _), false) => (true, rug::Rational::from(0)), // !(x > y) => x <= y
-
+                    (BoolExpr::Gt(_, _), false) => (true, rug::Rational::from(0)),
                     _ => unreachable!(),
                 };
+
                 if vars.len() == 1 {
-                    let (&var, coeff) = vars.iter().next().unwrap();
+                    let (var, coeff) = vars.iter().next().unwrap();
                     let bound = InfRational::new(Rational::Finite((-const_term.clone()) / coeff), eps_val / coeff);
-                    let expr = if is_upper_bound == coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
+                    let expr = if is_upper_bound == coeff.is_positive() { BoolExpr::Ub(*var, bound) } else { BoolExpr::Lb(*var, bound) };
                     self.assert_internal(&expr, true)
                 } else {
                     let slack = self.get_or_create_slack(vars);
@@ -121,39 +109,21 @@ impl SmtSolver {
                     self.assert_internal(&expr, true)
                 }
             }
-            (BoolExpr::Lb(var, bound), true) => {
-                if !self.lra_theory.set_lb(None, *var, bound.clone()) {
-                    return Err(vec![BoolExpr::False]);
-                }
-                Ok(())
-            }
-            (BoolExpr::Ub(var, bound), true) => {
-                if !self.lra_theory.set_ub(None, *var, bound.clone()) {
-                    return Err(vec![BoolExpr::False]);
-                }
-                Ok(())
-            }
-            (BoolExpr::ArithEq(var, val), true) => {
-                if !self.lra_theory.set_lb(None, *var, val.clone()) || !self.lra_theory.set_ub(None, *var, val.clone()) {
-                    return Err(vec![BoolExpr::False]);
-                }
-                Ok(())
-            }
+
             (BoolExpr::Eq(e1, e2), _) => {
                 if let (Expr::Arith(a1), Expr::Arith(a2)) = (&**e1, &**e2) {
                     let (vars, const_term) = self.diff(a1, a2);
 
                     if vars.is_empty() {
                         let is_sat = const_term.is_zero();
-                        let final_sat = if polarity { is_sat } else { !is_sat };
-                        return if final_sat { Ok(()) } else { Err(vec![BoolExpr::False]) };
+                        return if polarity { is_sat } else { !is_sat };
                     }
 
                     if polarity {
                         if vars.len() == 1 {
-                            let (&var, coeff) = vars.iter().next().unwrap();
+                            let (var, coeff) = vars.iter().next().unwrap();
                             let bound = InfRational::new(Rational::Finite((-const_term) / coeff), rug::Rational::from(0));
-                            self.assert_internal(&BoolExpr::ArithEq(var, bound), true)
+                            self.assert_internal(&BoolExpr::ArithEq(*var, bound), true)
                         } else {
                             let slack = self.get_or_create_slack(vars);
                             let bound = InfRational::new(Rational::Finite(-const_term), rug::Rational::from(0));
@@ -162,34 +132,32 @@ impl SmtSolver {
                     } else {
                         let lt_lit = self.mk_le(a1, a2, true);
                         let gt_lit = self.mk_ge(a1, a2, true);
-
-                        if self.sat_solver.add_clause(vec![lt_lit, gt_lit]).is_err() {
-                            return Err(vec![BoolExpr::False]);
-                        }
-                        Ok(())
+                        self.sat_solver.add_clause(vec![lt_lit, gt_lit]).is_ok()
                     }
                 } else {
                     let mut lit = self.encode_eq(e1, e2);
                     if !polarity {
                         lit = !lit;
                     }
-                    if self.sat_solver.add_clause(vec![lit]).is_err() {
-                        return Err(vec![BoolExpr::False]);
-                    }
-                    Ok(())
+                    self.sat_solver.add_clause(vec![lit]).is_ok()
                 }
             }
+
             _ => {
                 let mut lit = self.encode_bool(expr);
                 if !polarity {
                     lit = !lit;
                 }
-                if self.sat_solver.add_clause(vec![lit]).is_err() {
-                    return Err(vec![BoolExpr::False]);
-                }
-                Ok(())
+                self.sat_solver.add_clause(vec![lit]).is_ok()
             }
         }
+    }
+
+    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
+        self.sat_solver.push();
+        self.lra_theory.push();
+        self.sat_solver.enqueue_decision(lit);
+        self.propagate()
     }
 
     fn encode_bool(&mut self, expr: &BoolExpr) -> Lit {
@@ -335,9 +303,9 @@ impl SmtSolver {
                 }
             }
             1 => {
-                let (&var, coeff) = vars.iter().next().unwrap();
+                let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) } / coeff);
-                let bound = if coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
+                let bound = if coeff.is_positive() { BoolExpr::Ub(*var, bound) } else { BoolExpr::Lb(*var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
@@ -363,9 +331,9 @@ impl SmtSolver {
                 }
             }
             1 => {
-                let (&var, coeff) = vars.iter().next().unwrap();
+                let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), rug::Rational::from(0));
-                self.get_or_create_proxy(BoolExpr::ArithEq(var, bound))
+                self.get_or_create_proxy(BoolExpr::ArithEq(*var, bound))
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
@@ -387,9 +355,9 @@ impl SmtSolver {
                 }
             }
             1 => {
-                let (&var, coeff) = vars.iter().next().unwrap();
+                let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) } / coeff);
-                let bound = if coeff.is_positive() { BoolExpr::Lb(var, bound) } else { BoolExpr::Ub(var, bound) };
+                let bound = if coeff.is_positive() { BoolExpr::Lb(*var, bound) } else { BoolExpr::Ub(*var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
@@ -400,8 +368,8 @@ impl SmtSolver {
         }
     }
 
-    fn diff(&self, e1: &ArithExpr, e2: &ArithExpr) -> (BTreeMap<usize, rug::Rational>, rug::Rational) {
-        let mut vars = BTreeMap::new();
+    fn diff(&self, e1: &ArithExpr, e2: &ArithExpr) -> (SparseRow, rug::Rational) {
+        let mut vars = SparseRow::new();
         let mut const_term = rug::Rational::from(0);
 
         let pos_one = rug::Rational::from(1);
@@ -417,7 +385,7 @@ impl SmtSolver {
         (vars, const_term)
     }
 
-    fn accumulate_expr(&self, expr: &ArithExpr, scale: &rug::Rational, vars: &mut BTreeMap<usize, rug::Rational>, const_term: &mut rug::Rational, temp: &mut rug::Rational) {
+    fn accumulate_expr(&self, expr: &ArithExpr, scale: &rug::Rational, vars: &mut SparseRow, const_term: &mut rug::Rational, temp: &mut rug::Rational) {
         match expr {
             ArithExpr::Const(c) => {
                 temp.assign(c * scale);
@@ -470,19 +438,18 @@ impl SmtSolver {
         }
     }
 
-    fn accumulate_var(&self, var: usize, scale: &rug::Rational, vars: &mut BTreeMap<usize, rug::Rational>, temp: &mut rug::Rational) {
+    fn accumulate_var(&self, var: usize, scale: &rug::Rational, vars: &mut SparseRow, temp: &mut rug::Rational) {
         if let Some(basic_row) = self.lra_theory.tableau.get(&var) {
-            for (&sub_var, sub_coeff) in basic_row {
-                let entry = vars.entry(sub_var).or_insert_with(|| rug::Rational::from(0));
+            for (sub_var, sub_coeff) in basic_row.iter() {
                 temp.assign(sub_coeff * scale);
-                *entry += &*temp;
+                vars.add_coeff(*sub_var, temp);
             }
         } else {
-            *vars.entry(var).or_insert_with(|| rug::Rational::from(0)) += scale;
+            vars.add_coeff(var, scale);
         }
     }
 
-    fn get_or_create_slack(&mut self, vars: BTreeMap<usize, rug::Rational>) -> usize {
+    fn get_or_create_slack(&mut self, vars: SparseRow) -> usize {
         if let Some(&slack) = self.lra_theory.lin_to_slack.get(&vars) {
             slack
         } else {
@@ -527,49 +494,9 @@ impl SmtSolver {
             let lit = self.sat_solver.trail[self.notified_len];
             if let Some(expr) = self.registry.get_ast(lit)
                 && let Err(lemma) = match expr {
-                    BoolExpr::Ub(var, bound) => {
-                        if !self.lra_theory.set_ub(Some(lit), *var, bound.clone()) {
-                            let mut lemma = Vec::with_capacity(2);
-                            lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra_theory.lbs[*var].0 {
-                                lemma.push(!guard_lit);
-                            }
-                            Err(lemma)
-                        } else {
-                            Ok(())
-                        }
-                    }
-                    BoolExpr::ArithEq(var, val) => {
-                        if !self.lra_theory.set_lb(Some(lit), *var, val.clone()) {
-                            let mut lemma = Vec::with_capacity(2);
-                            lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra_theory.ubs[*var].0 {
-                                lemma.push(!guard_lit);
-                            }
-                            Err(lemma)
-                        } else if !self.lra_theory.set_ub(Some(lit), *var, val.clone()) {
-                            let mut lemma = Vec::with_capacity(2);
-                            lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra_theory.lbs[*var].0 {
-                                lemma.push(!guard_lit);
-                            }
-                            Err(lemma)
-                        } else {
-                            Ok(())
-                        }
-                    }
-                    BoolExpr::Lb(var, bound) => {
-                        if !self.lra_theory.set_lb(Some(lit), *var, bound.clone()) {
-                            let mut lemma = Vec::with_capacity(2);
-                            lemma.push(!lit);
-                            if let Some(guard_lit) = self.lra_theory.ubs[*var].0 {
-                                lemma.push(!guard_lit);
-                            }
-                            Err(lemma)
-                        } else {
-                            Ok(())
-                        }
-                    }
+                    BoolExpr::Ub(var, bound) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
+                    BoolExpr::Lb(var, bound) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
+                    BoolExpr::ArithEq(var, val) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
                     _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
                 }
             {

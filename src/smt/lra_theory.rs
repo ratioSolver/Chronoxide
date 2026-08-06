@@ -9,15 +9,15 @@ use std::{
 };
 
 pub(super) struct LraTheory {
-    ints: Vec<bool>,                                                       // true = integer variable, false = real variable
-    reals: Vec<InfRational>,                                               // Current assignments
-    pub(super) lbs: Vec<(Option<Lit>, InfRational)>,                       // Current lower bounds
-    pub(super) ubs: Vec<(Option<Lit>, InfRational)>,                       // Current upper bounds
-    pub(super) lin_to_slack: HashMap<BTreeMap<usize, RugRational>, usize>, // Mapping from linear constraints to their slack variable
-    pub(super) tableau: BTreeMap<usize, BTreeMap<usize, RugRational>>,     // Tableau: basic variable -> linear expression over non-basic variables
-    pub(super) t_watches: Vec<HashSet<usize>>,                             // For each variable, the set of tableau rows containing it
-    bound_trail: Vec<BoundUpdate>,                                         // Trail of bound updates for backtracking
-    trail_lim: Vec<usize>,                                                 // Trail limits
+    ints: Vec<bool>,                                    // true = integer variable, false = real variable
+    reals: Vec<InfRational>,                            // Current assignments
+    pub(super) lbs: Vec<(Option<Lit>, InfRational)>,    // Current lower bounds
+    pub(super) ubs: Vec<(Option<Lit>, InfRational)>,    // Current upper bounds
+    pub(super) lin_to_slack: HashMap<SparseRow, usize>, // Mapping from linear constraints to their slack variable
+    pub(super) tableau: BTreeMap<usize, SparseRow>,     // Tableau: basic variable -> linear expression over non-basic variables
+    pub(super) t_watches: Vec<HashSet<usize>>,          // For each variable, the set of tableau rows containing it
+    bound_trail: Vec<BoundUpdate>,                      // Trail of bound updates for backtracking
+    trail_lim: Vec<usize>,                              // Trail limits
 }
 
 impl LraTheory {
@@ -83,50 +83,60 @@ impl LraTheory {
         *self.ints.get(var).expect("variable index out of bounds")
     }
 
-    pub(super) fn set_lb(&mut self, lit: Option<Lit>, var: usize, new_lb: InfRational) -> bool {
+    pub(super) fn set_lb(&mut self, lit: Option<Lit>, var: usize, new_lb: InfRational) -> Result<bool, Vec<Lit>> {
         assert!(var < self.reals.len(), "variable index out of bounds: {var}");
 
         if &new_lb <= self.lb(var) {
-            return true;
+            return Ok(false);
         }
 
         if &new_lb > self.ub(var) {
-            return false;
+            let mut conflict = Vec::with_capacity(2);
+            if let Some(l) = lit {
+                conflict.push(!l);
+            }
+            if let Some(guard) = self.ubs[var].0 {
+                conflict.push(!guard);
+            }
+            return Err(conflict);
         }
 
         let (c_lit, val) = self.lbs[var].clone();
         self.bound_trail.push(BoundUpdate::LowerBound { lit: c_lit, var, val });
-
         self.lbs[var] = (lit, new_lb.clone());
 
         if self.value(var) < &new_lb && !self.is_basic(var) {
             self.update(var, new_lb);
         }
-
-        true
+        Ok(true)
     }
 
-    pub(super) fn set_ub(&mut self, lit: Option<Lit>, var: usize, new_ub: InfRational) -> bool {
+    pub(super) fn set_ub(&mut self, lit: Option<Lit>, var: usize, new_ub: InfRational) -> Result<bool, Vec<Lit>> {
         assert!(var < self.reals.len(), "variable index out of bounds: {var}");
 
         if &new_ub >= self.ub(var) {
-            return true;
+            return Ok(false);
         }
 
         if &new_ub < self.lb(var) {
-            return false;
+            let mut conflict = Vec::with_capacity(2);
+            if let Some(l) = lit {
+                conflict.push(!l);
+            }
+            if let Some(guard) = self.lbs[var].0 {
+                conflict.push(!guard);
+            }
+            return Err(conflict);
         }
 
         let (c_lit, val) = self.ubs[var].clone();
         self.bound_trail.push(BoundUpdate::UpperBound { lit: c_lit, var, val });
-
         self.ubs[var] = (lit, new_ub.clone());
 
         if self.value(var) > &new_ub && !self.is_basic(var) {
             self.update(var, new_ub);
         }
-
-        true
+        Ok(true)
     }
 
     fn is_basic(&self, var: usize) -> bool {
@@ -148,7 +158,7 @@ impl LraTheory {
         let watched_rows: Vec<usize> = self.t_watches[var].iter().copied().collect();
 
         for row_var in watched_rows {
-            let coeff = self.tableau[&row_var][&var].clone();
+            let coeff = self.tableau[&row_var].get(&var).expect("watched variable must occur in tableau row").clone();
             let delta = &delta_var * &coeff;
             self.reals[row_var] += delta;
         }
@@ -171,7 +181,7 @@ impl LraTheory {
             if let Some((leaving, val)) = var {
                 // .. if we find one, we try to pivot it with a non-basic variable that can take it back within bounds
                 if self.value(leaving) < &val {
-                    let entering = self.tableau[&leaving].iter().find_map(|(&v, coeff)| if coeff.is_positive() && self.value(v) < self.ub(v) || coeff.is_negative() && self.value(v) > self.lb(v) { Some(v) } else { None });
+                    let entering = (&self.tableau[&leaving]).into_iter().find_map(|(v, coeff)| if (coeff.is_positive() && self.value(*v) < self.ub(*v)) || (coeff.is_negative() && self.value(*v) > self.lb(*v)) { Some(*v) } else { None });
                     if let Some(entering) = entering {
                         self.pivot_and_update(entering, leaving, val.clone());
                     } else {
@@ -194,7 +204,7 @@ impl LraTheory {
                     }
                 }
                 if self.value(leaving) > &val {
-                    let entering = self.tableau[&leaving].iter().find_map(|(&v, coeff)| if coeff.is_positive() && self.value(v) > self.lb(v) || coeff.is_negative() && self.value(v) < self.ub(v) { Some(v) } else { None });
+                    let entering = (&self.tableau[&leaving]).into_iter().find_map(|(v, coeff)| if (coeff.is_positive() && self.value(*v) > self.lb(*v)) || (coeff.is_negative() && self.value(*v) < self.ub(*v)) { Some(*v) } else { None });
                     if let Some(entering) = entering {
                         self.pivot_and_update(entering, leaving, val);
                     } else {
@@ -257,30 +267,11 @@ impl LraTheory {
             let Some(row) = self.tableau.get_mut(&row_var) else {
                 continue;
             };
-
             let Some(coeff_entering) = row.remove(&entering) else {
                 continue;
             };
 
-            for (v, coeff_new_row) in &new_row {
-                let delta = coeff_new_row * coeff_entering.clone();
-
-                if delta.is_zero() {
-                    continue;
-                }
-
-                if let Some(old_coeff) = row.get_mut(v) {
-                    *old_coeff += delta;
-
-                    if old_coeff.is_zero() {
-                        row.remove(v);
-                        self.t_watches[*v].remove(&row_var);
-                    }
-                } else {
-                    row.insert(*v, delta);
-                    self.t_watches[*v].insert(row_var);
-                }
-            }
+            row.add_scaled(&new_row, &coeff_entering, &mut self.t_watches, row_var);
         }
 
         for v in new_row.keys().copied() {
@@ -297,7 +288,7 @@ impl LraTheory {
         assert!(!self.is_basic(entering), "entering variable must be non-basic");
         assert!(&new_value >= self.lb(leaving) && &new_value <= self.ub(leaving), "new value for leaving variable must be within bounds");
 
-        let pivot_coeff = self.tableau[&leaving][&entering].clone();
+        let pivot_coeff = self.tableau[&leaving].get(&entering).expect("entering variable must occur in leaving row").clone();
         assert!(!pivot_coeff.is_zero(), "pivot coefficient must be non-zero");
 
         let theta = (&new_value - self.value(leaving)) / &pivot_coeff;
@@ -354,6 +345,137 @@ impl LraTheory {
     }
 }
 
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SparseRow {
+    pub terms: Vec<(usize, RugRational)>,
+}
+
+impl SparseRow {
+    pub fn new() -> Self {
+        Self { terms: Vec::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.terms.len()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, (usize, RugRational)> {
+        self.terms.iter()
+    }
+
+    pub fn get(&self, var: &usize) -> Option<&RugRational> {
+        self.terms.binary_search_by_key(var, |&(v, _)| v).ok().map(|idx| &self.terms[idx].1)
+    }
+
+    pub fn get_mut(&mut self, var: &usize) -> Option<&mut RugRational> {
+        self.terms.binary_search_by_key(var, |&(v, _)| v).ok().map(|idx| &mut self.terms[idx].1)
+    }
+
+    pub fn insert(&mut self, var: usize, coeff: RugRational) {
+        match self.terms.binary_search_by_key(&var, |&(v, _)| v) {
+            Ok(idx) => self.terms[idx].1 = coeff,
+            Err(idx) => self.terms.insert(idx, (var, coeff)),
+        }
+    }
+
+    pub fn remove(&mut self, var: &usize) -> Option<RugRational> {
+        if let Ok(idx) = self.terms.binary_search_by_key(var, |&(v, _)| v) { Some(self.terms.remove(idx).1) } else { None }
+    }
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&usize, &mut RugRational) -> bool,
+    {
+        self.terms.retain_mut(|(v, c)| f(v, c));
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &usize> {
+        self.terms.iter().map(|(v, _)| v)
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut RugRational> {
+        self.terms.iter_mut().map(|(_, c)| c)
+    }
+
+    pub fn add_coeff(&mut self, var: usize, delta: &RugRational) {
+        if delta.is_zero() {
+            return;
+        }
+        match self.terms.binary_search_by_key(&var, |&(v, _)| v) {
+            Ok(idx) => {
+                self.terms[idx].1 += delta;
+            }
+            Err(idx) => {
+                self.terms.insert(idx, (var, delta.clone()));
+            }
+        }
+    }
+
+    pub fn add_scaled(&mut self, other: &SparseRow, scale: &RugRational, watches: &mut Vec<HashSet<usize>>, target_row_var: usize) {
+        let mut new_terms = Vec::with_capacity(self.terms.len() + other.terms.len());
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < self.terms.len() && j < other.terms.len() {
+            let (v1, c1) = &self.terms[i];
+            let (v2, c2) = &other.terms[j];
+
+            if v1 < v2 {
+                new_terms.push((*v1, c1.clone()));
+                i += 1;
+            } else if v1 > v2 {
+                let delta = c2.clone() * scale;
+                if !delta.is_zero() {
+                    watches[*v2].insert(target_row_var);
+                    new_terms.push((*v2, delta));
+                }
+                j += 1;
+            } else {
+                let delta = c2.clone() * scale;
+                let new_c = c1.clone() + delta;
+
+                if new_c.is_zero() {
+                    watches[*v1].remove(&target_row_var);
+                } else {
+                    new_terms.push((*v1, new_c));
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        while i < self.terms.len() {
+            new_terms.push(self.terms[i].clone());
+            i += 1;
+        }
+
+        while j < other.terms.len() {
+            let (v2, c2) = &other.terms[j];
+            let delta = c2.clone() * scale;
+            if !delta.is_zero() {
+                watches[*v2].insert(target_row_var);
+                new_terms.push((*v2, delta));
+            }
+            j += 1;
+        }
+
+        self.terms = new_terms;
+    }
+}
+
+impl<'a> IntoIterator for &'a SparseRow {
+    type Item = &'a (usize, RugRational);
+    type IntoIter = std::slice::Iter<'a, (usize, RugRational)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.terms.iter()
+    }
+}
+
 enum BoundUpdate {
     LowerBound { lit: Option<Lit>, var: usize, val: InfRational },
     UpperBound { lit: Option<Lit>, var: usize, val: InfRational },
@@ -370,7 +492,7 @@ mod tests {
     }
 
     fn add_test_row(theory: &mut LraTheory, basic_var: usize, terms: &[(usize, i32)]) {
-        let mut row = BTreeMap::new();
+        let mut row = SparseRow::new();
         for &(var, coeff) in terms {
             row.insert(var, RugRational::from(coeff));
             theory.t_watches[var].insert(basic_var);
