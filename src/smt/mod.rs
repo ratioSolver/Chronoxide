@@ -46,6 +46,13 @@ impl SmtSolver {
         self.propagate()
     }
 
+    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
+        self.sat_solver.push();
+        self.lra_theory.push();
+        self.sat_solver.enqueue_decision(lit);
+        self.propagate()
+    }
+
     fn assert_internal(&mut self, expr: &BoolExpr, polarity: bool) -> Result<(), Vec<BoolExpr>> {
         match (expr, polarity) {
             (BoolExpr::Not(inner), _) => self.assert_internal(inner, !polarity),

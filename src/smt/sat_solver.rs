@@ -54,10 +54,13 @@ impl SatSolver {
         idx
     }
 
-    pub(super) fn decide(&mut self, lit: Lit) -> Result<(), (usize, Vec<Lit>)> {
+    pub(super) fn push(&mut self) {
         self.trail_lim.push(self.trail.len());
-        self.enqueue(lit, None);
-        self.propagate()
+    }
+
+    pub(super) fn enqueue_decision(&mut self, lit: Lit) -> bool {
+        assert!(self.lit_value(&lit).is_none(), "Cannot decide on an already assigned literal: {}", lit);
+        self.enqueue(lit, None)
     }
 
     pub(super) fn propagate(&mut self) -> Result<(), (usize, Vec<Lit>)> {
@@ -185,8 +188,8 @@ impl SatSolver {
             let mut max_i = 1;
             let mut max_level = self.level(learnt[1].var()).unwrap_or(0);
 
-            for i in 2..learnt.len() {
-                let l = self.level(learnt[i].var()).unwrap_or(0);
+            for (i, lit) in learnt.iter().enumerate().skip(2) {
+                let l = self.level(lit.var()).unwrap_or(0);
                 if l > max_level {
                     max_level = l;
                     max_i = i;
@@ -263,9 +266,7 @@ impl SatSolver {
                     self.watches[lit.index()].push(clause_index);
                 }
                 self.clauses.push(clause);
-                if self.lit_value(&simplified_lits[0]) == Some(false) {
-                    return Err(simplified_lits);
-                } else if self.lit_value(&simplified_lits[1]) == Some(false) && !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                if self.lit_value(&simplified_lits[0]) == Some(false) || (self.lit_value(&simplified_lits[1]) == Some(false) && !self.enqueue(simplified_lits[0], Some(clause_index))) {
                     return Err(simplified_lits);
                 }
             }
@@ -330,27 +331,27 @@ impl fmt::Display for SatSolver {
 
 // Compact encoding: x = var*2 + sign_bit, where sign_bit=1 means negated (MiniSat convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct Lit {
+pub struct Lit {
     x: usize,
 }
 
 impl Lit {
-    pub(super) fn new(var: usize, sign: bool) -> Self {
+    pub fn new(var: usize, sign: bool) -> Self {
         Lit { x: var * 2 + sign as usize }
     }
 
     /// Variable index.
-    pub(super) fn var(self) -> usize {
+    pub fn var(self) -> usize {
         self.x >> 1
     }
 
     /// True if this is a negated literal.
-    pub(super) fn sign(self) -> bool {
+    pub fn sign(self) -> bool {
         self.x & 1 != 0
     }
 
     /// Compact integer index suitable for watch-list indexing (MiniSat's toInt).
-    pub(super) fn index(self) -> usize {
+    pub fn index(self) -> usize {
         self.x
     }
 }
@@ -384,6 +385,12 @@ impl fmt::Display for Clause {
 mod tests {
     use super::*;
 
+    fn decide(sat: &mut SatSolver, lit: Lit) -> Result<(), (usize, Vec<Lit>)> {
+        sat.push();
+        sat.enqueue_decision(lit);
+        sat.propagate()
+    }
+
     #[test]
     fn test_conflict_analysis() {
         let mut sat = SatSolver::new();
@@ -406,13 +413,13 @@ mod tests {
         sat.add_clause([Lit::new(b5, true), Lit::new(b6, true)]).expect("Should be able to add clause");
 
         // Decision: ¬b7
-        sat.decide(Lit::new(b7, true)).expect("Should be able to decide ¬b7");
+        decide(&mut sat, Lit::new(b7, true)).expect("Should be able to decide ¬b7");
         // Decision: ¬b8
-        sat.decide(Lit::new(b8, true)).expect("Should be able to decide ¬b8");
+        decide(&mut sat, Lit::new(b8, true)).expect("Should be able to decide ¬b8");
         // Decision: ¬b9
-        sat.decide(Lit::new(b9, true)).expect("Should be able to decide ¬b9");
+        decide(&mut sat, Lit::new(b9, true)).expect("Should be able to decide ¬b9");
         // Decision: ¬b1
-        let result = sat.decide(Lit::new(b1, true));
+        let result = decide(&mut sat, Lit::new(b1, true));
         assert!(result.is_err());
         let (bt_level, conflict_clause) = result.unwrap_err();
         assert_eq!(bt_level, 3);
