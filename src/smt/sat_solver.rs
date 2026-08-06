@@ -104,6 +104,9 @@ impl SatSolver {
                         self.watches[falsified_index].push(*c_i);
                     }
                     self.prop_q.clear();
+                    if self.decision_level() == 0 {
+                        return Err((0, self.clauses[clause_idx].lits.clone()));
+                    }
                     return Err(self.analyze_conflict(clause_idx));
                 }
             }

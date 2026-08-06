@@ -173,7 +173,7 @@ impl SmtSolver {
         match expr {
             BoolExpr::True => self.sat_solver.true_lit(),
             BoolExpr::False => !self.sat_solver.true_lit(),
-            BoolExpr::Var(v) => Lit::new(*v, true),
+            BoolExpr::Var(v) => Lit::new(*v, false),
             BoolExpr::Not(inner) => !self.encode_bool(inner),
             BoolExpr::And(terms) => {
                 let mut lits = Vec::with_capacity(terms.len());
@@ -537,5 +537,115 @@ impl SmtSolver {
             return Err(conflict_clause);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::smt::ast::{add, aeq, and, cst, gt, lt, mul, or};
+
+    #[test]
+    fn test_pure_sat_resolution() {
+        let mut solver = SmtSolver::new();
+
+        let a = solver.new_bool();
+        let b = solver.new_bool();
+        let c = solver.new_bool();
+
+        // (A ∨ B) ∧ (¬B ∨ C) ∧ (¬B ∨ ¬C) ∧ (¬A)
+        // With ¬A, clause (A ∨ B) forces B; then B forces both C and ¬C.
+        let expr = and([or([a.clone(), b.clone()]), or([!b.clone(), c.clone()]), or([!b, !c]), !a]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_early_bounding_unsat() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+
+        // x > 10 ∧ x < 5
+        let expr = and([gt(x.clone(), cst(10)), lt(x, cst(5))]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_equality_mutually_exclusive() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+
+        // x == 5 ∧ x > 6
+        let expr = and([aeq(x.clone(), cst(5)), gt(x, cst(6))]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_simplex_system_unsat() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+        let y = solver.new_real();
+
+        // x + y == 10
+        let eq_expr = aeq(add([x.clone(), y.clone()]), cst(10));
+        // x > 6
+        let gt_x = gt(x.clone(), cst(6));
+        // y > 6
+        let gt_y = gt(y.clone(), cst(6));
+
+        let expr = and([eq_expr, gt_x, gt_y]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_simplex_system_sat() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+        let y = solver.new_real();
+        let z = solver.new_real();
+
+        // 2x - y + z == 10
+        let exp1 = add([mul([cst(2), x.clone()]), mul([cst(-1), y.clone()]), z.clone()]);
+        let eq1 = aeq(exp1, cst(10));
+
+        // x > 0, y > 0, z > 0
+        let bnd = and([gt(x.clone(), cst(0)), gt(y.clone(), cst(0)), gt(z.clone(), cst(0))]);
+
+        let result = solver.assert(&and([eq1, bnd]));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_dpllt_backtracking_over_theory() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+
+        let expr = and([or([lt(x.clone(), cst(0)), gt(x.clone(), cst(10))]), gt(x.clone(), cst(5)), lt(x.clone(), cst(15))]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_dpllt_negated_equality_branching() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+        let y = solver.new_real();
+
+        let not_eq = !aeq(x.clone(), y.clone());
+
+        let force_lt = and([lt(x.clone(), cst(10)), gt(y.clone(), cst(20))]);
+
+        let expr = and([not_eq, force_lt]);
+
+        let result = solver.assert(&expr);
+        assert!(result.is_ok());
     }
 }
