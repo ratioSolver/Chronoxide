@@ -1,30 +1,34 @@
-use crate::smt::ast::BoolExpr;
+use crate::smt::{rational::InfRational, sat_solver::Lit};
 use std::collections::HashMap;
 
-pub(super) struct ProxyRegistry {
-    sat_to_ast: Vec<Option<BoolExpr>>,    // Map from SAT variable index to its corresponding AST expression
-    ast_to_sat: HashMap<BoolExpr, usize>, // Map from AST expression to its corresponding SAT variable index
+pub struct ProxyRegistry {
+    pub proxy_to_constraint: HashMap<Lit, TheoryConstraint>,
+    pub constraint_to_proxy: HashMap<TheoryConstraint, Lit>,
 }
 
 impl ProxyRegistry {
-    pub(super) fn new() -> Self {
-        ProxyRegistry { sat_to_ast: Vec::new(), ast_to_sat: HashMap::new() }
+    pub fn new() -> Self {
+        Self { proxy_to_constraint: HashMap::new(), constraint_to_proxy: HashMap::new() }
     }
 
-    pub(super) fn get_proxy(&self, expr: &BoolExpr) -> Option<&usize> {
-        self.ast_to_sat.get(expr)
+    pub fn get_proxy(&self, constraint: &TheoryConstraint) -> Option<&Lit> {
+        self.constraint_to_proxy.get(constraint)
     }
 
-    pub(super) fn register_proxy(&mut self, expr: BoolExpr, sat_var: usize) {
-        self.ast_to_sat.insert(expr.clone(), sat_var);
-        if self.sat_to_ast.len() <= sat_var {
-            self.sat_to_ast.resize(sat_var + 1, None);
-        }
-        self.sat_to_ast[sat_var] = Some(expr);
+    pub fn get_constraint(&self, lit: Lit) -> Option<&TheoryConstraint> {
+        self.proxy_to_constraint.get(&lit)
     }
 
-    pub(super) fn get_ast(&self, lit: crate::smt::sat_solver::Lit) -> Option<&BoolExpr> {
-        let var = lit.var();
-        if var < self.sat_to_ast.len() { self.sat_to_ast[var].as_ref() } else { None }
+    pub fn register(&mut self, constraint: TheoryConstraint, lit: Lit) {
+        self.proxy_to_constraint.insert(lit, constraint.clone());
+        self.constraint_to_proxy.insert(constraint, lit);
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum TheoryConstraint {
+    LraLb(usize, InfRational),
+    LraUb(usize, InfRational),
+    LraEq(usize, InfRational),
+    EnumEq(usize, i32),
 }

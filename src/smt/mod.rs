@@ -9,7 +9,7 @@ use crate::smt::{
     ast::{ArithExpr, BoolExpr, EnumExpr, Expr},
     enum_theory::EnumTheory,
     lra_theory::{LraTheory, SparseRow},
-    proxy::ProxyRegistry,
+    proxy::{ProxyRegistry, TheoryConstraint},
     rational::{InfRational, Rational},
     sat_solver::{Lit, SatSolver},
 };
@@ -85,9 +85,6 @@ impl SmtSolver {
                 }
                 self.sat_solver.add_clause(clause).is_ok()
             }
-            (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_lb(None, *var, bound.clone()).is_ok(),
-            (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_ub(None, *var, bound.clone()).is_ok(),
-            (BoolExpr::ArithEq(var, val), true) => self.lra_theory.set_lb(None, *var, val.clone()).is_ok() && self.lra_theory.set_ub(None, *var, val.clone()).is_ok(),
             (BoolExpr::Lt(e1, e2), _) | (BoolExpr::Le(e1, e2), _) | (BoolExpr::Ge(e1, e2), _) | (BoolExpr::Gt(e1, e2), _) => {
                 let (vars, const_term) = self.diff(e1, e2);
                 if vars.is_empty() {
@@ -113,19 +110,17 @@ impl SmtSolver {
                     _ => unreachable!(),
                 };
 
+                let bound = InfRational::new(Rational::Finite(-const_term.clone()), eps_val);
+
                 if vars.len() == 1 {
                     let (var, coeff) = vars.iter().next().unwrap();
-                    let bound = InfRational::new(Rational::Finite((-const_term.clone()) / coeff), eps_val / coeff);
-                    let expr = if is_upper_bound == coeff.is_positive() { BoolExpr::Ub(*var, bound) } else { BoolExpr::Lb(*var, bound) };
-                    self.assert_internal(&expr, true)
+                    let final_bound = bound / coeff.clone();
+                    if is_upper_bound == coeff.is_positive() { self.lra_theory.set_ub(None, *var, final_bound).is_ok() } else { self.lra_theory.set_lb(None, *var, final_bound).is_ok() }
                 } else {
                     let slack = self.get_or_create_slack(vars);
-                    let bound = InfRational::new(Rational::Finite(-const_term), eps_val);
-                    let expr = if is_upper_bound { BoolExpr::Ub(slack, bound) } else { BoolExpr::Lb(slack, bound) };
-                    self.assert_internal(&expr, true)
+                    if is_upper_bound { self.lra_theory.set_ub(None, slack, bound).is_ok() } else { self.lra_theory.set_lb(None, slack, bound).is_ok() }
                 }
             }
-
             (BoolExpr::Eq(e1, e2), _) => {
                 if let (Expr::Arith(a1), Expr::Arith(a2)) = (&**e1, &**e2) {
                     let (vars, const_term) = self.diff(a1, a2);
@@ -136,14 +131,15 @@ impl SmtSolver {
                     }
 
                     if polarity {
+                        let bound = InfRational::new(Rational::Finite(-const_term.clone()), rug::Rational::from(0));
+
                         if vars.len() == 1 {
                             let (var, coeff) = vars.iter().next().unwrap();
-                            let bound = InfRational::new(Rational::Finite((-const_term) / coeff), rug::Rational::from(0));
-                            self.assert_internal(&BoolExpr::ArithEq(*var, bound), true)
+                            let final_bound = bound / coeff.clone();
+                            self.lra_theory.set_lb(None, *var, final_bound.clone()).is_ok() && self.lra_theory.set_ub(None, *var, final_bound).is_ok()
                         } else {
                             let slack = self.get_or_create_slack(vars);
-                            let bound = InfRational::new(Rational::Finite(-const_term), rug::Rational::from(0));
-                            self.assert_internal(&BoolExpr::ArithEq(slack, bound), true)
+                            self.lra_theory.set_lb(None, slack, bound.clone()).is_ok() && self.lra_theory.set_ub(None, slack, bound).is_ok()
                         }
                     } else {
                         let lt_lit = self.mk_le(a1, a2, true);
@@ -158,7 +154,6 @@ impl SmtSolver {
                     self.sat_solver.add_clause(vec![lit]).is_ok()
                 }
             }
-
             _ => {
                 let mut lit = self.encode_bool(expr);
                 if !polarity {
@@ -220,7 +215,6 @@ impl SmtSolver {
             BoolExpr::Eq(e1, e2) => {
                 self.encode_eq(e1, e2) // Vedi spiegazione sotto
             }
-            BoolExpr::Lb(_, _) | BoolExpr::Ub(_, _) | BoolExpr::ArithEq(_, _) => self.get_or_create_proxy(expr.clone()),
         }
     }
 
@@ -312,12 +306,12 @@ impl SmtSolver {
             1 => {
                 let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) } / coeff);
-                let bound = if coeff.is_positive() { BoolExpr::Ub(*var, bound) } else { BoolExpr::Lb(*var, bound) };
+                let bound = if coeff.is_positive() { TheoryConstraint::LraUb(*var, bound) } else { TheoryConstraint::LraLb(*var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
-                let bound = BoolExpr::Ub(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) }));
+                let bound = TheoryConstraint::LraUb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
         }
@@ -340,11 +334,11 @@ impl SmtSolver {
             1 => {
                 let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), rug::Rational::from(0));
-                self.get_or_create_proxy(BoolExpr::ArithEq(*var, bound))
+                self.get_or_create_proxy(TheoryConstraint::LraEq(*var, bound))
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
-                let bound = BoolExpr::ArithEq(slack, InfRational::new(Rational::Finite(-const_term), rug::Rational::from(0)));
+                let bound = TheoryConstraint::LraEq(slack, InfRational::new(Rational::Finite(-const_term), rug::Rational::from(0)));
                 self.get_or_create_proxy(bound)
             }
         }
@@ -364,12 +358,12 @@ impl SmtSolver {
             1 => {
                 let (var, coeff) = vars.iter().next().unwrap();
                 let bound = InfRational::new(Rational::Finite(-const_term.clone() / coeff), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) } / coeff);
-                let bound = if coeff.is_positive() { BoolExpr::Lb(*var, bound) } else { BoolExpr::Ub(*var, bound) };
+                let bound = if coeff.is_positive() { TheoryConstraint::LraLb(*var, bound) } else { TheoryConstraint::LraUb(*var, bound) };
                 self.get_or_create_proxy(bound)
             }
             _ => {
                 let slack = self.get_or_create_slack(vars);
-                let bound = BoolExpr::Lb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) }));
+                let bound = TheoryConstraint::LraLb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
         }
@@ -472,12 +466,12 @@ impl SmtSolver {
         }
     }
 
-    fn get_or_create_proxy(&mut self, bound: BoolExpr) -> Lit {
-        if let Some(&sat_var) = self.registry.get_proxy(&bound) {
-            Lit::new(sat_var, false)
+    fn get_or_create_proxy(&mut self, constraint: TheoryConstraint) -> Lit {
+        if let Some(&sat_var) = self.registry.get_proxy(&constraint) {
+            sat_var
         } else {
             let sat_var = self.sat_solver.mk_var();
-            self.registry.register_proxy(bound, sat_var);
+            self.registry.register(constraint, Lit::new(sat_var, false));
             Lit::new(sat_var, false)
         }
     }
@@ -509,15 +503,15 @@ impl SmtSolver {
 
         while self.notified_len < self.sat_solver.trail.len() {
             let lit = self.sat_solver.trail[self.notified_len];
-            if let Some(expr) = self.registry.get_ast(lit)
+            if let Some(expr) = self.registry.get_constraint(lit)
                 && let Err(lemma) = match (expr, lit.sign()) {
-                    (BoolExpr::Ub(var, bound), false) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
-                    (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_negative() { rug::Rational::from(0) } else { rug::Rational::from(-1) })).map(|_| ()),
-                    (BoolExpr::Lb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
-                    (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(1) })).map(|_| ()),
-                    (BoolExpr::ArithEq(var, val), false) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
-                    (BoolExpr::ArithEq(_, _), true) => unreachable!("Negated arithmetic equalities are not supported on the SAT trail"),
-                    _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
+                    (TheoryConstraint::LraUb(var, bound), false) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
+                    (TheoryConstraint::LraLb(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_negative() { rug::Rational::from(0) } else { rug::Rational::from(-1) })).map(|_| ()),
+                    (TheoryConstraint::LraLb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
+                    (TheoryConstraint::LraUb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(1) })).map(|_| ()),
+                    (TheoryConstraint::LraEq(var, val), false) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
+                    (TheoryConstraint::LraEq(_, _), true) => unreachable!("Negated arithmetic equalities are not supported on the SAT trail"),
+                    _ => unreachable!("Unexpected TheoryConstraint in SAT trail: {:?}", expr),
                 }
             {
                 return Err(Self::build_conflict(lemma));

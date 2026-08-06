@@ -43,9 +43,6 @@ pub enum BoolExpr {
     Eq(Box<Expr>, Box<Expr>),
     Ge(ArithExpr, ArithExpr),
     Gt(ArithExpr, ArithExpr),
-    Lb(usize, InfRational),
-    ArithEq(usize, InfRational),
-    Ub(usize, InfRational),
 }
 
 impl From<bool> for BoolExpr {
@@ -82,9 +79,6 @@ impl fmt::Display for BoolExpr {
             BoolExpr::Eq(e1, e2) => write!(f, "{} = {}", e1, e2),
             BoolExpr::Ge(a1, a2) => write!(f, "{} ≥ {}", a1, a2),
             BoolExpr::Gt(a1, a2) => write!(f, "{} > {}", a1, a2),
-            BoolExpr::Lb(v, r) => write!(f, "{} ≥ {}", v, r),
-            BoolExpr::ArithEq(v, r) => write!(f, "{} = {}", v, r),
-            BoolExpr::Ub(v, r) => write!(f, "{} ≤ {}", v, r),
         }
     }
 }

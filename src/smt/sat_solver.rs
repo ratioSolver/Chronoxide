@@ -333,7 +333,7 @@ impl fmt::Display for SatSolver {
 }
 
 // Compact encoding: x = var*2 + sign_bit, where sign_bit=1 means negated (MiniSat convention).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lit {
     x: usize,
 }
