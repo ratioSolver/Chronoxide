@@ -79,10 +79,6 @@ impl LraTheory {
         &self.ubs.get(var).expect("variable index out of bounds").1
     }
 
-    pub(super) fn is_int(&self, var: usize) -> bool {
-        *self.ints.get(var).expect("variable index out of bounds")
-    }
-
     pub(super) fn set_lb(&mut self, lit: Option<Lit>, var: usize, new_lb: InfRational) -> Result<bool, Vec<Lit>> {
         assert!(var < self.reals.len(), "variable index out of bounds: {var}");
 
