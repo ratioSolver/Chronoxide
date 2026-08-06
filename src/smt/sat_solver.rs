@@ -184,6 +184,9 @@ impl SatSolver {
                     continue;
                 }
                 _ => {
+                    if simplified_lits.contains(&!lit) {
+                        return Ok(());
+                    }
                     if !simplified_lits.contains(&lit) {
                         simplified_lits.push(lit);
                     }
