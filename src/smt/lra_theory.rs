@@ -415,7 +415,7 @@ impl SparseRow {
         }
     }
 
-    pub fn add_scaled(&mut self, other: &SparseRow, scale: &RugRational, watches: &mut Vec<HashSet<usize>>, target_row_var: usize) {
+    pub fn add_scaled(&mut self, other: &SparseRow, scale: &RugRational, watches: &mut [HashSet<usize>], target_row_var: usize) {
         let mut new_terms = Vec::with_capacity(self.terms.len() + other.terms.len());
         let mut i = 0;
         let mut j = 0;
@@ -486,7 +486,6 @@ mod tests {
     use super::*;
     use rug::Rational as RugRational;
 
-    /// Helper per creare rapidamente un InfRational senza parte infinitesimale
     fn real(val: i32) -> InfRational {
         InfRational::new(Rational::Finite(RugRational::from(val)), RugRational::from(0))
     }
@@ -541,8 +540,8 @@ mod tests {
         lra.reals[y] = real(3);
         lra.reals[s] = real(8);
 
-        lra.set_lb(None, s, real(0));
-        lra.set_ub(None, s, real(10));
+        lra.set_lb(None, s, real(0)).expect("setting lower bound should succeed");
+        lra.set_ub(None, s, real(10)).expect("setting upper bound should succeed");
 
         lra.pivot_and_update(y, s, real(6));
 
@@ -561,14 +560,13 @@ mod tests {
 
         add_test_row(&mut lra, s, &[(x, 1), (y, 1)]); // s = x + y
 
-        lra.set_lb(None, x, real(0));
-        lra.set_ub(None, x, real(10));
-        lra.set_lb(None, y, real(-10));
-        lra.set_ub(None, y, real(10));
+        lra.set_lb(None, x, real(0)).expect("setting lower bound should succeed");
+        lra.set_ub(None, x, real(10)).expect("setting upper bound should succeed");
+        lra.set_lb(None, y, real(-10)).expect("setting lower bound should succeed");
+        lra.set_ub(None, y, real(10)).expect("setting upper bound should succeed");
+        lra.set_ub(None, s, real(5)).expect("setting upper bound should succeed");
 
-        lra.set_ub(None, s, real(5));
-
-        lra.set_lb(None, x, real(6));
+        lra.set_lb(None, x, real(6)).expect("setting lower bound should succeed");
 
         assert!(lra.value(s) > lra.ub(s));
 
@@ -593,13 +591,13 @@ mod tests {
 
         add_test_row(&mut lra, s, &[(x, 1), (y, 1)]);
 
-        lra.set_lb(Some(Lit::new(1, false)), x, real(3));
+        lra.set_lb(Some(Lit::new(1, false)), x, real(3)).expect("setting lower bound should succeed");
         assert_eq!(lra.value(s), &real(3));
 
-        lra.set_lb(Some(Lit::new(2, false)), y, real(4));
+        lra.set_lb(Some(Lit::new(2, false)), y, real(4)).expect("setting lower bound should succeed");
         assert_eq!(lra.value(s), &real(7));
 
-        lra.set_ub(Some(Lit::new(3, false)), s, real(5));
+        lra.set_ub(Some(Lit::new(3, false)), s, real(5)).expect("setting upper bound should succeed");
 
         let result = lra.check();
 
