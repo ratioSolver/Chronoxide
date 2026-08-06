@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    fmt, mem, ops,
-};
+use std::{collections::VecDeque, fmt, mem, ops};
 use tracing::trace;
 
 pub(super) struct SatSolver {
@@ -149,7 +146,7 @@ impl SatSolver {
             let next_p = self.trail[index];
             p_lit = Some(next_p);
             confl = self.reason[next_p.var()].unwrap_or_default();
-            self.seen[next_p.var()] = false; 
+            self.seen[next_p.var()] = false;
             path_c -= 1;
 
             if path_c == 0 {
@@ -268,10 +265,8 @@ impl SatSolver {
                 self.clauses.push(clause);
                 if self.lit_value(&simplified_lits[0]) == Some(false) {
                     return Err(simplified_lits);
-                } else if self.lit_value(&simplified_lits[1]) == Some(false) {
-                    if !self.enqueue(simplified_lits[0], Some(clause_index)) {
-                        return Err(simplified_lits);
-                    }
+                } else if self.lit_value(&simplified_lits[1]) == Some(false) && !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                    return Err(simplified_lits);
                 }
             }
         }
