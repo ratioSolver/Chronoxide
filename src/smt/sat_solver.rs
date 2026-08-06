@@ -2,17 +2,17 @@ use std::{collections::VecDeque, fmt, mem, ops};
 use tracing::trace;
 
 pub(super) struct SatSolver {
-    assigns: Vec<Option<bool>>,  // Current assignments of boolean variables (None = unassigned, Some(true/false) = assigned)
-    clauses: Vec<Clause>,        // List of clauses in the solver
-    watches: Vec<Vec<usize>>,    // Watch lists for each literal (positive and negative)
-    reason: Vec<Option<usize>>,  // Reason for each variable's assignment
-    seen: Vec<bool>,             // Temporary storage for conflict analysis
-    analyze_toclear: Vec<usize>, // Temporary storage for conflict analysis
-    prop_q: VecDeque<Lit>,       // Queue of literals to propagate
-    pub(super) trail: Vec<Lit>,  // Trail of assigned literals for backtracking
-    trail_lim: Vec<usize>,       // Indices in the trail where decisions were made
-    level: Vec<Option<usize>>,   // Decision level for each variable
-    true_var: usize,             // Index of the variable representing the constant true (used for unit propagation)
+    pub(super) assigns: Vec<Option<bool>>, // Current assignments of boolean variables (None = unassigned, Some(true/false) = assigned)
+    clauses: Vec<Clause>,                  // List of clauses in the solver
+    watches: Vec<Vec<usize>>,              // Watch lists for each literal (positive and negative)
+    reason: Vec<Option<usize>>,            // Reason for each variable's assignment
+    seen: Vec<bool>,                       // Temporary storage for conflict analysis
+    analyze_toclear: Vec<usize>,           // Temporary storage for conflict analysis
+    prop_q: VecDeque<Lit>,                 // Queue of literals to propagate
+    pub(super) trail: Vec<Lit>,            // Trail of assigned literals for backtracking
+    trail_lim: Vec<usize>,                 // Indices in the trail where decisions were made
+    level: Vec<Option<usize>>,             // Decision level for each variable
+    true_var: usize,                       // Index of the variable representing the constant true (used for unit propagation)
 }
 
 impl SatSolver {
@@ -290,7 +290,7 @@ impl SatSolver {
         self.level.get(var).copied().expect("Variable index out of bounds")
     }
 
-    fn decision_level(&self) -> usize {
+    pub(super) fn decision_level(&self) -> usize {
         self.trail_lim.len()
     }
 

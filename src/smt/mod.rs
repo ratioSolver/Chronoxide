@@ -482,6 +482,26 @@ impl SmtSolver {
         }
     }
 
+    fn build_conflict(lemma: Vec<Lit>) -> Vec<BoolExpr> {
+        lemma
+            .into_iter()
+            .map(|lit| {
+                let var = BoolExpr::Var(lit.var());
+                if lit.sign() { BoolExpr::Not(Box::new(var)) } else { var }
+            })
+            .collect()
+    }
+
+    fn negate_ub(bound: &InfRational) -> InfRational {
+        let (rat, inf) = bound.clone().into_parts();
+        InfRational::new(rat, rug::Rational::from(if inf < 0 { 0 } else { 1 }))
+    }
+
+    fn negate_lb(bound: &InfRational) -> InfRational {
+        let (rat, inf) = bound.clone().into_parts();
+        InfRational::new(rat, rug::Rational::from(if inf > 0 { 0 } else { -1 }))
+    }
+
     pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
         self.sat_solver.push();
         self.lra_theory.push();
@@ -490,58 +510,95 @@ impl SmtSolver {
     }
 
     pub fn propagate(&mut self) -> Result<(), Vec<BoolExpr>> {
-        if let Err((bt_level, conflict_clause)) = self.sat_solver.propagate() {
+        if let Err((bt_level, conflict)) = self.sat_solver.propagate() {
             self.sat_solver.cancel_until(bt_level);
             self.lra_theory.cancel_until(bt_level);
             self.notified_len = self.sat_solver.trail.len();
-            let conflict_clause = conflict_clause
-                .into_iter()
-                .map(|lit| {
-                    let var = lit.var();
-                    if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
-                })
-                .collect();
-            return Err(conflict_clause);
+            return Err(Self::build_conflict(conflict));
         }
 
         while self.notified_len < self.sat_solver.trail.len() {
             let lit = self.sat_solver.trail[self.notified_len];
             if let Some(expr) = self.registry.get_ast(lit)
-                && let Err(lemma) = match expr {
-                    BoolExpr::Ub(var, bound) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
-                    BoolExpr::Lb(var, bound) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
-                    BoolExpr::ArithEq(var, val) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
+                && let Err(lemma) = match (expr, lit.sign()) {
+                    (BoolExpr::Ub(var, bound), false) => self.lra_theory.set_ub(Some(lit), *var, bound.clone()).map(|_| ()),
+                    (BoolExpr::Ub(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, Self::negate_ub(bound)).map(|_| ()),
+                    (BoolExpr::Lb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()).map(|_| ()),
+                    (BoolExpr::Lb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, Self::negate_lb(bound)).map(|_| ()),
+                    (BoolExpr::ArithEq(var, val), false) => self.lra_theory.set_lb(Some(lit), *var, val.clone()).and_then(|_| self.lra_theory.set_ub(Some(lit), *var, val.clone())).map(|_| ()),
+                    (BoolExpr::ArithEq(_, _), true) => unreachable!("Negated arithmetic equalities are not supported on the SAT trail"),
                     _ => unreachable!("Unexpected BoolExpr in SAT trail: {:?}", expr),
                 }
             {
-                let conflict_clause = lemma
-                    .into_iter()
-                    .map(|lit| {
-                        let var = lit.var();
-                        if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
-                    })
-                    .collect();
-                return Err(conflict_clause);
+                return Err(Self::build_conflict(lemma));
             }
             self.notified_len += 1;
         }
 
-        if let Err(conflict_clause) = self.lra_theory.check() {
-            let conflict_clause = conflict_clause
-                .into_iter()
-                .map(|lit| {
-                    let var = lit.var();
-                    if lit.sign() { BoolExpr::Not(Box::new(BoolExpr::Var(var))) } else { BoolExpr::Var(var) }
-                })
-                .collect();
-            return Err(conflict_clause);
+        if let Err(conflict) = self.lra_theory.check() {
+            return Err(Self::build_conflict(conflict));
         }
         Ok(())
+    }
+
+    /// Explores the search space to find a valid model or prove UNSAT.
+    pub fn check_sat(&mut self) -> bool {
+        // 1. Initial root-level propagation
+        if self.propagate().is_err() {
+            return false; // Immediate UNSAT at level 0
+        }
+
+        loop {
+            // 2. Find the next unassigned boolean variable
+            let mut unassigned_var = None;
+            for i in 0..self.sat_solver.assigns.len() {
+                if self.sat_solver.value(i).is_none() {
+                    unassigned_var = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(var) = unassigned_var {
+                // 3. Guess a polarity (e.g., false)
+                let lit = Lit::new(var, false);
+
+                // 4. Decide and propagate (SAT + Theory)
+                if let Err(lemma) = self.decide(lit) {
+                    // We hit a conflict! If we are at the root level, the problem is UNSAT.
+                    if self.sat_solver.decision_level() == 0 {
+                        return false;
+                    }
+
+                    // For simplicity and robustness in this loop, we perform a restart to level 0.
+                    // (A production solver would compute the asserting level and jump back to it).
+                    self.sat_solver.cancel_until(0);
+                    self.lra_theory.cancel_until(0);
+                    self.notified_len = self.sat_solver.trail.len();
+
+                    // 5. Learn the theory conflict as a new SAT clause
+                    let mut learned_clause = Vec::with_capacity(lemma.len());
+                    for expr in lemma {
+                        // Re-encode the AST lemma into SAT literals
+                        learned_clause.push(self.encode_bool(&expr));
+                    }
+
+                    // Add the learned clause. If adding it triggers an immediate conflict, it's UNSAT.
+                    if self.sat_solver.add_clause(learned_clause).is_err() {
+                        return false;
+                    }
+                }
+            } else {
+                // All variables are assigned and no conflicts were found.
+                return true; // SAT
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tracing::{Level, subscriber};
+
     use super::*;
     use crate::smt::ast::{add, aeq, and, cst, gt, lt, mul, or};
 
@@ -620,17 +677,28 @@ mod tests {
 
         let result = solver.assert(&and([eq1, bnd]));
         assert!(result.is_ok());
+
+        // Triggers the search loop to assign values to the slack variables
+        assert!(solver.check_sat(), "The system has valid real solutions and should be SAT");
     }
 
     #[test]
     fn test_dpllt_backtracking_over_theory() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
         let mut solver = SmtSolver::new();
         let x = solver.new_real();
 
+        // (x < 0 ∨ x > 10) ∧ (x > 5) ∧ (x < 15)
         let expr = and([or([lt(x.clone(), cst(0)), gt(x.clone(), cst(10))]), gt(x.clone(), cst(5)), lt(x.clone(), cst(15))]);
 
         let result = solver.assert(&expr);
         assert!(result.is_ok());
+
+        // check_sat will guess (x < 0), the theory will reject it against (x > 5),
+        // the solver will learn the lemma, backtrack, and pick (x > 10) instead.
+        assert!(solver.check_sat(), "Solver must backtrack from the x < 0 branch and find the SAT path");
     }
 
     #[test]
@@ -647,5 +715,9 @@ mod tests {
 
         let result = solver.assert(&expr);
         assert!(result.is_ok());
+
+        // The solver will branch on the disjunction, fail one path due to LRA bounds,
+        // and backtrack to validate the other.
+        assert!(solver.check_sat(), "Solver must resolve negated equality branching correctly");
     }
 }
