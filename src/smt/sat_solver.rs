@@ -172,28 +172,52 @@ impl SatSolver {
             Some(value) => value,
         }
     }
-
     pub(super) fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), Vec<Lit>> {
-        let mut lits = lits.into_iter().collect::<Vec<_>>();
-        match lits.len() {
-            0 => return Err(lits),
+        let mut simplified_lits = Vec::new();
+
+        for lit in lits {
+            match self.lit_value(&lit) {
+                Some(true) if self.level(lit.var()) == Some(0) => {
+                    return Ok(());
+                }
+                Some(false) if self.level(lit.var()) == Some(0) => {
+                    continue;
+                }
+                _ => {
+                    if !simplified_lits.contains(&lit) {
+                        simplified_lits.push(lit);
+                    }
+                }
+            }
+        }
+
+        match simplified_lits.len() {
+            0 => return Err(simplified_lits),
             1 => {
-                self.cancel_until(0);
-                if !self.enqueue(lits[0], None) {
-                    return Err(lits);
+                if self.decision_level() > 0 {
+                    self.cancel_until(0);
+                }
+                if !self.enqueue(simplified_lits[0], None) {
+                    return Err(simplified_lits);
                 }
             }
             _ => {
                 let clause_index = self.clauses.len();
-                lits.sort_by_key(|l| self.assigns.get(l.var()).copied().unwrap_or(None).is_some());
-                let clause = Clause { lits: lits.clone() };
+
+                simplified_lits.sort_by_key(|l| self.lit_value(l).is_some());
+
+                let clause = Clause { lits: simplified_lits.clone() };
                 trace!("Adding clause {}: {}", clause_index, clause);
+
                 for lit in &clause.lits[0..2] {
                     self.watches[lit.index()].push(clause_index);
                 }
                 self.clauses.push(clause);
-                if self.lit_value(&lits[0]).is_none() && self.lit_value(&lits[1]) == Some(false) && !self.enqueue(lits[0], Some(clause_index)) {
-                    return Err(lits);
+
+                if self.lit_value(&simplified_lits[0]).is_none() && self.lit_value(&simplified_lits[1]) == Some(false) {
+                    if !self.enqueue(simplified_lits[0], Some(clause_index)) {
+                        return Err(simplified_lits);
+                    }
                 }
             }
         }
@@ -209,8 +233,8 @@ impl SatSolver {
         if lit.sign() { val.map(|v| !v) } else { *val }
     }
 
-    fn level(&self, var: usize) -> &Option<usize> {
-        self.level.get(var).expect("Variable index out of bounds")
+    fn level(&self, var: usize) -> Option<usize> {
+        self.level.get(var).copied().expect("Variable index out of bounds")
     }
 
     fn decision_level(&self) -> usize {
