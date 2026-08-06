@@ -57,12 +57,12 @@ impl SmtSolver {
                 let proxy_lit = Lit::new(proxy_var, true);
 
                 for &lit in &lits {
-                    self.sat_solver.add_clause(vec![!proxy_lit, lit]);
+                    self.sat_solver.add_clause(vec![!proxy_lit, lit]).expect("Failed to add clause");
                 }
 
                 let mut big_clause: Vec<Lit> = lits.into_iter().map(|l| !l).collect();
                 big_clause.push(proxy_lit);
-                self.sat_solver.add_clause(big_clause);
+                self.sat_solver.add_clause(big_clause).expect("Failed to add clause");
 
                 proxy_lit
             }
@@ -76,12 +76,12 @@ impl SmtSolver {
                 let proxy_lit = Lit::new(proxy_var, true);
 
                 for &lit in &lits {
-                    self.sat_solver.add_clause(vec![!lit, proxy_lit]);
+                    self.sat_solver.add_clause(vec![!lit, proxy_lit]).expect("Failed to add clause");
                 }
 
                 let mut big_clause = lits;
                 big_clause.push(!proxy_lit);
-                self.sat_solver.add_clause(big_clause);
+                self.sat_solver.add_clause(big_clause).expect("Failed to add clause");
 
                 proxy_lit
             }
