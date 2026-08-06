@@ -50,7 +50,6 @@ impl EnumTheory {
     pub fn set_eq(&mut self, lit: Option<Lit>, var: usize, val: i32, is_eq: bool) -> Result<bool, Vec<Lit>> {
         if is_eq {
             if !self.active_domains[var].contains(&val) {
-                // CONFLITTO: `val` era già stato escluso dal dominio.
                 let mut conflict = Vec::with_capacity(2);
                 if let Some(l) = lit {
                     conflict.push(!l);
