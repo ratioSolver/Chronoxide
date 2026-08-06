@@ -499,6 +499,14 @@ mod tests {
         theory.tableau.insert(basic_var, row);
     }
 
+    fn build_row(terms: &[(usize, i32)]) -> SparseRow {
+        let mut row = SparseRow::new();
+        for &(var, coeff) in terms {
+            row.insert(var, RugRational::from(coeff));
+        }
+        row
+    }
+
     #[test]
     fn test_pure_pivot_algebra() {
         let mut lra = LraTheory::new();
@@ -607,5 +615,67 @@ mod tests {
         assert!(conflict.contains(&Lit::new(1, true)));
         assert!(conflict.contains(&Lit::new(2, true)));
         assert!(conflict.contains(&Lit::new(3, true)));
+    }
+
+    #[test]
+    fn test_sparse_row_add_scaled_cancellation() {
+        // row1 = 2*v0 + 3*v1 - 1*v3
+        let mut row1 = build_row(&[(0, 2), (1, 3), (3, -1)]);
+        // row2 = 1*v1 + 4*v2 + 2*v3
+        let row2 = build_row(&[(1, 1), (2, 4), (3, 2)]);
+
+        let mut watches = vec![HashSet::new(); 4];
+        let target_row = 10;
+
+        watches[0].insert(target_row);
+        watches[1].insert(target_row);
+        watches[3].insert(target_row);
+
+        let scale = RugRational::from(-3);
+        row1.add_scaled(&row2, &scale, &mut watches, target_row);
+
+        assert_eq!(row1.len(), 3, "The row should have exactly 3 active terms");
+        assert_eq!(row1.get(&0), Some(&RugRational::from(2)));
+        assert_eq!(row1.get(&1), None, "v1 should have been removed from the row");
+        assert_eq!(row1.get(&2), Some(&RugRational::from(-12)));
+        assert_eq!(row1.get(&3), Some(&RugRational::from(-7)));
+
+        assert!(watches[0].contains(&target_row), "The watch for v0 should remain unchanged");
+        assert!(!watches[1].contains(&target_row), "The watch for v1 should have been removed because the coefficient became zero");
+        assert!(watches[2].contains(&target_row), "The watch for v2 should have been added dynamically");
+        assert!(watches[3].contains(&target_row), "The watch for v3 should remain unchanged after the coefficient update");
+    }
+
+    #[test]
+    fn test_tableau_pivot_nested_substitution() {
+        let mut lra = LraTheory::new();
+
+        let x = lra.mk_real(); // 0
+        let y = lra.mk_real(); // 1
+        let z = lra.mk_real(); // 2
+
+        let s1 = lra.mk_real(); // 3 (slack 1)
+        let s2 = lra.mk_real(); // 4 (slack 2)
+
+        // s1 = 2x + 1y - 1z
+        add_test_row(&mut lra, s1, &[(x, 2), (y, 1), (z, -1)]);
+        // s2 = 1x - 1y + 2z
+        add_test_row(&mut lra, s2, &[(x, 1), (y, -1), (z, 2)]);
+
+        lra.pivot(x, s2);
+
+        let row_s1 = lra.tableau.get(&s1).expect("s1 should still be present in the tableau");
+
+        assert_eq!(row_s1.get(&s2), Some(&RugRational::from(2)));
+        assert_eq!(row_s1.get(&y), Some(&RugRational::from(3)));
+        assert_eq!(row_s1.get(&z), Some(&RugRational::from(-5)));
+
+        assert_eq!(row_s1.get(&x), None, "x is now basic, so it cannot appear in s1");
+
+        // Verify that the reverse dependencies (watches) remain consistent.
+        assert!(!lra.t_watches[x].contains(&s1), "s1 should no longer watch x");
+        assert!(lra.t_watches[s2].contains(&s1), "s1 should now watch s2");
+        assert!(lra.t_watches[y].contains(&s1));
+        assert!(lra.t_watches[z].contains(&s1));
     }
 }
