@@ -252,8 +252,11 @@ pub fn to_cnf(expr: &BoolExpr) -> BoolExpr {
     distribute(&push_negations(expr))
 }
 
-pub fn cst(val: i32) -> ArithExpr {
+pub fn cst_arith(val: i32) -> ArithExpr {
     ArithExpr::Const(rug::Rational::from(val))
+}
+pub fn cst_enum(val: i32) -> EnumExpr {
+    EnumExpr::Const(val)
 }
 pub fn and(es: impl IntoIterator<Item = BoolExpr>) -> BoolExpr {
     BoolExpr::And(es.into_iter().collect())
@@ -276,8 +279,11 @@ pub fn le(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
 pub fn eq(e1: Expr, e2: Expr) -> BoolExpr {
     BoolExpr::Eq(Box::new(e1), Box::new(e2))
 }
-pub fn aeq(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
+pub fn eq_arith(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
     BoolExpr::Eq(Box::new(Expr::Arith(e1)), Box::new(Expr::Arith(e2)))
+}
+pub fn eq_enum(e1: EnumExpr, e2: EnumExpr) -> BoolExpr {
+    BoolExpr::Eq(Box::new(Expr::Enum(e1)), Box::new(Expr::Enum(e2)))
 }
 pub fn ge(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
     BoolExpr::Ge(e1, e2)

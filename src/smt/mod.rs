@@ -578,10 +578,9 @@ impl SmtSolver {
 
 #[cfg(test)]
 mod tests {
-    use tracing::{Level, subscriber};
-
     use super::*;
-    use crate::smt::ast::{add, aeq, and, cst, gt, lt, mul, or};
+    use crate::smt::ast::{add, and, cst_arith, cst_enum, eq_arith, eq_enum, gt, lt, mul, or};
+    use tracing::{Level, subscriber};
 
     #[test]
     fn test_pure_sat_resolution() {
@@ -605,7 +604,7 @@ mod tests {
         let x = solver.new_real();
 
         // x > 10 ∧ x < 5
-        let expr = and([gt(x.clone(), cst(10)), lt(x, cst(5))]);
+        let expr = and([gt(x.clone(), cst_arith(10)), lt(x, cst_arith(5))]);
 
         let result = solver.assert(&expr);
         assert!(result.is_err());
@@ -617,7 +616,7 @@ mod tests {
         let x = solver.new_real();
 
         // x == 5 ∧ x > 6
-        let expr = and([aeq(x.clone(), cst(5)), gt(x, cst(6))]);
+        let expr = and([eq_arith(x.clone(), cst_arith(5)), gt(x, cst_arith(6))]);
 
         let result = solver.assert(&expr);
         assert!(result.is_err());
@@ -630,11 +629,11 @@ mod tests {
         let y = solver.new_real();
 
         // x + y == 10
-        let eq_expr = aeq(add([x.clone(), y.clone()]), cst(10));
+        let eq_expr = eq_arith(add([x.clone(), y.clone()]), cst_arith(10));
         // x > 6
-        let gt_x = gt(x.clone(), cst(6));
+        let gt_x = gt(x.clone(), cst_arith(6));
         // y > 6
-        let gt_y = gt(y.clone(), cst(6));
+        let gt_y = gt(y.clone(), cst_arith(6));
 
         let expr = and([eq_expr, gt_x, gt_y]);
 
@@ -650,11 +649,11 @@ mod tests {
         let z = solver.new_real();
 
         // 2x - y + z == 10
-        let exp1 = add([mul([cst(2), x.clone()]), mul([cst(-1), y.clone()]), z.clone()]);
-        let eq1 = aeq(exp1, cst(10));
+        let exp1 = add([mul([cst_arith(2), x.clone()]), mul([cst_arith(-1), y.clone()]), z.clone()]);
+        let eq1 = eq_arith(exp1, cst_arith(10));
 
         // x > 0, y > 0, z > 0
-        let bnd = and([gt(x.clone(), cst(0)), gt(y.clone(), cst(0)), gt(z.clone(), cst(0))]);
+        let bnd = and([gt(x.clone(), cst_arith(0)), gt(y.clone(), cst_arith(0)), gt(z.clone(), cst_arith(0))]);
 
         let result = solver.assert(&and([eq1, bnd]));
         assert!(result.is_ok());
@@ -665,14 +664,11 @@ mod tests {
 
     #[test]
     fn test_dpllt_backtracking_over_theory() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut solver = SmtSolver::new();
         let x = solver.new_real();
 
         // (x < 0 ∨ x > 10) ∧ (x > 5) ∧ (x < 15)
-        let expr = and([or([lt(x.clone(), cst(0)), gt(x.clone(), cst(10))]), gt(x.clone(), cst(5)), lt(x.clone(), cst(15))]);
+        let expr = and([or([lt(x.clone(), cst_arith(0)), gt(x.clone(), cst_arith(10))]), gt(x.clone(), cst_arith(5)), lt(x.clone(), cst_arith(15))]);
 
         let result = solver.assert(&expr);
         assert!(result.is_ok());
@@ -688,9 +684,9 @@ mod tests {
         let x = solver.new_real();
         let y = solver.new_real();
 
-        let not_eq = !aeq(x.clone(), y.clone());
+        let not_eq = !eq_arith(x.clone(), y.clone());
 
-        let force_lt = and([lt(x.clone(), cst(10)), gt(y.clone(), cst(20))]);
+        let force_lt = and([lt(x.clone(), cst_arith(10)), gt(y.clone(), cst_arith(20))]);
 
         let expr = and([not_eq, force_lt]);
 
@@ -700,5 +696,71 @@ mod tests {
         // The solver will branch on the disjunction, fail one path due to LRA bounds,
         // and backtrack to validate the other.
         assert!(solver.check_sat(), "Solver must resolve negated equality branching correctly");
+    }
+
+    #[test]
+    fn test_enum_basic_sat() {
+        let mut solver = SmtSolver::new();
+        let e = solver.new_enum(vec![1, 2, 3]);
+
+        let expr = eq_enum(e, cst_enum(2));
+
+        assert!(solver.assert(&expr).is_ok());
+        assert!(solver.check_sat(), "The solver should find a valid assignment for the enum variable");
+    }
+
+    #[test]
+    fn test_enum_out_of_domain_unsat() {
+        let mut solver = SmtSolver::new();
+        let e = solver.new_enum(vec![1, 2]);
+
+        let expr = eq_enum(e, cst_enum(3));
+
+        let result = solver.assert(&expr);
+        assert!(result.is_err(), "The solver should detect that the enum variable cannot take a value outside its domain");
+    }
+
+    #[test]
+    fn test_enum_exhaustive_denial_integration() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+        let mut solver = SmtSolver::new();
+        let e = solver.new_enum(vec![1, 2]);
+
+        // (e != 1) AND (e != 2)
+        let expr = and(vec![!(eq_enum(e.clone(), cst_enum(1))), !(eq_enum(e, cst_enum(2)))]);
+
+        assert!(solver.assert(&expr).is_ok());
+        assert!(!solver.check_sat(), "The solver should detect that the enum variable cannot take a value outside its domain");
+    }
+
+    #[test]
+    fn test_enum_var_to_var_equality() {
+        let mut solver = SmtSolver::new();
+        let e1 = solver.new_enum(vec![1, 2, 3]);
+        let e2 = solver.new_enum(vec![3, 4, 5]);
+
+        let eq_expr = eq_enum(e1.clone(), e2.clone());
+
+        assert!(solver.assert(&eq_expr).is_ok());
+        assert!(solver.check_sat(), "Solver should find a valid assignment for e1 and e2 where they are equal (SAT)");
+
+        let not_3 = !(eq_enum(e1.clone(), cst_enum(3)));
+        assert!(solver.assert(&not_3).is_ok());
+
+        assert!(!solver.check_sat(), "Solver should detect that e1 cannot be equal to e2 without being 3 (UNSAT)");
+    }
+
+    #[test]
+    fn test_enum_dpllt_branching() {
+        let mut solver = SmtSolver::new();
+        let e = solver.new_enum(vec![1, 2, 3]);
+
+        let expr = and([or([eq_enum(e.clone(), cst_enum(1)), eq_enum(e.clone(), cst_enum(2))]), !(eq_enum(e.clone(), cst_enum(1)))]);
+
+        assert!(solver.assert(&expr).is_ok());
+
+        assert!(solver.check_sat(), "Solver should backtrack and explore e == 2 (SAT)");
     }
 }
