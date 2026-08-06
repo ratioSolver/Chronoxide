@@ -41,6 +41,159 @@ impl SmtSolver {
         }
     }
 
+    pub fn assert(&mut self, expr: &BoolExpr) -> Result<(), Vec<BoolExpr>> {
+        self.assert_internal(expr, true)?;
+        self.propagate()
+    }
+
+    fn assert_internal(&mut self, expr: &BoolExpr, polarity: bool) -> Result<(), Vec<BoolExpr>> {
+        match (expr, polarity) {
+            (BoolExpr::Not(inner), _) => self.assert_internal(inner, !polarity),
+            (BoolExpr::And(args), true) | (BoolExpr::Or(args), false) => {
+                for arg in args {
+                    self.assert_internal(arg, polarity)?;
+                }
+                Ok(())
+            }
+            (BoolExpr::Or(args), true) | (BoolExpr::And(args), false) => {
+                let mut clause = Vec::with_capacity(args.len());
+                for arg in args {
+                    let mut lit = self.encode_bool(arg);
+                    if !polarity {
+                        lit = !lit;
+                    }
+                    clause.push(lit);
+                }
+
+                if self.sat_solver.add_clause(clause).is_err() {
+                    return Err(vec![BoolExpr::False]);
+                }
+                Ok(())
+            }
+            (BoolExpr::Lt(e1, e2), _) | (BoolExpr::Le(e1, e2), _) | (BoolExpr::Ge(e1, e2), _) | (BoolExpr::Gt(e1, e2), _) => {
+                let (vars, const_term) = self.diff(e1, e2);
+                if vars.is_empty() {
+                    let is_sat = match expr {
+                        BoolExpr::Lt(_, _) => const_term.is_negative(),
+                        BoolExpr::Le(_, _) => const_term.is_negative() || const_term.is_zero(),
+                        BoolExpr::Ge(_, _) => !const_term.is_negative(), // >= 0
+                        BoolExpr::Gt(_, _) => const_term.is_positive(),
+                        _ => unreachable!(),
+                    };
+                    let final_sat = if polarity { is_sat } else { !is_sat };
+                    return if final_sat { Ok(()) } else { Err(vec![BoolExpr::False]) };
+                }
+                let (is_upper_bound, eps_val) = match (expr, polarity) {
+                    // Lt (< 0)
+                    (BoolExpr::Lt(_, _), true) => (true, rug::Rational::from(-1)),
+                    (BoolExpr::Lt(_, _), false) => (false, rug::Rational::from(0)), // !(x < y) => x >= y
+
+                    // Le (<= 0)
+                    (BoolExpr::Le(_, _), true) => (true, rug::Rational::from(0)),
+                    (BoolExpr::Le(_, _), false) => (false, rug::Rational::from(1)), // !(x <= y) => x > y
+
+                    // Ge (>= 0)
+                    (BoolExpr::Ge(_, _), true) => (false, rug::Rational::from(0)),
+                    (BoolExpr::Ge(_, _), false) => (true, rug::Rational::from(-1)), // !(x >= y) => x < y
+
+                    // Gt (> 0)
+                    (BoolExpr::Gt(_, _), true) => (false, rug::Rational::from(1)),
+                    (BoolExpr::Gt(_, _), false) => (true, rug::Rational::from(0)), // !(x > y) => x <= y
+
+                    _ => unreachable!(),
+                };
+                if vars.len() == 1 {
+                    let (&var, coeff) = vars.iter().next().unwrap();
+
+                    let bound_val = Rational::Finite(rug::Rational::from(-const_term.clone()) / coeff);
+                    let bound_eps = eps_val / coeff;
+                    let bound = InfRational::new(bound_val, bound_eps);
+
+                    let expr = if is_upper_bound == coeff.is_positive() { BoolExpr::Ub(var, bound) } else { BoolExpr::Lb(var, bound) };
+
+                    self.assert_internal(&expr, true)
+                } else {
+                    let slack = self.get_or_create_slack(vars);
+
+                    let bound_val = Rational::Finite(rug::Rational::from(-const_term));
+                    let bound = InfRational::new(bound_val, eps_val);
+
+                    let expr = if is_upper_bound { BoolExpr::Ub(slack, bound) } else { BoolExpr::Lb(slack, bound) };
+
+                    self.assert_internal(&expr, true)
+                }
+            }
+            (BoolExpr::Lb(var, bound), true) => {
+                if !self.lra_theory.set_lb(None, *var, bound.clone()) {
+                    return Err(vec![BoolExpr::False]);
+                }
+                Ok(())
+            }
+            (BoolExpr::Ub(var, bound), true) => {
+                if !self.lra_theory.set_ub(None, *var, bound.clone()) {
+                    return Err(vec![BoolExpr::False]);
+                }
+                Ok(())
+            }
+            (BoolExpr::ArithEq(var, val), true) => {
+                if !self.lra_theory.set_lb(None, *var, val.clone()) || !self.lra_theory.set_ub(None, *var, val.clone()) {
+                    return Err(vec![BoolExpr::False]);
+                }
+                Ok(())
+            }
+            (BoolExpr::Eq(e1, e2), _) => {
+                if let (Expr::Arith(a1), Expr::Arith(a2)) = (&**e1, &**e2) {
+                    let (vars, const_term) = self.diff(a1, a2);
+
+                    if vars.is_empty() {
+                        let is_sat = const_term.is_zero();
+                        let final_sat = if polarity { is_sat } else { !is_sat };
+                        return if final_sat { Ok(()) } else { Err(vec![BoolExpr::False]) };
+                    }
+
+                    if polarity {
+                        if vars.len() == 1 {
+                            let (&var, coeff) = vars.iter().next().unwrap();
+                            let bound = InfRational::new(Rational::Finite(rug::Rational::from(-const_term) / coeff), rug::Rational::from(0));
+                            self.assert_internal(&BoolExpr::ArithEq(var, bound), true)
+                        } else {
+                            let slack = self.get_or_create_slack(vars);
+                            let bound = InfRational::new(Rational::Finite(rug::Rational::from(-const_term)), rug::Rational::from(0));
+                            self.assert_internal(&BoolExpr::ArithEq(slack, bound), true)
+                        }
+                    } else {
+                        let lt_lit = self.mk_le(a1, a2, true);
+                        let gt_lit = self.mk_ge(a1, a2, true);
+
+                        if self.sat_solver.add_clause(vec![lt_lit, gt_lit]).is_err() {
+                            return Err(vec![BoolExpr::False]);
+                        }
+                        Ok(())
+                    }
+                } else {
+                    let mut lit = self.encode_eq(e1, e2);
+                    if !polarity {
+                        lit = !lit;
+                    }
+                    if self.sat_solver.add_clause(vec![lit]).is_err() {
+                        return Err(vec![BoolExpr::False]);
+                    }
+                    Ok(())
+                }
+            }
+            _ => {
+                let mut lit = self.encode_bool(expr);
+                if !polarity {
+                    lit = !lit;
+                }
+                if self.sat_solver.add_clause(vec![lit]).is_err() {
+                    return Err(vec![BoolExpr::False]);
+                }
+                Ok(())
+            }
+        }
+    }
+
     fn encode_bool(&mut self, expr: &BoolExpr) -> Lit {
         match expr {
             BoolExpr::True => self.sat_solver.true_lit(),
@@ -319,9 +472,6 @@ impl SmtSolver {
                 let mut neg_scale = rug::Rational::new();
                 neg_scale.assign(scale * -1);
                 self.accumulate_expr(sub_expr, &neg_scale, vars, const_term, temp);
-            }
-            _ => {
-                panic!("Unsupported arithmetic expression in linear arithmetic: {:?}", expr);
             }
         }
     }
