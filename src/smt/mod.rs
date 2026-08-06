@@ -526,7 +526,7 @@ impl SmtSolver {
         match expr {
             BoolExpr::True => Some(true),
             BoolExpr::False => Some(false),
-            BoolExpr::Var(v) => self.sat_solver.value(*v).clone(),
+            BoolExpr::Var(v) => *self.sat_solver.value(*v),
             _ => None,
         }
     }
