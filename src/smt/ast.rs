@@ -294,6 +294,46 @@ pub fn ge(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
 pub fn gt(e1: ArithExpr, e2: ArithExpr) -> BoolExpr {
     BoolExpr::Gt(e1, e2)
 }
+pub fn min(z: ArithExpr, args: impl IntoIterator<Item = ArithExpr>) -> BoolExpr {
+    let args = args.into_iter().collect::<Vec<_>>();
+    if args.is_empty() {
+        panic!("min constraint requires at least one argument");
+    }
+
+    let mut and_terms = Vec::with_capacity(args.len() + 1);
+    let mut or_terms = Vec::with_capacity(args.len());
+
+    for arg in args {
+        and_terms.push(BoolExpr::Le(z.clone(), arg.clone()));
+
+        let eq_expr = BoolExpr::Eq(Box::new(Expr::Arith(z.clone())), Box::new(Expr::Arith(arg)));
+        or_terms.push(eq_expr);
+    }
+
+    and_terms.push(BoolExpr::Or(or_terms));
+
+    BoolExpr::And(and_terms)
+}
+pub fn max(z: ArithExpr, args: impl IntoIterator<Item = ArithExpr>) -> BoolExpr {
+    let args = args.into_iter().collect::<Vec<_>>();
+    if args.is_empty() {
+        panic!("max constraint requires at least one argument");
+    }
+
+    let mut and_terms = Vec::with_capacity(args.len() + 1);
+    let mut or_terms = Vec::with_capacity(args.len());
+
+    for arg in args {
+        and_terms.push(BoolExpr::Ge(z.clone(), arg.clone()));
+
+        let eq_expr = BoolExpr::Eq(Box::new(Expr::Arith(z.clone())), Box::new(Expr::Arith(arg)));
+        or_terms.push(eq_expr);
+    }
+
+    and_terms.push(BoolExpr::Or(or_terms));
+
+    BoolExpr::And(and_terms)
+}
 
 #[cfg(test)]
 mod tests {

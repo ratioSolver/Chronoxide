@@ -117,7 +117,7 @@ impl SmtSolver {
                     let final_bound = bound / coeff.clone();
                     if is_upper_bound == coeff.is_positive() { self.lra_theory.set_ub(None, *var, final_bound).is_ok() } else { self.lra_theory.set_lb(None, *var, final_bound).is_ok() }
                 } else {
-                    let slack = self.get_or_create_slack(vars);
+                    let slack = self.lra_theory.get_or_create_slack(vars);
                     if is_upper_bound { self.lra_theory.set_ub(None, slack, bound).is_ok() } else { self.lra_theory.set_lb(None, slack, bound).is_ok() }
                 }
             }
@@ -138,7 +138,7 @@ impl SmtSolver {
                             let final_bound = bound / coeff.clone();
                             self.lra_theory.set_lb(None, *var, final_bound.clone()).is_ok() && self.lra_theory.set_ub(None, *var, final_bound).is_ok()
                         } else {
-                            let slack = self.get_or_create_slack(vars);
+                            let slack = self.lra_theory.get_or_create_slack(vars);
                             self.lra_theory.set_lb(None, slack, bound.clone()).is_ok() && self.lra_theory.set_ub(None, slack, bound).is_ok()
                         }
                     } else {
@@ -309,7 +309,7 @@ impl SmtSolver {
                 self.get_or_create_proxy(bound)
             }
             _ => {
-                let slack = self.get_or_create_slack(vars);
+                let slack = self.lra_theory.get_or_create_slack(vars);
                 let bound = TheoryConstraint::LraUb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(-1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
@@ -355,7 +355,7 @@ impl SmtSolver {
                 self.get_or_create_proxy(bound)
             }
             _ => {
-                let slack = self.get_or_create_slack(vars);
+                let slack = self.lra_theory.get_or_create_slack(vars);
                 let bound = TheoryConstraint::LraLb(slack, InfRational::new(Rational::Finite(-const_term), if strict { rug::Rational::from(1) } else { rug::Rational::from(0) }));
                 self.get_or_create_proxy(bound)
             }
@@ -440,22 +440,6 @@ impl SmtSolver {
             }
         } else {
             vars.add_coeff(var, scale);
-        }
-    }
-
-    fn get_or_create_slack(&mut self, vars: SparseRow) -> usize {
-        if let Some(&slack) = self.lra_theory.lin_to_slack.get(&vars) {
-            slack
-        } else {
-            let slack = self.lra_theory.mk_real();
-            self.lra_theory.tableau.insert(slack, vars.clone());
-
-            for &var in vars.keys() {
-                self.lra_theory.t_watches[var].insert(slack);
-            }
-
-            self.lra_theory.lin_to_slack.insert(vars, slack);
-            slack
         }
     }
 
@@ -599,7 +583,7 @@ impl SmtSolver {
                 // All variables are assigned and no conflicts were found.
                 if let Err((var, frac_val)) = self.lra_theory.check_ints() {
                     if let Some((cut_row, f0)) = self.lra_theory.generate_gomory_cut(var) {
-                        let cut_slack = self.get_or_create_slack(cut_row);
+                        let cut_slack = self.lra_theory.get_or_create_slack(cut_row);
 
                         let bound = InfRational::new(Rational::Finite(f0), rug::Rational::from(0));
                         let cut_lit = self.get_or_create_proxy(TheoryConstraint::LraLb(cut_slack, bound));
@@ -654,7 +638,7 @@ impl SmtSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smt::ast::{add, and, cst_arith, cst_enum, cst_frac, eq_arith, eq_enum, gt, lt, mul, or};
+    use crate::smt::ast::{add, and, cst_arith, cst_enum, cst_frac, eq_arith, eq_enum, gt, lt, min, mul, or};
     use tracing::{Level, subscriber};
 
     #[test]
@@ -808,9 +792,6 @@ mod tests {
 
     #[test]
     fn test_enum_var_to_var_equality() {
-        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
-        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
         let mut solver = SmtSolver::new();
         let e1 = solver.new_enum(vec![1, 2, 3]);
         let e2 = solver.new_enum(vec![3, 4, 5]);
@@ -858,5 +839,32 @@ mod tests {
         assert!(solver.assert(&expr).is_ok());
 
         assert!(solver.check_sat(), "There is an integer solution to the constraints, should be SAT");
+    }
+
+    #[test]
+    fn test_min_constraint_sat_and_model_extraction() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
+        subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+        let y = solver.new_real();
+        let z = solver.new_real();
+
+        // x = 15, y = 10
+        let eq_x = eq_arith(x.clone(), cst_arith(15));
+        let eq_y = eq_arith(y.clone(), cst_arith(10));
+
+        // z = min(x, y)
+        let min_expr = min(z.clone(), [x.clone(), y.clone()]);
+
+        let expr = and([eq_x, eq_y, min_expr]);
+        assert!(solver.assert(&expr).is_ok());
+
+        // DPLL(T) should resolve this and guess z = 10
+        assert!(solver.check_sat(), "The min constraint must be SAT");
+
+        // Verify the extracted model
+        assert_eq!(solver.get_arith_val(&z), Some(InfRational::new(Rational::Finite(rug::Rational::from(10)), rug::Rational::from(0))), "The min constraint should resolve to z = 10");
     }
 }

@@ -71,6 +71,30 @@ impl LraTheory {
         self.reals.get(var).expect("variable index out of bounds")
     }
 
+    pub(super) fn get_or_create_slack(&mut self, vars: SparseRow) -> usize {
+        if let Some(&slack) = self.lin_to_slack.get(&vars) {
+            return slack;
+        }
+
+        let slack = self.mk_real();
+
+        // Keep the new basic slack variable consistent with the current model:
+        // slack = sum(coeff_i * var_i).
+        let mut slack_value = Self::zero();
+        for (var, coeff) in vars.iter() {
+            slack_value += &self.reals[*var] * coeff;
+        }
+        self.reals[slack] = slack_value;
+
+        self.tableau.insert(slack, vars.clone());
+        for &var in vars.keys() {
+            self.t_watches[var].insert(slack);
+        }
+        self.lin_to_slack.insert(vars, slack);
+
+        slack
+    }
+
     pub(super) fn lb(&self, var: usize) -> &InfRational {
         &self.lbs.get(var).expect("variable index out of bounds").1
     }
