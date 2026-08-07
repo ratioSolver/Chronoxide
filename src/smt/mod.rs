@@ -21,6 +21,7 @@ pub struct SmtSolver {
     lra_theory: LraTheory,
     enum_theory: EnumTheory,
     notified_len: usize,
+    user_scopes: Vec<(usize, usize)>,
 }
 
 impl Default for SmtSolver {
@@ -37,6 +38,7 @@ impl SmtSolver {
             lra_theory: LraTheory::new(),
             enum_theory: EnumTheory::new(),
             notified_len: 0,
+            user_scopes: Vec::new(),
         }
     }
 
@@ -56,9 +58,9 @@ impl SmtSolver {
         EnumExpr::Var(self.enum_theory.mk_var(domain.into_iter().collect()))
     }
 
-    pub fn assert(&mut self, expr: &BoolExpr) -> Result<(), Vec<BoolExpr>> {
+    pub fn assert(&mut self, expr: &BoolExpr) -> Result<(), (usize, Vec<BoolExpr>)> {
         if !self.assert_internal(expr, true) {
-            return Err(vec![BoolExpr::False]);
+            return Err((self.user_scopes.len(), vec![BoolExpr::False]));
         }
         self.propagate()
     }
@@ -463,7 +465,7 @@ impl SmtSolver {
             .collect()
     }
 
-    pub fn decide(&mut self, lit: Lit) -> Result<(), Vec<BoolExpr>> {
+    pub fn decide(&mut self, lit: Lit) -> Result<(), (usize, Vec<BoolExpr>)> {
         self.sat_solver.push();
         self.lra_theory.push();
         self.enum_theory.push();
@@ -471,13 +473,16 @@ impl SmtSolver {
         self.propagate()
     }
 
-    pub fn propagate(&mut self) -> Result<(), Vec<BoolExpr>> {
+    pub fn cancel_until(&mut self, level: usize) {
+        self.sat_solver.cancel_until(level);
+        self.lra_theory.cancel_until(level);
+        self.enum_theory.cancel_until(level);
+        self.notified_len = self.sat_solver.trail.len();
+    }
+
+    fn propagate(&mut self) -> Result<(), (usize, Vec<BoolExpr>)> {
         if let Err((bt_level, conflict)) = self.sat_solver.propagate() {
-            self.sat_solver.cancel_until(bt_level);
-            self.lra_theory.cancel_until(bt_level);
-            self.enum_theory.cancel_until(bt_level);
-            self.notified_len = self.sat_solver.trail.len();
-            return Err(Self::build_conflict(conflict));
+            return Err((bt_level, Self::build_conflict(conflict)));
         }
 
         while self.notified_len < self.sat_solver.trail.len() {
@@ -494,14 +499,14 @@ impl SmtSolver {
                 };
 
                 if let Err(lemma) = theory_result {
-                    return Err(Self::build_conflict(lemma));
+                    return Err((self.compute_backtrack_level(&lemma, self.user_scopes.len()), Self::build_conflict(lemma)));
                 }
             }
             self.notified_len += 1;
         }
 
         if let Err(conflict) = self.lra_theory.check() {
-            return Err(Self::build_conflict(conflict));
+            return Err((self.compute_backtrack_level(&conflict, self.user_scopes.len()), Self::build_conflict(conflict)));
         }
         Ok(())
     }
@@ -533,11 +538,39 @@ impl SmtSolver {
         }
     }
 
+    pub fn push(&mut self) {
+        let clauses_len = self.sat_solver.clauses.len();
+
+        self.sat_solver.push();
+        self.lra_theory.push();
+        self.enum_theory.push();
+
+        let current_level = self.sat_solver.decision_level();
+        self.user_scopes.push((current_level, clauses_len));
+    }
+
+    pub fn pop(&mut self) {
+        if let Some((saved_level, saved_clauses_len)) = self.user_scopes.pop() {
+            let target_level = saved_level - 1;
+            self.sat_solver.cancel_until(target_level);
+            self.lra_theory.cancel_until(target_level);
+            self.enum_theory.cancel_until(target_level);
+            self.notified_len = self.sat_solver.trail.len();
+
+            for watch_list in self.sat_solver.watches.iter_mut() {
+                watch_list.retain(|&clause_idx| clause_idx < saved_clauses_len);
+            }
+            self.sat_solver.clauses.truncate(saved_clauses_len);
+        }
+    }
+
     /// Explores the search space to find a valid model or prove UNSAT.
     pub fn check_sat(&mut self) -> bool {
+        let root_level = self.user_scopes.len();
+
         // 1. Initial root-level propagation
         if self.propagate().is_err() {
-            return false; // Immediate UNSAT at level 0
+            return false; // Immediate UNSAT at root level
         }
 
         loop {
@@ -555,16 +588,15 @@ impl SmtSolver {
                 let lit = Lit::new(var, false);
 
                 // 4. Decide and propagate (SAT + Theory)
-                if let Err(lemma) = self.decide(lit) {
+                if let Err((bt_level, lemma)) = self.decide(lit) {
                     // We hit a conflict! If we are at the root level, the problem is UNSAT.
-                    if self.sat_solver.decision_level() == 0 {
+                    if self.sat_solver.decision_level() <= root_level {
                         return false;
                     }
 
-                    // For simplicity and robustness in this loop, we perform a restart to level 0.
-                    // (A production solver would compute the asserting level and jump back to it).
-                    self.sat_solver.cancel_until(0);
-                    self.lra_theory.cancel_until(0);
+                    self.sat_solver.cancel_until(bt_level);
+                    self.lra_theory.cancel_until(bt_level);
+                    self.enum_theory.cancel_until(bt_level);
                     self.notified_len = self.sat_solver.trail.len();
 
                     // 5. Learn the theory conflict as a new SAT clause
@@ -590,9 +622,9 @@ impl SmtSolver {
 
                         let learned_lemma = vec![cut_lit];
 
-                        self.sat_solver.cancel_until(0);
-                        self.lra_theory.cancel_until(0);
-                        self.enum_theory.cancel_until(0);
+                        self.sat_solver.cancel_until(root_level);
+                        self.lra_theory.cancel_until(root_level);
+                        self.enum_theory.cancel_until(root_level);
                         self.notified_len = self.sat_solver.trail.len();
 
                         if self.sat_solver.add_clause(learned_lemma).is_err() {
@@ -619,9 +651,9 @@ impl SmtSolver {
 
                     let learned_branch = vec![lit_ub, lit_lb];
 
-                    self.sat_solver.cancel_until(0);
-                    self.lra_theory.cancel_until(0);
-                    self.enum_theory.cancel_until(0);
+                    self.sat_solver.cancel_until(root_level);
+                    self.lra_theory.cancel_until(root_level);
+                    self.enum_theory.cancel_until(root_level);
                     self.notified_len = self.sat_solver.trail.len();
 
                     if self.sat_solver.add_clause(learned_branch).is_err() {
@@ -633,12 +665,30 @@ impl SmtSolver {
             }
         }
     }
+
+    fn compute_backtrack_level(&self, lemma: &[Lit], root_level: usize) -> usize {
+        if lemma.len() <= 1 {
+            return root_level;
+        }
+
+        let mut levels: Vec<usize> = lemma.iter().map(|lit| self.sat_solver.level(lit.var()).expect("literal should have a decision level")).collect();
+
+        levels.sort_unstable_by(|a, b| b.cmp(a));
+
+        let max_level = levels[0];
+
+        if max_level <= root_level {
+            return root_level;
+        }
+
+        if levels.iter().filter(|&&l| l == max_level).count() == 1 { levels[1].max(root_level) } else { (max_level - 1).max(root_level) }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::smt::ast::{add, and, cst_arith, cst_enum, cst_frac, eq_arith, eq_enum, gt, lt, min, mul, or};
+    use crate::smt::ast::{add, and, cst_arith, cst_enum, cst_frac, eq_arith, eq_enum, ge, gt, le, lt, min, mul, or};
     use tracing::{Level, subscriber};
 
     #[test]
@@ -866,5 +916,35 @@ mod tests {
 
         // Verify the extracted model
         assert_eq!(solver.get_arith_val(&z), Some(InfRational::new(Rational::Finite(rug::Rational::from(10)), rug::Rational::from(0))), "The min constraint should resolve to z = 10");
+    }
+
+    #[test]
+    fn test_push_pop_incremental_scopes() {
+        let mut solver = SmtSolver::new();
+        let x = solver.new_real();
+
+        // x >= 10
+        assert!(solver.assert(&ge(x.clone(), cst_arith(10))).is_ok());
+        assert!(solver.check_sat(), "x >= 10 is SAT");
+
+        solver.push();
+        // x <= 20
+        assert!(solver.assert(&le(x.clone(), cst_arith(20))).is_ok());
+        assert!(solver.check_sat(), "x >= 10 and x <= 20 is SAT");
+
+        solver.push();
+        // x <= 5
+        assert!(solver.assert(&le(x.clone(), cst_arith(5))).is_err(), "x >= 10 and x <= 5 is UNSAT");
+
+        solver.pop();
+        assert!(solver.check_sat(), "x >= 10 and x <= 20 is SAT after popping the last scope");
+
+        let val = solver.get_arith_val(&x).unwrap();
+        assert!(val >= InfRational::new(Rational::Finite(rug::Rational::from(10)), rug::Rational::from(0)));
+        assert!(val <= InfRational::new(Rational::Finite(rug::Rational::from(20)), rug::Rational::from(0)));
+
+        solver.pop();
+        assert!(solver.assert(&ge(x.clone(), cst_arith(50))).is_ok());
+        assert!(solver.check_sat(), "x >= 50 is SAT after popping all scopes");
     }
 }

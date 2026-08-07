@@ -3,8 +3,8 @@ use tracing::trace;
 
 pub(super) struct SatSolver {
     pub(super) assigns: Vec<Option<bool>>, // Current assignments of boolean variables (None = unassigned, Some(true/false) = assigned)
-    clauses: Vec<Clause>,                  // List of clauses in the solver
-    watches: Vec<Vec<usize>>,              // Watch lists for each literal (positive and negative)
+    pub(super) clauses: Vec<Clause>,       // List of clauses in the solver
+    pub(super) watches: Vec<Vec<usize>>,   // Watch lists for each literal (positive and negative)
     reason: Vec<Option<usize>>,            // Reason for each variable's assignment
     seen: Vec<bool>,                       // Temporary storage for conflict analysis
     analyze_toclear: Vec<usize>,           // Temporary storage for conflict analysis
@@ -287,7 +287,7 @@ impl SatSolver {
         if lit.sign() { val.map(|v| !v) } else { *val }
     }
 
-    fn level(&self, var: usize) -> Option<usize> {
+    pub(super) fn level(&self, var: usize) -> Option<usize> {
         self.level.get(var).copied().expect("Variable index out of bounds")
     }
 
@@ -369,7 +369,7 @@ impl fmt::Display for Lit {
     }
 }
 
-struct Clause {
+pub(super) struct Clause {
     lits: Vec<Lit>, // List of literals in the clause
 }
 
