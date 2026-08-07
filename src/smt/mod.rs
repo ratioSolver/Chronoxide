@@ -494,8 +494,8 @@ impl SmtSolver {
                     (TheoryConstraint::LraLb(var, bound), true) => self.lra_theory.set_ub(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_positive() { rug::Rational::from(0) } else { rug::Rational::from(-1) })),
                     (TheoryConstraint::LraLb(var, bound), false) => self.lra_theory.set_lb(Some(lit), *var, bound.clone()),
                     (TheoryConstraint::LraUb(var, bound), true) => self.lra_theory.set_lb(Some(lit), *var, InfRational::new(bound.rational_part().clone(), if bound.infinitesimal_part().is_negative() { rug::Rational::from(0) } else { rug::Rational::from(1) })),
-                    (TheoryConstraint::EnumEq(var, val), false) => self.enum_theory.set_eq(Some(lit), *var, *val, true),
-                    (TheoryConstraint::EnumEq(var, val), true) => self.enum_theory.set_eq(Some(lit), *var, *val, false),
+                    (TheoryConstraint::EnumEq(var, val), false) => self.enum_theory.set_eq(Some(lit), *var, *val),
+                    (TheoryConstraint::EnumEq(var, val), true) => self.enum_theory.set_neq(Some(lit), *var, *val),
                 };
 
                 if let Err(lemma) = theory_result {
