@@ -14,6 +14,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
     rc::{Rc, Weak},
+    str::FromStr,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
@@ -312,14 +313,15 @@ impl Core for SolverState {
     fn new_bool_var(&self) -> Slot {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), Bool::fresh_const("b"))))
     }
-    fn new_int(&self, value: i64) -> Slot {
-        Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::from_i64(value))))
+    fn new_int(&self, value: &str) -> Slot {
+        Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::from_str(value).unwrap())))
     }
     fn new_int_var(&self) -> Slot {
         Slot::Primitive(Rc::new(IntVar::new(self.int_type(), Int::fresh_const("i"))))
     }
-    fn new_real(&self, num: i64, den: i64) -> Slot {
-        Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::from_rational(num, den))))
+    fn new_real(&self, value: &str) -> Slot {
+        let rat = rug::Rational::from_str(value).map_err(|e| SolverError::RuntimeError(format!("Failed to parse rational number: {:?}", e))).unwrap();
+        Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::from_rational(rat.numer().to_i64_wrapping(), rat.denom().to_i64_wrapping()))))
     }
     fn new_real_var(&self) -> Slot {
         Slot::Primitive(Rc::new(RealVar::new(self.real_type(), Real::fresh_const("r"))))
