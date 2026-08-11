@@ -1,6 +1,10 @@
+mod graph;
 mod objects;
 
-use crate::objects::{ArithVar, BoolVar, EnumVar, StringVar};
+use crate::{
+    graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
+    objects::{ArithVar, BoolVar, EnumVar, StringVar},
+};
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
@@ -11,7 +15,6 @@ use riddle::{
 use semitone::{
     SmtSolver,
     ast::{self, Expr},
-    rational::Rational,
 };
 use serde_json::{Value, json};
 use std::{
@@ -40,6 +43,7 @@ struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     smt: RefCell<SmtSolver>,
+    graph: Graph,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -52,6 +56,7 @@ impl SolverState {
             },
             slv: core.clone(),
             smt: RefCell::new(SmtSolver::new()),
+            graph: Graph::new(),
             tx_event,
         })
     }
@@ -63,6 +68,29 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
+        Ok(())
+    }
+
+    pub fn add_flaw(&mut self, flaw: Box<dyn Flaw>) {
+        trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
+        let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
+        for cause_id in flaw.causes() {
+            let cause = self.graph.resolvers.get(*cause_id).expect("Invalid cause ID");
+            or_args.push(!cause.rho().clone());
+        }
+        or_args.push(flaw.phi().clone());
+        self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
+        self.graph.flaws.push(flaw);
+    }
+
+    pub fn add_resolver(&mut self, resolver: Box<dyn Resolver>) {
+        trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
+        self.smt.borrow_mut().assert(&ast::or([!resolver.rho().clone(), self.graph.flaws.get(resolver.flaw()).expect("Invalid flaw ID").phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
+        self.graph.resolvers.push(resolver);
+    }
+
+    fn build_graph(&self) -> Result<(), SolverError> {
+        info!("Building graph...");
         Ok(())
     }
 
@@ -290,14 +318,14 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw { flaw_id: usize, phi: usize, causes: Vec<usize>, supports: Vec<usize>, status: Option<bool>, cost: Rational, data: Value },
-    FlawCostUpdate { flaw_id: usize, cost: Rational },
-    FlawStatusUpdate { flaw_id: usize, status: Option<bool> },
-    CurrentFlaw(Option<usize>),
-    NewResolver { resolver_id: usize, rho: usize, flaw_id: usize, requirements: Vec<usize>, intrinsic_cost: Rational, status: Option<bool>, data: Value },
-    ResolverStatusUpdate { resolver_id: usize, status: Option<bool> },
-    CurrentResolver(Option<usize>),
-    NewCausalLink { flaw_id: usize, resolver_id: usize },
+    NewFlaw { flaw_id: FlawId, phi: usize, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
+    FlawCostUpdate { flaw_id: FlawId, cost: f64 },
+    FlawStatusUpdate { flaw_id: FlawId, status: Option<bool> },
+    CurrentFlaw(Option<FlawId>),
+    NewResolver { resolver_id: ResolverId, rho: usize, flaw_id: FlawId, sub_flaws: Vec<FlawId>, intrinsic_cost: f64, status: Option<bool>, data: Value },
+    ResolverStatusUpdate { resolver_id: ResolverId, status: Option<bool> },
+    CurrentResolver(Option<ResolverId>),
+    NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
 }
 
 #[derive(Clone)]

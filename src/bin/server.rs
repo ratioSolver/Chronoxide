@@ -8,7 +8,6 @@ use axum::{
     routing::get,
 };
 use chronoxide::{Solver, SolverError, SolverEvent};
-use semitone::rational::Rational;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
@@ -113,7 +112,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                     "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                                     "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                                     "status": status,
-                                    "cost": to_json(&cost)
+                                    "cost": cost
                                 });
                                 msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
@@ -122,7 +121,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 let msg = json!({
                                     "msg_type": "flaw-cost-update",
                                     "id": format!("{}", flaw_id),
-                                    "cost": to_json(&cost),
+                                    "cost": cost,
                                 });
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
@@ -141,14 +140,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 });
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
-                            SolverEvent::NewResolver { resolver_id, rho, flaw_id, requirements, intrinsic_cost, status, data } => {
+                            SolverEvent::NewResolver { resolver_id, rho, flaw_id, sub_flaws, intrinsic_cost, status, data } => {
                                 let mut msg = json!({
                                     "msg_type": "new-resolver",
                                     "id": format!("{}", resolver_id),
                                     "rho": format!("{}", rho),
                                     "flaw_id": format!("{}", flaw_id),
-                                    "requirements": requirements.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                                    "intrinsic_cost": to_json(&intrinsic_cost),
+                                    "sub_flaws": sub_flaws.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                                    "intrinsic_cost": intrinsic_cost,
                                     "status": status,
                                 });
                                 msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
@@ -189,13 +188,5 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
             SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
         },
-    }
-}
-
-fn to_json(val: &Rational) -> Value {
-    match val {
-        Rational::NegativeInf => Value::String("-inf".to_string()),
-        Rational::Finite(num) => Value::String(num.to_string()),
-        Rational::PositiveInf => Value::String("inf".to_string()),
     }
 }
