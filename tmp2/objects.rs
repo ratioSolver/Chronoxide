@@ -1,20 +1,22 @@
+use linarith::Lin;
 use riddle::{
     env::Var,
     scope::{BoolType, StringType, Type},
 };
-use semitone::ast::{ArithExpr, BoolExpr, EnumExpr};
 use std::{
     any::Any,
     rc::{Rc, Weak},
 };
+use watchsat::Lit;
 
+#[derive(Debug)]
 pub struct BoolVar {
     var_type: Weak<BoolType>,
-    pub(crate) lit: BoolExpr,
+    pub(crate) lit: Lit,
 }
 
 impl BoolVar {
-    pub(crate) fn new(var_type: Rc<BoolType>, lit: BoolExpr) -> Self {
+    pub(crate) fn new(var_type: Rc<BoolType>, lit: Lit) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lit }
     }
 }
@@ -29,13 +31,14 @@ impl Var for BoolVar {
     }
 }
 
+#[derive(Debug)]
 pub struct ArithVar {
     var_type: Weak<dyn Type>,
-    pub(crate) lin: ArithExpr,
+    pub(crate) lin: Lin,
 }
 
 impl ArithVar {
-    pub(crate) fn new(var_type: Rc<dyn Type>, lin: ArithExpr) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, lin: Lin) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lin }
     }
 }
@@ -50,6 +53,7 @@ impl Var for ArithVar {
     }
 }
 
+#[derive(Debug)]
 pub struct StringVar {
     var_type: Weak<StringType>,
     pub(crate) value: String,
@@ -71,13 +75,14 @@ impl Var for StringVar {
     }
 }
 
+#[derive(Debug)]
 pub struct EnumVar {
     var_type: Weak<dyn Type>,
-    pub(crate) var: EnumExpr,
+    pub(crate) var: ac3rm::VarId,
 }
 
 impl EnumVar {
-    pub(crate) fn new(var_type: Rc<dyn Type>, var: EnumExpr) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, var: ac3rm::VarId) -> Self {
         Self { var_type: Rc::downgrade(&var_type), var }
     }
 }

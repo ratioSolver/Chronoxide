@@ -7,10 +7,8 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use chronoxide::{
-    ToJson,
-    solver::{Solver, SolverEvent},
-};
+use chronoxide::{Solver, SolverError, SolverEvent};
+use semitone::rational::Rational;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
@@ -48,11 +46,20 @@ async fn main() {
 
     app_state.first_client_connected.notified().await;
     for file in &files {
-        slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await.expect("Failed to read RiDDle script");
+        match slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await {
+            Ok(_) => trace!("Read RiDDle script from file: {}", file),
+            Err(e) => match e {
+                SolverError::Inconsistent => error!("Failed to read RiDDle script from file {}: Inconsistent problem", file),
+                SolverError::RuntimeError(msg) => error!("Failed to read RiDDle script from file {}: Runtime error: {}", file, msg),
+            },
+        }
     }
     match slv.solve().await {
         Ok(_) => trace!("Solver finished successfully"),
-        Err(e) => error!("Solver failed with error: {:?}", e),
+        Err(e) => match e {
+            SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
+            SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
+        },
     }
 
     server.await.unwrap();
@@ -65,115 +72,130 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let mut rx = state.slv.tx_event.subscribe();
 
-    let mut msg = state.slv.to_json().await.expect("Failed to serialize solver state to JSON");
-    msg["msg_type"] = "status".into();
-    if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
-        return;
-    }
+    match state.slv.to_json().await {
+        Ok(mut msg) => {
+            msg["msg_type"] = "status".into();
+            if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
+                return;
+            }
 
-    state.first_client_connected.notify_waiters();
-    loop {
-        tokio::select! {
-            incoming = socket.recv() => {
-                match incoming {
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
+            state.first_client_connected.notify_waiters();
+            loop {
+                tokio::select! {
+                    incoming = socket.recv() => {
+                        match incoming {
+                            Some(Ok(Message::Close(_))) | None => break,
+                            Some(Ok(Message::Ping(payload))) => {
+                                if socket.send(Message::Pong(payload)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(_)) => break,
+                        }
+                    }
+                    recv = rx.recv() => {
+                        let event = match recv {
+                            Ok(event) => event,
+                            Err(RecvError::Lagged(skipped)) => {
+                                trace!("WebSocket client lagging behind, skipped {} events", skipped);
+                                continue;
+                            }
+                            Err(RecvError::Closed) => break,
+                        };
+
+                        let send_result = match event {
+                            SolverEvent::NewFlaw{  flaw_id,  phi, causes, supports, status, cost, data } => {
+                                let mut msg = json!({
+                                    "msg_type": "new-flaw",
+                                    "id": format!("{}", flaw_id),
+                                    "phi": format!("{}", phi),
+                                    "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                                    "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                                    "status": status,
+                                    "cost": to_json(&cost)
+                                });
+                                msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::FlawCostUpdate { flaw_id, cost } => {
+                                let msg = json!({
+                                    "msg_type": "flaw-cost-update",
+                                    "id": format!("{}", flaw_id),
+                                    "cost": to_json(&cost),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::FlawStatusUpdate { flaw_id, status } => {
+                                let msg = json!({
+                                    "msg_type": "flaw-status-update",
+                                    "id": format!("{}", flaw_id),
+                                    "status": status,
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::CurrentFlaw(flaw_id) => {
+                                let msg = json!({
+                                    "msg_type": "current-flaw",
+                                    "id": flaw_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::NewResolver { resolver_id, rho, flaw_id, requirements, intrinsic_cost, status, data } => {
+                                let mut msg = json!({
+                                    "msg_type": "new-resolver",
+                                    "id": format!("{}", resolver_id),
+                                    "rho": format!("{}", rho),
+                                    "flaw_id": format!("{}", flaw_id),
+                                    "requirements": requirements.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
+                                    "intrinsic_cost": to_json(&intrinsic_cost),
+                                    "status": status,
+                                });
+                                msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::ResolverStatusUpdate { resolver_id, status } => {
+                                let msg = json!({
+                                    "msg_type": "resolver-status-update",
+                                    "id": format!("{}", resolver_id),
+                                    "status": status,
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::CurrentResolver(resolver_id) => {
+                                let msg = json!({
+                                    "msg_type": "current-resolver",
+                                    "id": resolver_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::NewCausalLink { flaw_id, resolver_id } => {
+                                let msg = json!({
+                                    "msg_type": "new-causal-link",
+                                    "flaw_id": format!("{}", flaw_id),
+                                    "resolver_id": format!("{}", resolver_id),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                        };
+                        if send_result.is_err() {
                             break;
                         }
                     }
-                    Some(Ok(_)) => {}
-                    Some(Err(_)) => break,
-                }
-            }
-            recv = rx.recv() => {
-                let event = match recv {
-                    Ok(event) => event,
-                    Err(RecvError::Lagged(skipped)) => {
-                        trace!("WebSocket client lagging behind, skipped {} events", skipped);
-                        continue;
-                    }
-                    Err(RecvError::Closed) => break,
-                };
-
-                let send_result = match event {
-                    SolverEvent::NewFlaw{  flaw_id,  phi, causes, supports, status, cost, data } => {
-                        let mut msg = json!({
-                            "msg_type": "new-flaw",
-                            "id": format!("{}", flaw_id),
-                            "phi": format!("{}", phi),
-                            "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                            "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                            "status": status.to_json(),
-                            "cost": cost.to_json()
-                        });
-                        msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::FlawCostUpdate { flaw_id, cost } => {
-                        let msg = json!({
-                            "msg_type": "flaw-cost-update",
-                            "id": format!("{}", flaw_id),
-                            "cost": cost.to_json(),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::FlawStatusUpdate { flaw_id, status } => {
-                        let msg = json!({
-                            "msg_type": "flaw-status-update",
-                            "id": format!("{}", flaw_id),
-                            "status": status.to_json(),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::CurrentFlaw(flaw_id) => {
-                        let msg = json!({
-                            "msg_type": "current-flaw",
-                            "id": flaw_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::NewResolver { resolver_id, rho, flaw_id, requirements, intrinsic_cost, status, data } => {
-                        let mut msg = json!({
-                            "msg_type": "new-resolver",
-                            "id": format!("{}", resolver_id),
-                            "rho": format!("{}", rho),
-                            "flaw_id": format!("{}", flaw_id),
-                            "requirements": requirements.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                            "intrinsic_cost": intrinsic_cost.to_json(),
-                            "status": status.to_json(),
-                        });
-                        msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::ResolverStatusUpdate { resolver_id, status } => {
-                        let msg = json!({
-                            "msg_type": "resolver-status-update",
-                            "id": format!("{}", resolver_id),
-                            "status": status.to_json(),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::CurrentResolver(resolver_id) => {
-                        let msg = json!({
-                            "msg_type": "current-resolver",
-                            "id": resolver_id.map(|id| Value::String(format!("{}", id))).unwrap_or(Value::Null),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                    SolverEvent::NewCausalLink { flaw_id, resolver_id } => {
-                        let msg = json!({
-                            "msg_type": "new-causal-link",
-                            "flaw_id": format!("{}", flaw_id),
-                            "resolver_id": format!("{}", resolver_id),
-                        });
-                        socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
-                    }
-                };
-                if send_result.is_err() {
-                    break;
                 }
             }
         }
+        Err(e) => match e {
+            SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
+            SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
+        },
+    }
+}
+
+fn to_json(val: &Rational) -> Value {
+    match val {
+        Rational::NegativeInf => Value::String("-inf".to_string()),
+        Rational::Finite(num) => Value::String(num.to_string()),
+        Rational::PositiveInf => Value::String("inf".to_string()),
     }
 }
