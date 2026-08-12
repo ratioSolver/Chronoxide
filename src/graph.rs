@@ -89,6 +89,10 @@ impl Graph {
     pub(super) fn set_current_resolver(&mut self, resolver_id: Option<ResolverId>) {
         self.current_resolver = resolver_id;
     }
+
+    pub(super) fn compute_resolver_cost(&self, resolver: ResolverId) -> f64 {
+        self.get_resolver(resolver).sub_flaws().iter().map(|&flaw_id| self.get_flaw(flaw_id).estimated_cost()).fold(self.get_resolver(resolver).intrinsic_cost(), |acc, cost| acc + cost)
+    }
 }
 
 pub trait Flaw {

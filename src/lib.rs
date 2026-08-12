@@ -162,20 +162,24 @@ impl SolverState {
                     planner.graph.take_flaw(flaw_id)
                 };
                 assert!(!flaw.is_expanded());
-                let phi = flaw.phi().clone();
                 let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
                 for cause_id in flaw.causes() {
                     or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
                 }
-                or_args.push(phi.clone());
+                or_args.push(flaw.phi().clone());
                 self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
 
                 let resolvers = flaw.expand(slv.clone())?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
-                for resolver in resolvers {
+                for resolver in &resolvers {
                     let rho = resolver.rho().clone();
                     or_args.push(rho.clone());
-                    self.smt.borrow_mut().assert(&ast::or([!rho, phi.clone()])).expect("Failed to assert resolver rho in SMT solver");
+                    self.smt.borrow_mut().assert(&ast::or([!rho, flaw.phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
+                }
+                or_args.push(!flaw.phi().clone());
+                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver after expansion");
+
+                for resolver in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
                         let res_id = planner.graph.add_resolver(resolver);
@@ -189,8 +193,6 @@ impl SolverState {
                         planner.graph.set_current_resolver(None);
                     }
                 }
-                or_args.push(!phi.clone());
-                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver after expansion");
                 {
                     let mut planner = self.planner_state.borrow_mut();
                     planner.graph.return_flaw(flaw_id, flaw);
