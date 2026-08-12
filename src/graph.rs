@@ -1,9 +1,11 @@
-use std::{collections::VecDeque, rc::Rc};
-
+use crate::SolverError;
 use riddle::core::Core;
 use semitone::ast::BoolExpr;
-
-use crate::SolverError;
+use std::{
+    collections::{HashSet, VecDeque},
+    rc::Rc,
+};
+use tracing::trace;
 
 pub type FlawId = usize;
 pub type ResolverId = usize;
@@ -90,8 +92,46 @@ impl Graph {
         self.current_resolver = resolver_id;
     }
 
-    pub(super) fn compute_resolver_cost(&self, resolver: ResolverId) -> f64 {
-        self.get_resolver(resolver).sub_flaws().iter().map(|&flaw_id| self.get_flaw(flaw_id).estimated_cost()).fold(self.get_resolver(resolver).intrinsic_cost(), |acc, cost| acc + cost)
+    pub(super) fn propagate_costs<F>(&mut self, start_flaws: Vec<FlawId>, is_valid: F)
+    where
+        F: Fn(&BoolExpr) -> bool,
+    {
+        let mut queue: VecDeque<FlawId> = start_flaws.into_iter().collect();
+        let mut in_queue: HashSet<FlawId> = queue.iter().copied().collect();
+        while let Some(flaw_id) = queue.pop_front() {
+            in_queue.remove(&flaw_id);
+
+            let (phi, resolver_ids, old_cost, supports) = {
+                let flaw = self.get_flaw(flaw_id);
+                (flaw.phi().clone(), flaw.resolvers().to_vec(), flaw.estimated_cost(), flaw.supports().to_vec())
+            };
+
+            let mut current_cost = f64::INFINITY;
+
+            if is_valid(&phi) {
+                for res_id in resolver_ids {
+                    let resolver = self.get_resolver(res_id);
+                    if is_valid(resolver.rho()) {
+                        let resolver_cost = resolver.sub_flaws().iter().map(|&sub_id| self.get_flaw(sub_id).estimated_cost()).fold(resolver.intrinsic_cost(), |acc, cost| acc.max(cost));
+                        if resolver_cost < current_cost {
+                            current_cost = resolver_cost;
+                        }
+                    }
+                }
+            }
+
+            if (current_cost - old_cost).abs() > f64::EPSILON {
+                trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
+                self.get_flaw_mut(flaw_id).set_estimated_cost(current_cost);
+
+                for support_id in supports {
+                    let parent_flaw_id = self.get_resolver(support_id).flaw();
+                    if in_queue.insert(parent_flaw_id) {
+                        queue.push_back(parent_flaw_id);
+                    }
+                }
+            }
+        }
     }
 }
 

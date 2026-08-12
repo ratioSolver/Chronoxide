@@ -2,7 +2,7 @@ mod graph;
 mod objects;
 
 use crate::{
-    graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
+    graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use riddle::{
@@ -198,6 +198,7 @@ impl SolverState {
                     planner.graph.return_flaw(flaw_id, flaw);
                     planner.graph.set_current_flaw(None);
                 }
+                self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(&expr) != Some(false));
             } else {
                 return Err(SolverError::Inconsistent);
             }
