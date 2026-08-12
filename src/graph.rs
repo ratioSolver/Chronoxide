@@ -35,9 +35,9 @@ impl Graph {
         self.flaws[id].as_mut().unwrap().as_mut()
     }
 
-    pub(super) fn add_flaw(&mut self, flaw: Box<dyn Flaw>) -> FlawId {
-        let id = flaw.id();
-        assert_eq!(id, self.flaws.len());
+    pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
+        let id = self.flaws.len();
+        flaw.set_id(id);
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
@@ -67,9 +67,9 @@ impl Graph {
         self.resolvers[id].as_mut().unwrap().as_mut()
     }
 
-    pub(super) fn add_resolver(&mut self, resolver: Box<dyn Resolver>) -> ResolverId {
-        let id = resolver.id();
-        assert_eq!(id, self.resolvers.len());
+    pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
+        let id = self.resolvers.len();
+        resolver.set_id(id);
         self.resolvers.push(Some(resolver));
         id
     }
@@ -93,6 +93,7 @@ impl Graph {
 
 pub trait Flaw {
     fn id(&self) -> FlawId;
+    fn set_id(&mut self, id: FlawId);
 
     fn phi(&self) -> &BoolExpr;
 
@@ -110,6 +111,7 @@ pub trait Flaw {
 
 pub trait Resolver {
     fn id(&self) -> ResolverId;
+    fn set_id(&mut self, id: ResolverId);
 
     fn rho(&self) -> &BoolExpr;
 

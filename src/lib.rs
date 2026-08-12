@@ -173,20 +173,19 @@ impl SolverState {
                 let resolvers = flaw.expand(slv.clone())?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in resolvers {
-                    let res_id = resolver.id();
                     let rho = resolver.rho().clone();
                     or_args.push(rho.clone());
                     self.smt.borrow_mut().assert(&ast::or([!rho, phi.clone()])).expect("Failed to assert resolver rho in SMT solver");
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        planner.graph.add_resolver(resolver);
+                        let res_id = planner.graph.add_resolver(resolver);
                         planner.graph.set_current_resolver(Some(res_id));
                         planner.graph.take_resolver(res_id)
                     };
                     resolver.apply(slv.clone())?;
                     {
                         let mut planner = self.planner_state.borrow_mut();
-                        planner.graph.return_resolver(res_id, resolver);
+                        planner.graph.return_resolver(resolver.id(), resolver);
                         planner.graph.set_current_resolver(None);
                     }
                 }
