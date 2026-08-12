@@ -19,7 +19,7 @@ use semitone::{
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
     str::FromStr,
 };
@@ -43,8 +43,16 @@ struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     smt: RefCell<SmtSolver>,
-    graph: Graph,
+    planner_state: RefCell<PlannerState>,
     tx_event: broadcast::Sender<SolverEvent>,
+}
+
+struct PlannerState {
+    graph: Graph,
+    agenda: HashSet<FlawId>,
+    notified_len: usize,
+    lit_to_flaw: HashMap<usize, FlawId>,
+    lit_to_resolver: HashMap<usize, ResolverId>,
 }
 
 impl SolverState {
@@ -56,7 +64,13 @@ impl SolverState {
             },
             slv: core.clone(),
             smt: RefCell::new(SmtSolver::new()),
-            graph: Graph::new(),
+            planner_state: RefCell::new(PlannerState {
+                graph: Graph::new(),
+                agenda: HashSet::new(),
+                notified_len: 0,
+                lit_to_flaw: HashMap::new(),
+                lit_to_resolver: HashMap::new(),
+            }),
             tx_event,
         })
     }
@@ -68,29 +82,92 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
+        self.build_graph()?;
         Ok(())
     }
 
-    pub fn add_flaw(&mut self, flaw: Box<dyn Flaw>) {
+    pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
         let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
         for cause_id in flaw.causes() {
-            let cause = self.graph.resolvers.get(*cause_id).expect("Invalid cause ID");
-            or_args.push(!cause.rho().clone());
+            or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
         }
         or_args.push(flaw.phi().clone());
         self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
-        self.graph.flaws.push(flaw);
+        if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() {
+            self.smt.borrow_mut().assert(&ast::or([!c_res.rho().clone(), flaw.phi().clone()])).expect("Failed to assert flaw phi in SMT solver");
+        }
+        self.planner_state.borrow_mut().graph.add_flaw(flaw);
     }
 
-    pub fn add_resolver(&mut self, resolver: Box<dyn Resolver>) {
+    pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
         trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
-        self.smt.borrow_mut().assert(&ast::or([!resolver.rho().clone(), self.graph.flaws.get(resolver.flaw()).expect("Invalid flaw ID").phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
-        self.graph.resolvers.push(resolver);
+        self.smt.borrow_mut().assert(&ast::or([!resolver.rho().clone(), self.planner_state.borrow().graph.get_flaw(resolver.flaw()).phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
+        self.planner_state.borrow_mut().graph.add_resolver(resolver);
+    }
+
+    fn sync_agenda(&self) {
+        let mut planner = self.planner_state.borrow_mut();
+        let smt = self.smt.borrow();
+
+        let current_trail_len = smt.current_trail_len();
+        if planner.notified_len == current_trail_len {
+            return;
+        }
+
+        let new_literals = smt.get_trail_delta(planner.notified_len);
+
+        for lit in new_literals {
+            let var_id = lit.var();
+
+            if let Some(&flaw_id) = planner.lit_to_flaw.get(&var_id) {
+                if !lit.sign() {
+                    planner.agenda.insert(flaw_id);
+                }
+            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id) {
+                if !lit.sign() {
+                    let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
+                    planner.agenda.remove(&parent_flaw_id);
+                }
+            }
+        }
+
+        planner.notified_len = current_trail_len;
+    }
+
+    fn cancel_until(&self, level: usize) {
+        let mut planner = self.planner_state.borrow_mut();
+        let smt = self.smt.borrow();
+
+        let target_trail_len = smt.get_trail_len_at_level(level);
+        let current_trail_len = smt.current_trail_len();
+
+        let trail_to_undo = smt.get_trail_slice(target_trail_len, current_trail_len);
+
+        for lit in trail_to_undo.iter().rev() {
+            let var_id = lit.var();
+
+            if let Some(&flaw_id) = planner.lit_to_flaw.get(&var_id) {
+                if !lit.sign() {
+                    planner.agenda.remove(&flaw_id);
+                }
+            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id) {
+                if !lit.sign() {
+                    let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
+                    planner.agenda.insert(parent_flaw_id);
+                }
+            }
+        }
+
+        planner.notified_len = target_trail_len;
+
+        drop(smt);
+        self.smt.borrow_mut().cancel_until(level);
     }
 
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
+        self.sync_agenda();
         Ok(())
     }
 
@@ -233,7 +310,7 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        self.smt.borrow_mut().assert(&expr_to_bool(&term)).is_ok()
+        if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { self.smt.borrow_mut().assert(&ast::or([!c_res.rho().clone(), expr_to_bool(&term)])).is_ok() } else { self.smt.borrow_mut().assert(&expr_to_bool(&term)).is_ok() }
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, self.smt.borrow_mut().new_enum(instances.iter().map(|id| **id as i32).collect::<Vec<_>>())))))
