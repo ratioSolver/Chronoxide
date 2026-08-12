@@ -88,22 +88,7 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
-        let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
-        for cause_id in flaw.causes() {
-            or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
-        }
-        or_args.push(flaw.phi().clone());
-        self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
-        if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() {
-            self.smt.borrow_mut().assert(&ast::or([!c_res.rho().clone(), flaw.phi().clone()])).expect("Failed to assert flaw phi in SMT solver");
-        }
         self.planner_state.borrow_mut().graph.add_flaw(flaw);
-    }
-
-    pub fn add_resolver(&self, resolver: Box<dyn Resolver>) {
-        trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
-        self.smt.borrow_mut().assert(&ast::or([!resolver.rho().clone(), self.planner_state.borrow().graph.get_flaw(resolver.flaw()).phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
-        self.planner_state.borrow_mut().graph.add_resolver(resolver);
     }
 
     fn sync_agenda(&self) {
@@ -168,6 +153,54 @@ impl SolverState {
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
         self.sync_agenda();
+        let slv = self.slv.upgrade().expect("SolverState should never be dropped while in use");
+        while self.planner_state.borrow().agenda.iter().any(|&flaw_id| self.planner_state.borrow().graph.get_flaw(flaw_id).estimated_cost() == f64::INFINITY) {
+            if let Some(flaw_id) = self.planner_state.borrow_mut().graph.flaw_q.pop_front() {
+                let mut flaw = {
+                    let mut planner = self.planner_state.borrow_mut();
+                    planner.graph.set_current_flaw(Some(flaw_id));
+                    planner.graph.take_flaw(flaw_id)
+                };
+                assert!(!flaw.is_expanded());
+                let phi = flaw.phi().clone();
+                let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
+                for cause_id in flaw.causes() {
+                    or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
+                }
+                or_args.push(phi.clone());
+                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
+
+                let resolvers = flaw.expand(slv.clone())?;
+                let mut or_args = Vec::with_capacity(resolvers.len() + 1);
+                for resolver in resolvers {
+                    let res_id = resolver.id();
+                    let rho = resolver.rho().clone();
+                    or_args.push(rho.clone());
+                    self.smt.borrow_mut().assert(&ast::or([!rho, phi.clone()])).expect("Failed to assert resolver rho in SMT solver");
+                    let mut resolver = {
+                        let mut planner = self.planner_state.borrow_mut();
+                        planner.graph.add_resolver(resolver);
+                        planner.graph.set_current_resolver(Some(res_id));
+                        planner.graph.take_resolver(res_id)
+                    };
+                    resolver.apply(slv.clone())?;
+                    {
+                        let mut planner = self.planner_state.borrow_mut();
+                        planner.graph.return_resolver(res_id, resolver);
+                        planner.graph.set_current_resolver(None);
+                    }
+                }
+                or_args.push(!phi.clone());
+                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver after expansion");
+                {
+                    let mut planner = self.planner_state.borrow_mut();
+                    planner.graph.return_flaw(flaw_id, flaw);
+                    planner.graph.set_current_flaw(None);
+                }
+            } else {
+                return Err(SolverError::Inconsistent);
+            }
+        }
         Ok(())
     }
 
