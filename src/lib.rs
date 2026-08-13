@@ -3,7 +3,7 @@ mod graph;
 mod objects;
 
 use crate::{
-    flaws::{bool::BoolFlaw, clause::ClauseFlaw},
+    flaws::{bool_flw::BoolFlaw, clause_flw::ClauseFlaw, enum_flw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -375,7 +375,11 @@ impl Core for SolverState {
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
-        Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, self.smt.borrow_mut().new_enum(instances.iter().map(|id| **id as i32).collect::<Vec<_>>())))))
+        let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
+        let var = self.smt.borrow_mut().new_enum(domain.clone());
+        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
+        self.add_flaw(Box::new(EnumFlaw::new(phi, c_res, var.clone(), domain)));
+        Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {}
 
