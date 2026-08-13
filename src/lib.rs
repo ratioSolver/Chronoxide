@@ -111,11 +111,11 @@ impl SolverState {
                 if !lit.sign() {
                     planner.agenda.insert(flaw_id);
                 }
-            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id) {
-                if !lit.sign() {
-                    let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
-                    planner.agenda.remove(&parent_flaw_id);
-                }
+            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id)
+                && !lit.sign()
+            {
+                let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
+                planner.agenda.remove(&parent_flaw_id);
             }
         }
 
@@ -138,11 +138,11 @@ impl SolverState {
                 if !lit.sign() {
                     planner.agenda.remove(&flaw_id);
                 }
-            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id) {
-                if !lit.sign() {
-                    let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
-                    planner.agenda.insert(parent_flaw_id);
-                }
+            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id)
+                && !lit.sign()
+            {
+                let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
+                planner.agenda.insert(parent_flaw_id);
             }
         }
 
@@ -200,7 +200,7 @@ impl SolverState {
                     planner.graph.return_flaw(flaw_id, flaw);
                     planner.graph.set_current_flaw(None);
                 }
-                self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(&expr) != Some(false));
+                self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(expr) != Some(false));
             } else {
                 return Err(SolverError::Inconsistent);
             }
@@ -263,13 +263,13 @@ impl Core for SolverState {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
-        Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid integer literal").into()))))
+        Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid integer literal")))))
     }
     fn new_int_var(&self) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), self.smt.borrow_mut().new_int())))
     }
     fn new_real(&self, value: &str) -> Slot {
-        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid real literal").into()))))
+        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid real literal")))))
     }
     fn new_real_var(&self) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), self.smt.borrow_mut().new_real())))
@@ -355,7 +355,7 @@ impl Core for SolverState {
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, self.smt.borrow_mut().new_enum(instances.iter().map(|id| **id as i32).collect::<Vec<_>>())))))
     }
-    fn new_disjunction(&self, disjunction: Disjunction) {}
+    fn new_disjunction(&self, _disjunction: Disjunction) {}
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
         self.core.new_object(class)
@@ -364,8 +364,7 @@ impl Core for SolverState {
         self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
-        let atm = self.core.new_atom(predicate, fact, args);
-        atm
+        self.core.new_atom(predicate, fact, args)
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
@@ -384,18 +383,18 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
         }
         BoolExpr::Eq { left, right, .. } => eq_to_bool(left, right),
         BoolExpr::Lt { left, right, .. } => {
-            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right) {
-                if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
-                    return ast::lt(left.lin.clone(), right.lin.clone());
-                }
+            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
+                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+            {
+                return ast::lt(left.lin.clone(), right.lin.clone());
             }
             panic!("Expected compatible primitive types in BoolExpr::Lt");
         }
         BoolExpr::Leq { left, right, .. } => {
-            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right) {
-                if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
-                    return ast::le(left.lin.clone(), right.lin.clone());
-                }
+            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
+                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+            {
+                return ast::le(left.lin.clone(), right.lin.clone());
             }
             panic!("Expected compatible primitive types in BoolExpr::Leq");
         }
