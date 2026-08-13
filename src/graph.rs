@@ -1,10 +1,6 @@
-use crate::SolverError;
-use riddle::core::Core;
+use crate::{SolverError, SolverState};
 use semitone::ast::BoolExpr;
-use std::{
-    collections::{HashSet, VecDeque},
-    rc::Rc,
-};
+use std::collections::{HashSet, VecDeque};
 use tracing::trace;
 
 pub type FlawId = usize;
@@ -145,7 +141,7 @@ pub trait Flaw {
     fn supports(&self) -> &[ResolverId];
 
     fn is_expanded(&self) -> bool;
-    fn expand(&mut self, core: Rc<dyn Core>) -> Result<Vec<Box<dyn Resolver>>, SolverError>;
+    fn expand(&mut self, core: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError>;
 
     fn resolvers(&self) -> &[ResolverId];
     fn add_resolver(&mut self, id: ResolverId);
@@ -164,7 +160,7 @@ pub trait Resolver {
 
     fn intrinsic_cost(&self) -> f64;
 
-    fn apply(&mut self, core: Rc<dyn Core>) -> Result<(), SolverError>;
+    fn apply(&mut self, core: &SolverState) -> Result<(), SolverError>;
 
     fn sub_flaws(&self) -> &[FlawId];
 }

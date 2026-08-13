@@ -1,1 +1,1 @@
-mod bool;
+pub(super) mod bool;

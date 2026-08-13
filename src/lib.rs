@@ -3,6 +3,7 @@ mod graph;
 mod objects;
 
 use crate::{
+    flaws::bool::BoolFlaw,
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -154,7 +155,6 @@ impl SolverState {
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
         self.sync_agenda();
-        let slv = self.slv.upgrade().expect("SolverState should never be dropped while in use");
         while self.planner_state.borrow().agenda.iter().any(|&flaw_id| self.planner_state.borrow().graph.get_flaw(flaw_id).estimated_cost() == f64::INFINITY) {
             if let Some(flaw_id) = self.planner_state.borrow_mut().graph.flaw_q.pop_front() {
                 let mut flaw = {
@@ -170,7 +170,7 @@ impl SolverState {
                 or_args.push(flaw.phi().clone());
                 self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
 
-                let resolvers = flaw.expand(slv.clone())?;
+                let resolvers = flaw.expand(self)?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
                     let rho = resolver.rho().clone();
@@ -188,7 +188,7 @@ impl SolverState {
                         planner.graph.set_current_resolver(Some(res_id));
                         planner.graph.take_resolver(res_id)
                     };
-                    resolver.apply(slv.clone())?;
+                    resolver.apply(self)?;
                     {
                         let mut planner = self.planner_state.borrow_mut();
                         planner.graph.return_resolver(resolver.id(), resolver);
@@ -257,7 +257,10 @@ impl Core for SolverState {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), if value { ast::BoolExpr::True } else { ast::BoolExpr::False })))
     }
     fn new_bool_var(&self) -> Slot {
-        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), self.smt.borrow_mut().new_bool())))
+        let var = self.smt.borrow_mut().new_bool();
+        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
+        self.add_flaw(Box::new(BoolFlaw::new(phi, c_res, var.clone())));
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid integer literal").into()))))

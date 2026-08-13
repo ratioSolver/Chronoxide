@@ -1,13 +1,10 @@
-use std::rc::Rc;
-
 use crate::{
-    SolverError,
+    SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use riddle::core::Core;
-use semitone::ast::{self, BoolExpr};
+use semitone::ast::BoolExpr;
 
-pub(super) struct BoolFlaw {
+pub(crate) struct BoolFlaw {
     id: FlawId,
     phi: BoolExpr,
 
@@ -22,12 +19,12 @@ pub(super) struct BoolFlaw {
 }
 
 impl BoolFlaw {
-    pub(super) fn new(phi: BoolExpr, target: BoolExpr) -> Self {
+    pub(crate) fn new(phi: BoolExpr, cause: Option<ResolverId>, target: BoolExpr) -> Self {
         Self {
             id: 0,
             phi,
-            causes: Vec::new(),
-            supports: Vec::new(),
+            causes: cause.into_iter().collect(),
+            supports: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
             is_expanded: false,
@@ -72,16 +69,9 @@ impl Flaw for BoolFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, _core: Rc<dyn Core>) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, _state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
         self.is_expanded = true;
-
-        let rho_true = self.target.clone();
-        let rho_false = !self.target.clone();
-
-        let res_true = Box::new(BoolResolver::new(self.id, rho_true, true));
-        let res_false = Box::new(BoolResolver::new(self.id, rho_false, false));
-
-        Ok(vec![res_true, res_false])
+        Ok(vec![Box::new(BoolResolver::new(self.id, self.target.clone())), Box::new(BoolResolver::new(self.id, !self.target.clone()))])
     }
 }
 
@@ -90,12 +80,11 @@ struct BoolResolver {
     flaw: FlawId,
     rho: BoolExpr,
     sub_flaws: Vec<FlawId>,
-    value: bool,
 }
 
 impl BoolResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, value: bool) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), value }
+    fn new(flaw: FlawId, rho: BoolExpr) -> Self {
+        Self { id: 0, flaw, rho, sub_flaws: Vec::new() }
     }
 }
 
@@ -123,7 +112,7 @@ impl Resolver for BoolResolver {
         &self.sub_flaws
     }
 
-    fn apply(&mut self, core: Rc<dyn Core>) -> Result<(), SolverError> {
+    fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
         Ok(())
     }
 }
