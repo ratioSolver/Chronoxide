@@ -3,14 +3,14 @@ mod graph;
 mod objects;
 
 use crate::{
-    flaws::bool::BoolFlaw,
+    flaws::{bool::BoolFlaw, clause::ClauseFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
-    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot},
+    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, to_cnf},
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
@@ -350,7 +350,29 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { self.smt.borrow_mut().assert(&ast::or([!c_res.rho().clone(), expr_to_bool(&term)])).is_ok() } else { self.smt.borrow_mut().assert(&expr_to_bool(&term)).is_ok() }
+        let (phi, c_res_id) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
+        if self.smt.borrow_mut().assert(&ast::or([!phi.clone(), expr_to_bool(&term)])).is_err() {
+            return false;
+        }
+        let cnf_expr = to_cnf(term.clone());
+        if let BoolExpr::And { terms, .. } = cnf_expr.as_ref() {
+            for clause in terms {
+                if let BoolExpr::Or { terms, .. } = clause.as_ref()
+                    && terms.len() > 1
+                {
+                    let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                    self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), c_res_id, terms)));
+                }
+            }
+        } else {
+            if let BoolExpr::Or { terms, .. } = cnf_expr.as_ref()
+                && terms.len() > 1
+            {
+                let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), c_res_id, terms)));
+            }
+        }
+        return true;
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, self.smt.borrow_mut().new_enum(instances.iter().map(|id| **id as i32).collect::<Vec<_>>())))))
