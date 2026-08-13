@@ -372,7 +372,7 @@ impl Core for SolverState {
                 self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), c_res_id, terms)));
             }
         }
-        return true;
+        true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, self.smt.borrow_mut().new_enum(instances.iter().map(|id| **id as i32).collect::<Vec<_>>())))))
