@@ -1,3 +1,4 @@
+mod flaws;
 mod graph;
 mod objects;
 
@@ -183,6 +184,7 @@ impl SolverState {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
                         let res_id = planner.graph.add_resolver(resolver);
+                        flaw.add_resolver(res_id);
                         planner.graph.set_current_resolver(Some(res_id));
                         planner.graph.take_resolver(res_id)
                     };

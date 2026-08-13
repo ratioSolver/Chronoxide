@@ -148,6 +148,7 @@ pub trait Flaw {
     fn expand(&mut self, core: Rc<dyn Core>) -> Result<Vec<Box<dyn Resolver>>, SolverError>;
 
     fn resolvers(&self) -> &[ResolverId];
+    fn add_resolver(&mut self, id: ResolverId);
 
     fn estimated_cost(&self) -> f64;
     fn set_estimated_cost(&mut self, cost: f64);
