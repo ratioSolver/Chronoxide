@@ -2,6 +2,7 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
+use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
 
 pub(crate) struct BoolFlaw {
@@ -47,9 +48,6 @@ impl Flaw for BoolFlaw {
 
     fn causes(&self) -> &[ResolverId] {
         &self.causes
-    }
-    fn supports(&self) -> &[ResolverId] {
-        &self.supports
     }
     fn resolvers(&self) -> &[ResolverId] {
         &self.resolvers

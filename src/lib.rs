@@ -3,7 +3,7 @@ mod graph;
 mod objects;
 
 use crate::{
-    flaws::{bool_flw::BoolFlaw, clause_flw::ClauseFlaw, enum_flw::EnumFlaw},
+    flaws::{atom_flw::AtomFlaw, bool_flw::BoolFlaw, clause_flw::ClauseFlaw, enum_flw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -90,7 +90,25 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
-        self.planner_state.borrow_mut().graph.add_flaw(flaw);
+        let mut planner = self.planner_state.borrow_mut();
+        let atom_id = flaw.atom_id();
+        let flaw_id = planner.graph.add_flaw(flaw);
+        if let Some(atom_id) = atom_id {
+            planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
+        }
+    }
+
+    pub(crate) fn add_causal_link(&self, unif_resolver_id: ResolverId, target_atom_id: riddle::env::AtomId) -> Result<(), SolverError> {
+        let mut planner = self.planner_state.borrow_mut();
+
+        let target_flaw_id = *planner.graph.atom_to_flaw.get(&target_atom_id).ok_or_else(|| SolverError::RuntimeError(format!("Atom ID {} has no corresponding Flaw", target_atom_id)))?;
+
+        let target_flaw = planner.graph.get_flaw_mut(target_flaw_id);
+        target_flaw.add_support(unif_resolver_id);
+
+        trace!("Causal link created: Resolver {} supports Flaw {}", unif_resolver_id, target_flaw_id);
+        let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: target_flaw_id, resolver_id: unif_resolver_id });
+        Ok(())
     }
 
     fn sync_agenda(&self) {

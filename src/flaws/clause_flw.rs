@@ -48,9 +48,6 @@ impl Flaw for ClauseFlaw {
     fn causes(&self) -> &[ResolverId] {
         &self.causes
     }
-    fn supports(&self) -> &[ResolverId] {
-        &self.supports
-    }
     fn resolvers(&self) -> &[ResolverId] {
         &self.resolvers
     }

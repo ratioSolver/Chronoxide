@@ -1,6 +1,7 @@
-use crate::{SolverError, SolverState};
+use crate::{SolverError, SolverState, flaws::atom_flw::AtomFlaw};
+use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::trace;
 
 pub type FlawId = usize;
@@ -12,6 +13,7 @@ pub(super) struct Graph {
     resolvers: Vec<Option<Box<dyn Resolver>>>,
     current_resolver: Option<ResolverId>,
     pub(super) flaw_q: VecDeque<FlawId>,
+    pub(super) atom_to_flaw: HashMap<AtomId, FlawId>,
 }
 
 impl Graph {
@@ -22,6 +24,7 @@ impl Graph {
             resolvers: Vec::new(),
             current_resolver: None,
             flaw_q: VecDeque::new(),
+            atom_to_flaw: HashMap::new(),
         }
     }
 
@@ -129,6 +132,25 @@ impl Graph {
             }
         }
     }
+
+    pub(crate) fn get_causal_ancestor_atoms(&self, start_resolver_id: ResolverId) -> HashSet<riddle::env::AtomId> {
+        let mut ancestor_atoms = HashSet::new();
+        let mut current_resolver = Some(start_resolver_id);
+
+        while let Some(res_id) = current_resolver {
+            let resolver = self.get_resolver(res_id);
+            let parent_flaw_id = resolver.flaw();
+            let flaw = self.get_flaw(parent_flaw_id);
+
+            if let Some(atom_id) = flaw.atom_id() {
+                ancestor_atoms.insert(atom_id);
+            }
+
+            current_resolver = flaw.causes().first().copied();
+        }
+
+        ancestor_atoms
+    }
 }
 
 pub trait Flaw {
@@ -138,7 +160,16 @@ pub trait Flaw {
     fn phi(&self) -> &BoolExpr;
 
     fn causes(&self) -> &[ResolverId];
-    fn supports(&self) -> &[ResolverId];
+    fn supports(&self) -> &[ResolverId] {
+        self.causes()
+    }
+    fn add_support(&mut self, id: ResolverId) {
+        unreachable!("This flaw type does not support adding supports.");
+    }
+
+    fn atom_id(&self) -> Option<AtomId> {
+        None
+    }
 
     fn is_expanded(&self) -> bool;
     fn expand(&mut self, core: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError>;
