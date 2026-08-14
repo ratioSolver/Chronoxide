@@ -2,7 +2,6 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
 
 pub(crate) struct BoolFlaw {
@@ -10,7 +9,6 @@ pub(crate) struct BoolFlaw {
     phi: BoolExpr,
 
     causes: Vec<ResolverId>,
-    supports: Vec<ResolverId>,
     resolvers: Vec<ResolverId>,
 
     estimated_cost: f64,
@@ -25,7 +23,6 @@ impl BoolFlaw {
             id: 0,
             phi,
             causes: cause.into_iter().collect(),
-            supports: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
             is_expanded: false,

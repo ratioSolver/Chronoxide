@@ -1,4 +1,4 @@
-use crate::{SolverError, SolverState, flaws::atom_flw::AtomFlaw};
+use crate::{SolverError, SolverState};
 use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -52,20 +52,12 @@ impl Graph {
         self.flaws[id] = Some(flaw);
     }
 
-    pub(super) fn get_current_flaw(&self) -> Option<&dyn Flaw> {
-        self.current_flaw.map(|id| self.flaws[id].as_ref().unwrap().as_ref())
-    }
-
     pub(super) fn set_current_flaw(&mut self, flaw_id: Option<FlawId>) {
         self.current_flaw = flaw_id;
     }
 
     pub(super) fn get_resolver(&self, id: ResolverId) -> &dyn Resolver {
         self.resolvers[id].as_ref().unwrap().as_ref()
-    }
-
-    pub(super) fn get_resolver_mut(&mut self, id: ResolverId) -> &mut dyn Resolver {
-        self.resolvers[id].as_mut().unwrap().as_mut()
     }
 
     pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
@@ -163,7 +155,7 @@ pub trait Flaw {
     fn supports(&self) -> &[ResolverId] {
         self.causes()
     }
-    fn add_support(&mut self, id: ResolverId) {
+    fn add_support(&mut self, _id: ResolverId) {
         unreachable!("This flaw type does not support adding supports.");
     }
 

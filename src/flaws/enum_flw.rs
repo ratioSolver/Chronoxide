@@ -9,7 +9,6 @@ pub(crate) struct EnumFlaw {
     phi: BoolExpr,
 
     causes: Vec<ResolverId>,
-    supports: Vec<ResolverId>,
     resolvers: Vec<ResolverId>,
 
     estimated_cost: f64,
@@ -25,7 +24,6 @@ impl EnumFlaw {
             id: 0,
             phi,
             causes: cause.into_iter().collect(),
-            supports: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
             is_expanded: false,

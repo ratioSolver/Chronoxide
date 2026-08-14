@@ -408,7 +408,10 @@ impl Core for SolverState {
         self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
-        self.core.new_atom(predicate, fact, args)
+        let atm = self.core.new_atom(predicate, fact, args);
+        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
+        self.add_flaw(Box::new(AtomFlaw::new(phi, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
+        atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
