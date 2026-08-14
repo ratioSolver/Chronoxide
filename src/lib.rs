@@ -98,7 +98,7 @@ impl SolverState {
         }
     }
 
-    pub(crate) fn add_causal_link(&self, unif_resolver_id: ResolverId, target_atom_id: riddle::env::AtomId) -> Result<(), SolverError> {
+    pub(crate) fn add_causal_link(&self, unif_resolver_id: ResolverId, target_atom_id: AtomId) -> Result<(), SolverError> {
         let mut planner = self.planner_state.borrow_mut();
 
         let target_flaw_id = *planner.graph.atom_to_flaw.get(&target_atom_id).ok_or_else(|| SolverError::RuntimeError(format!("Atom ID {} has no corresponding Flaw", target_atom_id)))?;
@@ -555,5 +555,102 @@ impl Solver {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
         reply_rx.await.map_err(|_| SolverError::Inconsistent)?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use semitone::ast;
+    use tokio::sync::broadcast;
+
+    fn setup_test_state() -> Rc<SolverState> {
+        let (tx, _) = broadcast::channel(100);
+        SolverState::new(tx)
+    }
+
+    #[test]
+    fn test_solver_initialization() {
+        let state = setup_test_state();
+
+        assert!(state.planner_state.borrow().agenda.is_empty());
+        assert_eq!(state.smt.borrow().current_trail_len(), 1); // The initial trail length should be 1 due to the initial true literal.
+    }
+
+    #[test]
+    fn test_eq_to_bool_primitives() {
+        let state = setup_test_state();
+
+        let bool_true = state.new_bool(true);
+        let bool_false = state.new_bool(false);
+
+        let eq_expr = eq_to_bool(&bool_true, &bool_false);
+        assert!(matches!(eq_expr, ast::BoolExpr::Eq(_, _)));
+    }
+
+    #[test]
+    #[should_panic(expected = "Expected compatible types in equality")]
+    fn test_eq_to_bool_incompatible_types_panic() {
+        let state = setup_test_state();
+
+        let bool_var = state.new_bool(true);
+        let int_var = state.new_int("42");
+
+        let _ = eq_to_bool(&bool_var, &int_var);
+    }
+
+    #[test]
+    fn test_core_new_bool_var_generates_flaw() {
+        let state = setup_test_state();
+
+        let initial_q_len = state.planner_state.borrow().graph.flaw_q.len();
+        assert_eq!(initial_q_len, 0, "Initial flaw queue should be empty");
+
+        let bool_slot = state.new_bool_var();
+
+        assert!(matches!(bool_slot, Slot::Primitive(_)));
+
+        let final_q_len = state.planner_state.borrow().graph.flaw_q.len();
+        assert_eq!(final_q_len, 1, "Flaw queue should have one flaw after creating a new bool var");
+    }
+
+    #[test]
+    fn test_core_assert_disjunction_generates_clause_flaw() {
+        let state = setup_test_state();
+
+        let slot_a = state.new_bool_var();
+        let slot_b = state.new_bool_var();
+
+        let initial_q_len = state.planner_state.borrow().graph.flaw_q.len();
+        assert_eq!(initial_q_len, 2);
+
+        let expr_a = Rc::new(BoolExpr::Term { var_type: Rc::downgrade(&state.bool_type()), term: slot_a });
+        let expr_b = Rc::new(BoolExpr::Term { var_type: Rc::downgrade(&state.bool_type()), term: slot_b });
+
+        let disjunction = Rc::new(BoolExpr::Or { var_type: Rc::downgrade(&state.bool_type()), terms: vec![expr_a, expr_b] });
+
+        let success = state.assert(disjunction);
+        assert!(success, "Assertion of a disjunction should succeed");
+
+        let final_q_len = state.planner_state.borrow().graph.flaw_q.len();
+        assert_eq!(final_q_len, 3, "Assertion of a disjunction should generate a ClauseFlaw");
+    }
+
+    #[test]
+    fn test_core_assert_conjunction_skips_clause_flaw() {
+        let state = setup_test_state();
+        let slot_a = state.new_bool_var();
+
+        let initial_q_len = state.planner_state.borrow().graph.flaw_q.len();
+
+        let expr_a = Rc::new(BoolExpr::Term { var_type: Rc::downgrade(&state.bool_type()), term: slot_a });
+
+        let conjunction = Rc::new(BoolExpr::And { var_type: Rc::downgrade(&state.bool_type()), terms: vec![expr_a] });
+
+        let success = state.assert(conjunction);
+        assert!(success);
+
+        let final_q_len = state.planner_state.borrow().graph.flaw_q.len();
+        assert_eq!(final_q_len, initial_q_len, "Conjunctions should not generate ClauseFlaw");
     }
 }
