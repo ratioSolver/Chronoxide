@@ -40,6 +40,7 @@ impl Graph {
     pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
         let id = self.flaws.len();
         flaw.set_id(id);
+        trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
@@ -64,6 +65,7 @@ impl Graph {
     pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
         let id = self.resolvers.len();
         resolver.set_id(id);
+        trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
         self.resolvers.push(Some(resolver));
         id
     }

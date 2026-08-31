@@ -108,13 +108,17 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 let mut msg = json!({
                                     "msg_type": "new-flaw",
                                     "id": format!("{}", flaw_id),
-                                    "causes": causes.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                                    "supports": supports.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
-                                    "status": status,
-                                    "cost": cost
+                                    "phi": phi,
+                                    "status": status
                                 });
-                                if let Some(phi) = phi {
-                                    msg["phi"] = Value::String(format!("{}", phi));
+                                if !causes.is_empty() {
+                                    msg["causes"] = Value::Array(causes.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                }
+                                if !supports.is_empty() {
+                                    msg["supports"] = Value::Array(supports.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                }
+                                if cost.is_finite() {
+                                    msg["cost"] = Value::from(cost);
                                 }
                                 msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
@@ -146,13 +150,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 let mut msg = json!({
                                     "msg_type": "new-resolver",
                                     "id": format!("{}", resolver_id),
+                                    "rho": rho,
                                     "flaw_id": format!("{}", flaw_id),
-                                    "sub_flaws": sub_flaws.iter().map(|id| format!("{}", id)).collect::<Vec<_>>(),
                                     "intrinsic_cost": intrinsic_cost,
                                     "status": status,
                                 });
-                                if let Some(rho) = rho {
-                                    msg["rho"] = Value::String(format!("{}", rho));
+                                if !sub_flaws.is_empty() {
+                                    msg["sub_flaws"] = Value::Array(sub_flaws.iter().map(|id| Value::String(format!("{}", id))).collect());
                                 }
                                 msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await

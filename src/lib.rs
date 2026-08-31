@@ -91,26 +91,23 @@ impl SolverState {
     }
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
-        trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
-        let _ = self.tx_event.send(SolverEvent::NewFlaw {
-            flaw_id: flaw.id(),
-            phi: match flaw.phi() {
-                ast::BoolExpr::True => None,
-                ast::BoolExpr::Var(phi) => Some(*phi),
-                _ => unreachable!("Flaw phi should be either True or a variable"),
-            },
-            causes: flaw.causes().to_vec(),
-            supports: flaw.supports().to_vec(),
-            status: self.smt.borrow().get_bool_val(&flaw.phi()),
-            cost: flaw.estimated_cost(),
-            data: flaw.to_json(),
-        });
+        let phi = flaw.phi().to_string();
+        let causes = flaw.causes().to_vec();
+        let supports = flaw.supports().to_vec();
+        let status = self.smt.borrow().get_bool_val(&flaw.phi());
+        let cost = flaw.estimated_cost();
+        let data = flaw.to_json();
 
         let mut planner = self.planner_state.borrow_mut();
         let atom_id = flaw.atom_id();
         let flaw_id = planner.graph.add_flaw(flaw);
+
+        let _ = self.tx_event.send(SolverEvent::NewFlaw { flaw_id, phi, causes, supports, status, cost, data });
         if let Some(atom_id) = atom_id {
             planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
+        }
+        if status == Some(true) {
+            planner.agenda.insert(flaw_id);
         }
     }
 
@@ -189,11 +186,21 @@ impl SolverState {
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
         self.sync_agenda();
-        while self.planner_state.borrow().agenda.iter().any(|&flaw_id| self.planner_state.borrow().graph.get_flaw(flaw_id).estimated_cost() == f64::INFINITY) {
-            if let Some(flaw_id) = self.planner_state.borrow_mut().graph.flaw_q.pop_front() {
+        loop {
+            {
+                let planner = self.planner_state.borrow();
+                if !planner.agenda.iter().any(|&flaw_id| planner.graph.get_flaw(flaw_id).estimated_cost() == f64::INFINITY) {
+                    trace!("All flaws have finite estimated costs, graph building complete");
+                    return self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent);
+                }
+            }
+
+            let next_flaw_id = self.planner_state.borrow_mut().graph.flaw_q.pop_front();
+            if let Some(flaw_id) = next_flaw_id {
                 let mut flaw = {
                     let mut planner = self.planner_state.borrow_mut();
                     planner.graph.set_current_flaw(Some(flaw_id));
+                    let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flaw_id)));
                     planner.graph.take_flaw(flaw_id)
                 };
                 assert!(!flaw.is_expanded());
@@ -207,21 +214,6 @@ impl SolverState {
                 }
 
                 let resolvers = flaw.expand(self)?;
-                for resolver in &resolvers {
-                    let _ = self.tx_event.send(SolverEvent::NewResolver {
-                        resolver_id: resolver.id(),
-                        flaw_id: flaw.id(),
-                        rho: match resolver.rho() {
-                            ast::BoolExpr::True => None,
-                            ast::BoolExpr::Var(rho) => Some(*rho),
-                            _ => unreachable!("Resolver rho should be either True or a variable"),
-                        },
-                        status: self.smt.borrow().get_bool_val(&resolver.rho()),
-                        intrinsic_cost: resolver.intrinsic_cost(),
-                        sub_flaws: resolver.sub_flaws().to_vec(),
-                        data: resolver.to_json(),
-                    });
-                }
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
                     let rho = resolver.rho().clone();
@@ -235,34 +227,41 @@ impl SolverState {
                     return Err(SolverError::Inconsistent);
                 }
 
+                let flaw_id = flaw.id();
                 for resolver in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        let res_id = planner.graph.add_resolver(resolver);
-                        flaw.add_resolver(res_id);
-                        planner.graph.set_current_resolver(Some(res_id));
-                        planner.graph.take_resolver(res_id)
+                        let rho = resolver.rho().to_string();
+                        let status = self.smt.borrow().get_bool_val(&resolver.rho());
+                        let intrinsic_cost = resolver.intrinsic_cost();
+                        let sub_flaws = resolver.sub_flaws().to_vec();
+                        let data = resolver.to_json();
+                        let resolver_id = planner.graph.add_resolver(resolver);
+                        let _ = self.tx_event.send(SolverEvent::NewResolver { resolver_id, flaw_id, rho, status, intrinsic_cost, sub_flaws, data });
+                        flaw.add_resolver(resolver_id);
+                        planner.graph.set_current_resolver(Some(resolver_id));
+                        let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));
+                        planner.graph.take_resolver(resolver_id)
                     };
                     resolver.apply(self)?;
                     {
                         let mut planner = self.planner_state.borrow_mut();
                         planner.graph.return_resolver(resolver.id(), resolver);
                         planner.graph.set_current_resolver(None);
+                        let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
                     }
                 }
                 {
                     let mut planner = self.planner_state.borrow_mut();
                     planner.graph.return_flaw(flaw_id, flaw);
                     planner.graph.set_current_flaw(None);
+                    let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
                 }
                 self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(expr) != Some(false));
             } else {
                 return Err(SolverError::Inconsistent);
             }
         }
-
-        self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent)?;
-        Ok(())
     }
 
     fn to_json(&self) -> Value {
@@ -448,9 +447,8 @@ impl Core for SolverState {
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let atm = self.core.new_atom(predicate, fact, args);
-        let sigma = self.smt.borrow_mut().new_bool();
-        let ast::BoolExpr::Var(sigma) = sigma else {
-            panic!("Expected a BoolExpr::Var for atom sigma");
+        let ast::BoolExpr::Var(sigma) = self.smt.borrow_mut().new_bool() else {
+            unreachable!("Expected a BoolExpr::Var for atom sigma");
         };
         self.planner_state.borrow_mut().atom_sigma.push(sigma);
         let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
@@ -470,7 +468,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             {
                 return var.lit.clone();
             }
-            panic!("Expected BoolVar in BoolExpr::Term");
+            unreachable!("Expected BoolVar in BoolExpr::Term");
         }
         BoolExpr::Eq { left, right, .. } => eq_to_bool(left, right),
         BoolExpr::Lt { left, right, .. } => {
@@ -479,7 +477,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             {
                 return left.lin.lt(&right.lin);
             }
-            panic!("Expected compatible primitive types in BoolExpr::Lt");
+            unreachable!("Expected compatible primitive types in BoolExpr::Lt");
         }
         BoolExpr::Leq { left, right, .. } => {
             if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
@@ -487,7 +485,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             {
                 return left.lin.le(&right.lin);
             }
-            panic!("Expected compatible primitive types in BoolExpr::Leq");
+            unreachable!("Expected compatible primitive types in BoolExpr::Leq");
         }
         BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
         BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
@@ -517,19 +515,19 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
             }
         }
         _ => {
-            panic!("Expected compatible types in equality");
+            unreachable!("Expected compatible types in equality");
         }
     }
-    panic!("Expected compatible types in equality");
+    unreachable!("Expected compatible types in equality");
 }
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw { flaw_id: FlawId, phi: Option<usize>, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
+    NewFlaw { flaw_id: FlawId, phi: String, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
     FlawCostUpdate { flaw_id: FlawId, cost: f64 },
     FlawStatusUpdate { flaw_id: FlawId, status: Option<bool> },
     CurrentFlaw(Option<FlawId>),
-    NewResolver { resolver_id: ResolverId, rho: Option<usize>, flaw_id: FlawId, sub_flaws: Vec<FlawId>, intrinsic_cost: f64, status: Option<bool>, data: Value },
+    NewResolver { resolver_id: ResolverId, rho: String, flaw_id: FlawId, sub_flaws: Vec<FlawId>, intrinsic_cost: f64, status: Option<bool>, data: Value },
     ResolverStatusUpdate { resolver_id: ResolverId, status: Option<bool> },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },

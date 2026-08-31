@@ -45,15 +45,15 @@ export namespace solver {
         switch (msg.msg_type) {
           case 'status': {
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
-              this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes, flaw_msg.supports, flaw_msg.status, flaw_msg.cost));
+              this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes ?? [], flaw_msg.supports ?? [], flaw_msg.status, flaw_msg.cost));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
-              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.requirements, resolver_msg.status));
+              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.sub_flaws ?? [], resolver_msg.status));
 
             for (const listener of this.listeners) listener.initialized();
             break;
           }
           case 'new-flaw': {
-            const flaw = new Flaw(this, msg.id, msg.phi, msg.causes, msg.supports, msg.status, msg.cost);
+            const flaw = new Flaw(this, msg.id, msg.phi, msg.causes ?? [], msg.supports ?? [], msg.status, msg.cost);
             this.flaws.set(msg.id, flaw);
             for (const listener of this.listeners) listener.new_flaw(flaw);
             break;
@@ -87,7 +87,7 @@ export namespace solver {
             break;
           }
           case 'new-resolver': {
-            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.requirements, msg.status);
+            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.sub_flaws ?? [], msg.status);
             this.resolvers.set(msg.id, resolver);
             for (const listener of this.listeners) listener.new_resolver(resolver);
             break;
@@ -166,13 +166,13 @@ export namespace solver {
   export class Flaw {
     private readonly solver: Solver;
     private readonly id: string;
-    private readonly phi: number;
+    private readonly phi: string;
     private readonly causes: string[];
     private supports: string[];
     private status: Status;
-    private cost: Rational;
+    private cost?: number;
 
-    constructor(solver: Solver, id: string, phi: number, causes: string[], supports: string[], status: Status, cost: Rational) {
+    constructor(solver: Solver, id: string, phi: string, causes: string[], supports: string[], status: Status, cost?: number) {
       this.solver = solver;
       this.id = id;
       this.phi = phi;
@@ -184,26 +184,26 @@ export namespace solver {
 
     get_solver(): Solver { return this.solver; }
     get_id(): string { return this.id; }
-    get_phi(): number { return this.phi; }
+    get_phi(): string { return this.phi; }
     get_causes(): string[] { return this.causes; }
     get_supports(): string[] { return this.supports; }
     _add_support(support_id: string) { this.supports.push(support_id); }
     get_status(): Status { return this.status; }
     _set_status(status: Status) { this.status = status; }
-    get_cost(): number { return this.cost.den === 0 ? Infinity : this.cost.num / this.cost.den; }
-    _set_cost(cost: Rational) { this.cost = cost; }
+    get_cost(): number { return this.cost ?? Infinity; }
+    _set_cost(cost?: number) { this.cost = cost; }
   }
 
   export class Resolver {
     private readonly solver: Solver;
     private readonly id: string;
-    private readonly rho: number;
+    private readonly rho: string;
     private readonly flaw: string;
-    private readonly intrinsic_cost: Rational;
+    private readonly intrinsic_cost: number;
     private requirements: string[];
     private status: Status;
 
-    constructor(solver: Solver, id: string, rho: number, flaw: string, intrinsic_cost: Rational, requirements: string[], status: Status) {
+    constructor(solver: Solver, id: string, rho: string, flaw: string, intrinsic_cost: number, requirements: string[], status: Status) {
       this.solver = solver;
       this.id = id;
       this.rho = rho;
@@ -215,10 +215,10 @@ export namespace solver {
 
     get_solver(): Solver { return this.solver; }
     get_id(): string { return this.id; }
-    get_rho(): number { return this.rho; }
+    get_rho(): string { return this.rho; }
     get_flaw(): string { return this.flaw; }
     get_requirements(): string[] { return this.requirements; }
-    get_intrinsic_cost(): number { return this.intrinsic_cost.den === 0 ? Infinity : this.intrinsic_cost.num / this.intrinsic_cost.den; }
+    get_intrinsic_cost(): number { return this.intrinsic_cost; }
     get_cost(): number {
       const req_costs = this.requirements.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
       const max_req_cost = req_costs.length > 0 ? Math.max(...req_costs) : 0;
@@ -229,18 +229,17 @@ export namespace solver {
   }
 
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
-  type PartialFlawMessage = { phi: number, causes: string[], supports: string[], cost: Rational, status: Status };
+  type PartialFlawMessage = { phi: string, causes?: string[], supports?: string[], cost?: number, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
-  type PartialResolverMessage = { rho: number, flaw_id: string, requirements: string[], intrinsic_cost: Rational, status: Status };
+  type PartialResolverMessage = { rho: string, flaw_id: string, sub_flaws?: string[], intrinsic_cost: number, status: Status };
   type ResolverMessage = ({ id: string } & PartialResolverMessage);
-  type Rational = { num: number, den: number };
   export type Status = true | false | null;
 
   type ServerMessage =
     | ({ msg_type: 'status' } & SolverMessage)
     | ({ msg_type: 'new-flaw' } & FlawMessage)
     | ({ msg_type: 'flaw-status-update' } & { id: string, status: Status })
-    | ({ msg_type: 'flaw-cost-update' } & { id: string, cost: Rational })
+    | ({ msg_type: 'flaw-cost-update' } & { id: string, cost?: number })
     | ({ msg_type: 'current-flaw' } & { id: string | undefined })
     | ({ msg_type: 'new-resolver' } & ResolverMessage)
     | ({ msg_type: 'resolver-status-update' } & { id: string, status: Status })
