@@ -5,7 +5,7 @@ use crate::{
 use riddle::{
     core::Core,
     env::{Atom, AtomId, Env},
-    scope::get_predicate_by_path,
+    scope::{Type, get_predicate_by_path},
 };
 use semitone::ast::{self, BoolExpr};
 use std::{collections::HashSet, rc::Rc};
@@ -115,6 +115,14 @@ impl Flaw for AtomFlaw {
 
         Ok(resolvers)
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "atom",
+            "atom_id": *self.atom.id(),
+            "predicate": self.atom.predicate().name(),
+        })
+    }
 }
 
 struct RuleResolver {
@@ -162,6 +170,12 @@ impl Resolver for RuleResolver {
         self.predicate.clone().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Error applying rule: {:?}", e)))?;
         Ok(())
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "rule"
+        })
+    }
 }
 
 struct FactResolver {
@@ -206,6 +220,12 @@ impl Resolver for FactResolver {
             return Err(SolverError::Inconsistent);
         }
         Ok(())
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "fact"
+        })
     }
 }
 
@@ -267,6 +287,14 @@ impl Resolver for UnificationResolver {
         }
         state.add_causal_link(self.id, self.target_atom_id)?;
         Ok(())
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "unification",
+            "source": *self.source_atom_id,
+            "target": *self.target_atom_id,
+        })
     }
 }
 

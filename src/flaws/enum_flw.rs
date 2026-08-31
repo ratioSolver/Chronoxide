@@ -3,6 +3,7 @@ use crate::{
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
 use semitone::ast::{BoolExpr, EnumExpr};
+use serde_json::{Value, json};
 
 pub(crate) struct EnumFlaw {
     id: FlawId,
@@ -72,23 +73,34 @@ impl Flaw for EnumFlaw {
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
 
         for &val in &self.domain {
-            resolvers.push(Box::new(EnumResolver::new(self.id, self.target.eq(val))));
+            resolvers.push(Box::new(EnumResolver::new(self.id, val, self.target.eq(val))));
         }
 
         Ok(resolvers)
+    }
+
+    fn to_json(&self) -> Value {
+        let EnumExpr::Var(var) = &self.target else {
+            panic!("Expected a EnumExpr::Var for flaw target");
+        };
+        json!({
+            "kind": "enum",
+            "var": var,
+        })
     }
 }
 
 struct EnumResolver {
     id: ResolverId,
     flaw: FlawId,
+    val: i32,
     rho: BoolExpr,
     sub_flaws: Vec<FlawId>,
 }
 
 impl EnumResolver {
-    fn new(flaw: FlawId, rho: BoolExpr) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new() }
+    fn new(flaw: FlawId, val: i32, rho: BoolExpr) -> Self {
+        Self { id: 0, flaw, val, rho, sub_flaws: Vec::new() }
     }
 }
 
@@ -118,5 +130,12 @@ impl Resolver for EnumResolver {
 
     fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
         Ok(())
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "val",
+            "val": self.val,
+        })
     }
 }

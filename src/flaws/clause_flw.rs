@@ -74,6 +74,13 @@ impl Flaw for ClauseFlaw {
 
         Ok(resolvers)
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "clause",
+            "lits": self.literals.iter().map(|lit| lit.to_string()).collect::<Vec<_>>(),
+        })
+    }
 }
 
 struct ClauseResolver {
@@ -115,5 +122,11 @@ impl Resolver for ClauseResolver {
 
     fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
         Ok(())
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "lit"
+        })
     }
 }

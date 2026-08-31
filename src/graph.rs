@@ -1,6 +1,7 @@
 use crate::{SolverError, SolverState};
 use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::trace;
 
@@ -171,6 +172,8 @@ pub trait Flaw {
 
     fn estimated_cost(&self) -> f64;
     fn set_estimated_cost(&mut self, cost: f64);
+
+    fn to_json(&self) -> Value;
 }
 
 pub trait Resolver {
@@ -186,4 +189,6 @@ pub trait Resolver {
     fn apply(&mut self, core: &SolverState) -> Result<(), SolverError>;
 
     fn sub_flaws(&self) -> &[FlawId];
+
+    fn to_json(&self) -> Value;
 }

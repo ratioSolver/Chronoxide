@@ -92,6 +92,20 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
+        let _ = self.tx_event.send(SolverEvent::NewFlaw {
+            flaw_id: flaw.id(),
+            phi: match flaw.phi() {
+                ast::BoolExpr::True => None,
+                ast::BoolExpr::Var(phi) => Some(*phi),
+                _ => unreachable!("Flaw phi should be either True or a variable"),
+            },
+            causes: flaw.causes().to_vec(),
+            supports: flaw.supports().to_vec(),
+            status: self.smt.borrow().get_bool_val(&flaw.phi()),
+            cost: flaw.estimated_cost(),
+            data: flaw.to_json(),
+        });
+
         let mut planner = self.planner_state.borrow_mut();
         let atom_id = flaw.atom_id();
         let flaw_id = planner.graph.add_flaw(flaw);
@@ -193,6 +207,21 @@ impl SolverState {
                 }
 
                 let resolvers = flaw.expand(self)?;
+                for resolver in &resolvers {
+                    let _ = self.tx_event.send(SolverEvent::NewResolver {
+                        resolver_id: resolver.id(),
+                        flaw_id: flaw.id(),
+                        rho: match resolver.rho() {
+                            ast::BoolExpr::True => None,
+                            ast::BoolExpr::Var(rho) => Some(*rho),
+                            _ => unreachable!("Resolver rho should be either True or a variable"),
+                        },
+                        status: self.smt.borrow().get_bool_val(&resolver.rho()),
+                        intrinsic_cost: resolver.intrinsic_cost(),
+                        sub_flaws: resolver.sub_flaws().to_vec(),
+                        data: resolver.to_json(),
+                    });
+                }
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
                     let rho = resolver.rho().clone();
@@ -496,11 +525,11 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewFlaw { flaw_id: FlawId, phi: usize, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
+    NewFlaw { flaw_id: FlawId, phi: Option<usize>, causes: Vec<ResolverId>, supports: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
     FlawCostUpdate { flaw_id: FlawId, cost: f64 },
     FlawStatusUpdate { flaw_id: FlawId, status: Option<bool> },
     CurrentFlaw(Option<FlawId>),
-    NewResolver { resolver_id: ResolverId, rho: usize, flaw_id: FlawId, sub_flaws: Vec<FlawId>, intrinsic_cost: f64, status: Option<bool>, data: Value },
+    NewResolver { resolver_id: ResolverId, rho: Option<usize>, flaw_id: FlawId, sub_flaws: Vec<FlawId>, intrinsic_cost: f64, status: Option<bool>, data: Value },
     ResolverStatusUpdate { resolver_id: ResolverId, status: Option<bool> },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },

@@ -68,6 +68,12 @@ impl Flaw for BoolFlaw {
         self.is_expanded = true;
         Ok(vec![Box::new(BoolResolver::new(self.id, self.target.clone())), Box::new(BoolResolver::new(self.id, !self.target.clone()))])
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "bool"
+        })
+    }
 }
 
 struct BoolResolver {
@@ -109,5 +115,11 @@ impl Resolver for BoolResolver {
 
     fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
         Ok(())
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "bool"
+        })
     }
 }
