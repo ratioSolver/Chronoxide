@@ -83,6 +83,9 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
+        if let Err(_) = self.smt.borrow_mut().propagate() {
+            return Err(SolverError::Inconsistent);
+        }
         self.build_graph()?;
         Ok(())
     }
@@ -228,6 +231,8 @@ impl SolverState {
                 return Err(SolverError::Inconsistent);
             }
         }
+
+        self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent)?;
         Ok(())
     }
 
