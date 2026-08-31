@@ -2,7 +2,7 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use semitone::ast::{self, BoolExpr, EnumExpr, Expr};
+use semitone::ast::{BoolExpr, EnumExpr};
 
 pub(crate) struct EnumFlaw {
     id: FlawId,
@@ -72,9 +72,7 @@ impl Flaw for EnumFlaw {
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
 
         for &val in &self.domain {
-            let rho = ast::eq(Expr::Enum(self.target.clone()), Expr::Enum(ast::EnumExpr::Const(val)));
-
-            resolvers.push(Box::new(EnumResolver::new(self.id, rho)));
+            resolvers.push(Box::new(EnumResolver::new(self.id, self.target.eq(val))));
         }
 
         Ok(resolvers)

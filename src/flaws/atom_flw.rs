@@ -238,9 +238,11 @@ impl Resolver for UnificationResolver {
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
         let mut clause_args = Vec::with_capacity(self.unification_constraints.len() + 1);
         clause_args.push(!self.rho.clone());
-        clause_args.push(ast::and(self.unification_constraints.clone()));
+        clause_args.push(ast::BoolExpr::And(self.unification_constraints.clone()));
 
-        state.smt.borrow_mut().assert(&ast::or(clause_args)).map_err(|_| SolverError::Inconsistent)?;
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(clause_args)) {
+            return Err(SolverError::Inconsistent);
+        }
         state.add_causal_link(self.id, self.target_atom_id)?;
         Ok(())
     }

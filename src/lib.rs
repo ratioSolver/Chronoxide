@@ -14,10 +14,7 @@ use riddle::{
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
-use semitone::{
-    SmtSolver,
-    ast::{self, Expr},
-};
+use semitone::{SeMiTONE, ast};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -44,7 +41,7 @@ pub enum SolverError {
 struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
-    smt: RefCell<SmtSolver>,
+    smt: RefCell<SeMiTONE>,
     planner_state: RefCell<PlannerState>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
@@ -65,7 +62,7 @@ impl SolverState {
                 CommonCore::new(core)
             },
             slv: core.clone(),
-            smt: RefCell::new(SmtSolver::new()),
+            smt: RefCell::new(SeMiTONE::new()),
             planner_state: RefCell::new(PlannerState {
                 graph: Graph::new(),
                 agenda: HashSet::new(),
@@ -186,17 +183,23 @@ impl SolverState {
                     or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
                 }
                 or_args.push(flaw.phi().clone());
-                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver");
+                if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(or_args)) {
+                    return Err(SolverError::Inconsistent);
+                }
 
                 let resolvers = flaw.expand(self)?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
                     let rho = resolver.rho().clone();
                     or_args.push(rho.clone());
-                    self.smt.borrow_mut().assert(&ast::or([!rho, flaw.phi().clone()])).expect("Failed to assert resolver rho in SMT solver");
+                    if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho, flaw.phi().clone()])) {
+                        return Err(SolverError::Inconsistent);
+                    }
                 }
                 or_args.push(!flaw.phi().clone());
-                self.smt.borrow_mut().assert(&ast::or(or_args)).expect("Failed to assert flaw phi in SMT solver after expansion");
+                if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(or_args)) {
+                    return Err(SolverError::Inconsistent);
+                }
 
                 for resolver in resolvers {
                     let mut resolver = {
@@ -369,7 +372,7 @@ impl Core for SolverState {
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
         let (phi, c_res_id) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        if self.smt.borrow_mut().assert(&ast::or([!phi.clone(), expr_to_bool(&term)])).is_err() {
+        if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!phi.clone(), expr_to_bool(&term)])) {
             return false;
         }
         let cnf_expr = to_cnf(term.clone());
@@ -433,7 +436,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
                 && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
             {
-                return ast::lt(left.lin.clone(), right.lin.clone());
+                return left.lin.lt(&right.lin);
             }
             panic!("Expected compatible primitive types in BoolExpr::Lt");
         }
@@ -441,12 +444,12 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
                 && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
             {
-                return ast::le(left.lin.clone(), right.lin.clone());
+                return left.lin.le(&right.lin);
             }
             panic!("Expected compatible primitive types in BoolExpr::Leq");
         }
-        BoolExpr::Or { terms, .. } => ast::or(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
-        BoolExpr::And { terms, .. } => ast::and(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
         BoolExpr::Not { term, .. } => !expr_to_bool(term),
     }
 }
@@ -455,21 +458,21 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
     match (left, right) {
         (Slot::Primitive(left), Slot::Primitive(right)) => {
             if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
-                return ast::eq(Expr::Bool(left.lit.clone()), Expr::Bool(right.lit.clone()));
+                return left.lit.eq(&right.lit);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
-                return ast::eq(Expr::Arith(left.lin.clone()), Expr::Arith(right.lin.clone()));
+                return left.lin.eq(&right.lin);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
-                return ast::eq(Expr::Enum(left.var.clone()), Expr::Enum(right.var.clone()));
+                return left.var.eq(&right.var);
             }
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
-                return ast::eq(Expr::Enum(left.var.clone()), Expr::Enum(ast::EnumExpr::Const(**right as i32)));
+                return left.var.eq(**right as i32);
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
-                return ast::eq(Expr::Enum(ast::EnumExpr::Const(**left as i32)), Expr::Enum(right.var.clone()));
+                return right.var.eq(**left as i32);
             }
         }
         _ => {
