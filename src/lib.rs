@@ -49,6 +49,7 @@ struct SolverState {
 struct PlannerState {
     graph: Graph,
     agenda: HashSet<FlawId>,
+    atom_sigma: Vec<usize>,
     notified_len: usize,
     lit_to_flaw: HashMap<usize, FlawId>,
     lit_to_resolver: HashMap<usize, ResolverId>,
@@ -66,6 +67,7 @@ impl SolverState {
             planner_state: RefCell::new(PlannerState {
                 graph: Graph::new(),
                 agenda: HashSet::new(),
+                atom_sigma: Vec::new(),
                 notified_len: 0,
                 lit_to_flaw: HashMap::new(),
                 lit_to_resolver: HashMap::new(),
@@ -412,6 +414,11 @@ impl Core for SolverState {
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let atm = self.core.new_atom(predicate, fact, args);
+        let sigma = self.smt.borrow_mut().new_bool();
+        let ast::BoolExpr::Var(sigma) = sigma else {
+            panic!("Expected a BoolExpr::Var for atom sigma");
+        };
+        self.planner_state.borrow_mut().atom_sigma.push(sigma);
         let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
         self.add_flaw(Box::new(AtomFlaw::new(phi, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
         atm

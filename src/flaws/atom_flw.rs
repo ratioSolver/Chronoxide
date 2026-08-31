@@ -86,7 +86,7 @@ impl Flaw for AtomFlaw {
         let rho_strutturale = state.smt.borrow_mut().new_bool();
 
         if self.atom.is_fact() {
-            resolvers.push(Box::new(FactResolver::new(self.id, rho_strutturale, self.atom.clone())));
+            resolvers.push(Box::new(FactResolver::new(self.id, rho_strutturale, self.atom.id())));
         } else {
             resolvers.push(Box::new(RuleResolver::new(self.id, rho_strutturale, self.atom.clone(), predicate.clone())));
         }
@@ -109,7 +109,7 @@ impl Flaw for AtomFlaw {
 
                 let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
 
-                resolvers.push(Box::new(UnificationResolver::new(self.id, rho_unif, target_id, unif_eqs)));
+                resolvers.push(Box::new(UnificationResolver::new(self.id, rho_unif, self.atom.id(), target_id, unif_eqs)));
             }
         }
 
@@ -153,7 +153,12 @@ impl Resolver for RuleResolver {
         10.0
     }
 
-    fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
+    fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
+        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom.id()).copied().ok_or(SolverError::Inconsistent)?;
+
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::Var(atom_sigma)])) {
+            return Err(SolverError::Inconsistent);
+        }
         self.predicate.clone().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Error applying rule: {:?}", e)))?;
         Ok(())
     }
@@ -164,12 +169,12 @@ struct FactResolver {
     flaw: FlawId,
     rho: BoolExpr,
     sub_flaws: Vec<FlawId>,
-    atom: Rc<Atom>,
+    atom_id: AtomId,
 }
 
 impl FactResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, atom: Rc<Atom>) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), atom }
+    fn new(flaw: FlawId, rho: BoolExpr, atom_id: AtomId) -> Self {
+        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), atom_id }
     }
 }
 
@@ -194,8 +199,13 @@ impl Resolver for FactResolver {
         1.0
     }
 
-    fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
-        Ok(()) // Niente da applicare. `rho` forzerà i vincoli temporali SMT.
+    fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
+        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom_id).copied().ok_or(SolverError::Inconsistent)?;
+
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::Var(atom_sigma)])) {
+            return Err(SolverError::Inconsistent);
+        }
+        Ok(())
     }
 }
 
@@ -204,13 +214,22 @@ struct UnificationResolver {
     flaw: FlawId,
     rho: BoolExpr,
     sub_flaws: Vec<FlawId>,
-    target_atom_id: riddle::env::AtomId,
+    source_atom_id: AtomId,
+    target_atom_id: AtomId,
     unification_constraints: Vec<ast::BoolExpr>,
 }
 
 impl UnificationResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, target_atom_id: riddle::env::AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), target_atom_id, unification_constraints }
+    fn new(flaw: FlawId, rho: BoolExpr, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
+        Self {
+            id: 0,
+            flaw,
+            rho,
+            sub_flaws: Vec::new(),
+            source_atom_id,
+            target_atom_id,
+            unification_constraints,
+        }
     }
 }
 
@@ -236,11 +255,14 @@ impl Resolver for UnificationResolver {
     }
 
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
-        let mut clause_args = Vec::with_capacity(self.unification_constraints.len() + 1);
-        clause_args.push(!self.rho.clone());
-        clause_args.push(ast::BoolExpr::And(self.unification_constraints.clone()));
+        let source_sigma = state.planner_state.borrow().atom_sigma.get(*self.source_atom_id).copied().ok_or(SolverError::Inconsistent)?;
+        let target_sigma = state.planner_state.borrow().atom_sigma.get(*self.target_atom_id).copied().ok_or(SolverError::Inconsistent)?;
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(clause_args)) {
+        let mut conjunction = self.unification_constraints.clone();
+        conjunction.push(!ast::BoolExpr::Var(source_sigma));
+        conjunction.push(ast::BoolExpr::Var(target_sigma));
+
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::And(conjunction)])) {
             return Err(SolverError::Inconsistent);
         }
         state.add_causal_link(self.id, self.target_atom_id)?;
