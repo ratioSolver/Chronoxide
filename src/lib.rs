@@ -255,10 +255,8 @@ impl SolverState {
 
                     planner.graph.set_resolver_status(resolver_id, status);
 
-                    if status != Some(true) {
-                        if planner.graph.get_flaw(flaw_id).status() == Some(true) {
-                            planner.agenda.insert(flaw_id);
-                        }
+                    if status != Some(true) && planner.graph.get_flaw(flaw_id).status() == Some(true) {
+                        planner.agenda.insert(flaw_id);
                     }
                 }
             }

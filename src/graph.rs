@@ -59,7 +59,7 @@ impl Graph {
             data: flaw.to_json(),
         });
 
-        self.lit_to_flaw.entry(flaw.phi().var()).or_insert_with(Vec::new).push(id);
+        self.lit_to_flaw.entry(flaw.phi().var()).or_default().push(id);
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
@@ -113,7 +113,7 @@ impl Graph {
             data: resolver.to_json(),
         });
 
-        self.lit_to_resolver.entry(resolver.rho().var()).or_insert_with(Vec::new).push(id);
+        self.lit_to_resolver.entry(resolver.rho().var()).or_default().push(id);
         self.resolvers.push(Some(resolver));
         id
     }
