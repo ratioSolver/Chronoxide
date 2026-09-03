@@ -1,8 +1,9 @@
-use crate::{SolverError, SolverState};
+use crate::{SolverError, SolverEvent, SolverState};
 use riddle::env::AtomId;
 use semitone::ast::BoolExpr;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
+use tokio::sync::broadcast;
 use tracing::trace;
 
 pub type FlawId = usize;
@@ -15,10 +16,11 @@ pub(super) struct Graph {
     current_resolver: Option<ResolverId>,
     pub(super) flaw_q: VecDeque<FlawId>,
     pub(super) atom_to_flaw: HashMap<AtomId, FlawId>,
+    tx_event: broadcast::Sender<SolverEvent>,
 }
 
 impl Graph {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(tx_event: broadcast::Sender<SolverEvent>) -> Self {
         Graph {
             flaws: Vec::new(),
             current_flaw: None,
@@ -26,6 +28,7 @@ impl Graph {
             current_resolver: None,
             flaw_q: VecDeque::new(),
             atom_to_flaw: HashMap::new(),
+            tx_event,
         }
     }
 
@@ -117,6 +120,7 @@ impl Graph {
             if (current_cost - old_cost).abs() > f64::EPSILON {
                 trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
                 self.get_flaw_mut(flaw_id).set_estimated_cost(current_cost);
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
 
                 for support_id in supports {
                     let parent_flaw_id = self.get_resolver(support_id).flaw();
@@ -153,6 +157,8 @@ pub trait Flaw {
     fn set_id(&mut self, id: FlawId);
 
     fn phi(&self) -> &BoolExpr;
+    fn status(&self) -> Option<bool>;
+    fn set_status(&mut self, status: Option<bool>);
 
     fn causes(&self) -> &[ResolverId];
     fn supports(&self) -> &[ResolverId] {
@@ -183,6 +189,8 @@ pub trait Resolver {
     fn set_id(&mut self, id: ResolverId);
 
     fn rho(&self) -> &BoolExpr;
+    fn status(&self) -> Option<bool>;
+    fn set_status(&mut self, status: Option<bool>);
 
     fn flaw(&self) -> FlawId;
 

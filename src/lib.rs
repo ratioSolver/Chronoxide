@@ -65,7 +65,7 @@ impl SolverState {
             slv: core.clone(),
             smt: RefCell::new(SeMiTONE::new()),
             planner_state: RefCell::new(PlannerState {
-                graph: Graph::new(),
+                graph: Graph::new(tx_event.clone()),
                 agenda: HashSet::new(),
                 atom_sigma: Vec::new(),
                 notified_len: 0,
@@ -315,7 +315,8 @@ impl Core for SolverState {
     fn new_bool_var(&self) -> Slot {
         let var = self.smt.borrow_mut().new_bool();
         let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        self.add_flaw(Box::new(BoolFlaw::new(phi, c_res, var.clone())));
+        let status = self.smt.borrow().get_bool_val(&phi);
+        self.add_flaw(Box::new(BoolFlaw::new(phi, status, c_res, var.clone())));
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -407,6 +408,7 @@ impl Core for SolverState {
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
         let (phi, c_res_id) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
+        let status = self.smt.borrow().get_bool_val(&phi);
         if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!phi.clone(), expr_to_bool(&term)])) {
             return false;
         }
@@ -417,7 +419,7 @@ impl Core for SolverState {
                     && terms.len() > 1
                 {
                     let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                    self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), c_res_id, terms)));
+                    self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), status, c_res_id, terms)));
                 }
             }
         } else {
@@ -425,7 +427,7 @@ impl Core for SolverState {
                 && terms.len() > 1
             {
                 let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), c_res_id, terms)));
+                self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), status, c_res_id, terms)));
             }
         }
         true
@@ -434,7 +436,8 @@ impl Core for SolverState {
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
         let var = self.smt.borrow_mut().new_enum(domain.clone());
         let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        self.add_flaw(Box::new(EnumFlaw::new(phi, c_res, var.clone(), domain)));
+        let status = self.smt.borrow().get_bool_val(&phi);
+        self.add_flaw(Box::new(EnumFlaw::new(phi.clone(), status, c_res, var.clone(), domain)));
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {}
@@ -452,7 +455,8 @@ impl Core for SolverState {
         };
         self.planner_state.borrow_mut().atom_sigma.push(sigma);
         let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        self.add_flaw(Box::new(AtomFlaw::new(phi, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
+        let status = self.smt.borrow().get_bool_val(&phi);
+        self.add_flaw(Box::new(AtomFlaw::new(phi.clone(), status, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {

@@ -13,6 +13,7 @@ use std::{collections::HashSet, rc::Rc};
 pub(crate) struct AtomFlaw {
     id: FlawId,
     phi: BoolExpr,
+    status: Option<bool>,
 
     causes: Vec<ResolverId>,
     supports: Vec<ResolverId>,
@@ -25,10 +26,11 @@ pub(crate) struct AtomFlaw {
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(phi: BoolExpr, cause: Option<ResolverId>, atom: Rc<Atom>) -> Self {
+    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, atom: Rc<Atom>) -> Self {
         Self {
             id: 0,
             phi,
+            status,
             causes: cause.into_iter().collect(),
             supports: Vec::new(),
             resolvers: Vec::new(),
@@ -46,9 +48,17 @@ impl Flaw for AtomFlaw {
     fn set_id(&mut self, id: FlawId) {
         self.id = id;
     }
+
     fn phi(&self) -> &BoolExpr {
         &self.phi
     }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
     fn causes(&self) -> &[ResolverId] {
         &self.causes
     }
@@ -83,12 +93,13 @@ impl Flaw for AtomFlaw {
 
         let predicate = self.atom.predicate();
 
-        let rho_strutturale = state.smt.borrow_mut().new_bool();
+        let rho = state.smt.borrow_mut().new_bool();
+        let status = state.smt.borrow().get_bool_val(&rho);
 
         if self.atom.is_fact() {
-            resolvers.push(Box::new(FactResolver::new(self.id, rho_strutturale, self.atom.id())));
+            resolvers.push(Box::new(FactResolver::new(self.id, rho, status, self.atom.id())));
         } else {
-            resolvers.push(Box::new(RuleResolver::new(self.id, rho_strutturale, self.atom.clone(), predicate.clone())));
+            resolvers.push(Box::new(RuleResolver::new(self.id, rho, status, self.atom.clone(), predicate.clone())));
         }
 
         let forbidden_atoms = if let Some(&primary_cause) = self.causes.first() { state.planner_state.borrow().graph.get_causal_ancestor_atoms(primary_cause) } else { HashSet::new() };
@@ -105,11 +116,12 @@ impl Flaw for AtomFlaw {
             }
 
             if let Some(target_atom) = state.get_atom(target_id) {
-                let rho_unif = state.smt.borrow_mut().new_bool();
+                let rho = state.smt.borrow_mut().new_bool();
+                let status = state.smt.borrow().get_bool_val(&rho);
 
                 let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
 
-                resolvers.push(Box::new(UnificationResolver::new(self.id, rho_unif, self.atom.id(), target_id, unif_eqs)));
+                resolvers.push(Box::new(UnificationResolver::new(self.id, rho, status, self.atom.id(), target_id, unif_eqs)));
             }
         }
 
@@ -129,14 +141,15 @@ struct RuleResolver {
     id: ResolverId,
     flaw: FlawId,
     rho: BoolExpr,
+    status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     atom: Rc<Atom>,
     predicate: Rc<riddle::scope::Predicate>,
 }
 
 impl RuleResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, atom: Rc<Atom>, predicate: Rc<riddle::scope::Predicate>) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), atom, predicate }
+    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, atom: Rc<Atom>, predicate: Rc<riddle::scope::Predicate>) -> Self {
+        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom, predicate }
     }
 }
 
@@ -147,9 +160,17 @@ impl Resolver for RuleResolver {
     fn set_id(&mut self, id: ResolverId) {
         self.id = id;
     }
+
     fn rho(&self) -> &BoolExpr {
         &self.rho
     }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
     fn flaw(&self) -> FlawId {
         self.flaw
     }
@@ -182,13 +203,14 @@ struct FactResolver {
     id: ResolverId,
     flaw: FlawId,
     rho: BoolExpr,
+    status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     atom_id: AtomId,
 }
 
 impl FactResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, atom_id: AtomId) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new(), atom_id }
+    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, atom_id: AtomId) -> Self {
+        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom_id }
     }
 }
 
@@ -199,9 +221,17 @@ impl Resolver for FactResolver {
     fn set_id(&mut self, id: ResolverId) {
         self.id = id;
     }
+
     fn rho(&self) -> &BoolExpr {
         &self.rho
     }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
     fn flaw(&self) -> FlawId {
         self.flaw
     }
@@ -233,6 +263,7 @@ struct UnificationResolver {
     id: ResolverId,
     flaw: FlawId,
     rho: BoolExpr,
+    status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     source_atom_id: AtomId,
     target_atom_id: AtomId,
@@ -240,11 +271,12 @@ struct UnificationResolver {
 }
 
 impl UnificationResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
+    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
         Self {
             id: 0,
             flaw,
             rho,
+            status,
             sub_flaws: Vec::new(),
             source_atom_id,
             target_atom_id,
@@ -260,9 +292,17 @@ impl Resolver for UnificationResolver {
     fn set_id(&mut self, id: ResolverId) {
         self.id = id;
     }
+
     fn rho(&self) -> &BoolExpr {
         &self.rho
     }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
     fn flaw(&self) -> FlawId {
         self.flaw
     }

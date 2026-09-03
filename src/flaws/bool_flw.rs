@@ -7,6 +7,7 @@ use semitone::ast::BoolExpr;
 pub(crate) struct BoolFlaw {
     id: FlawId,
     phi: BoolExpr,
+    status: Option<bool>,
 
     causes: Vec<ResolverId>,
     resolvers: Vec<ResolverId>,
@@ -18,10 +19,11 @@ pub(crate) struct BoolFlaw {
 }
 
 impl BoolFlaw {
-    pub(crate) fn new(phi: BoolExpr, cause: Option<ResolverId>, target: BoolExpr) -> Self {
+    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: BoolExpr) -> Self {
         Self {
             id: 0,
             phi,
+            status,
             causes: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
@@ -41,6 +43,12 @@ impl Flaw for BoolFlaw {
 
     fn phi(&self) -> &BoolExpr {
         &self.phi
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
     }
 
     fn causes(&self) -> &[ResolverId] {
@@ -64,9 +72,9 @@ impl Flaw for BoolFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, _state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
         self.is_expanded = true;
-        Ok(vec![Box::new(BoolResolver::new(self.id, self.target.clone())), Box::new(BoolResolver::new(self.id, !self.target.clone()))])
+        Ok(vec![Box::new(BoolResolver::new(self.id, self.target.clone(), state.smt.borrow().get_bool_val(&self.target))), Box::new(BoolResolver::new(self.id, !self.target.clone(), state.smt.borrow().get_bool_val(&!&self.target)))])
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -80,12 +88,13 @@ struct BoolResolver {
     id: ResolverId,
     flaw: FlawId,
     rho: BoolExpr,
+    status: Option<bool>,
     sub_flaws: Vec<FlawId>,
 }
 
 impl BoolResolver {
-    fn new(flaw: FlawId, rho: BoolExpr) -> Self {
-        Self { id: 0, flaw, rho, sub_flaws: Vec::new() }
+    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>) -> Self {
+        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
     }
 }
 
@@ -99,6 +108,12 @@ impl Resolver for BoolResolver {
 
     fn rho(&self) -> &BoolExpr {
         &self.rho
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
     }
 
     fn flaw(&self) -> FlawId {

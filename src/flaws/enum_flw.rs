@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 pub(crate) struct EnumFlaw {
     id: FlawId,
     phi: BoolExpr,
+    status: Option<bool>,
 
     causes: Vec<ResolverId>,
     resolvers: Vec<ResolverId>,
@@ -20,10 +21,11 @@ pub(crate) struct EnumFlaw {
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(phi: BoolExpr, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
+    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
         Self {
             id: 0,
             phi,
+            status,
             causes: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
@@ -44,6 +46,12 @@ impl Flaw for EnumFlaw {
 
     fn phi(&self) -> &BoolExpr {
         &self.phi
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
     }
 
     fn causes(&self) -> &[ResolverId] {
@@ -67,13 +75,15 @@ impl Flaw for EnumFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, _state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
         self.is_expanded = true;
 
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
 
         for &val in &self.domain {
-            resolvers.push(Box::new(EnumResolver::new(self.id, val, self.target.eq(val))));
+            let rho = self.target.eq(val);
+            let status = state.smt.borrow().get_bool_val(&rho);
+            resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
         }
 
         Ok(resolvers)
@@ -95,12 +105,13 @@ struct EnumResolver {
     flaw: FlawId,
     val: i32,
     rho: BoolExpr,
+    status: Option<bool>,
     sub_flaws: Vec<FlawId>,
 }
 
 impl EnumResolver {
-    fn new(flaw: FlawId, val: i32, rho: BoolExpr) -> Self {
-        Self { id: 0, flaw, val, rho, sub_flaws: Vec::new() }
+    fn new(flaw: FlawId, val: i32, rho: BoolExpr, status: Option<bool>) -> Self {
+        Self { id: 0, flaw, val, rho, status, sub_flaws: Vec::new() }
     }
 }
 
@@ -114,6 +125,12 @@ impl Resolver for EnumResolver {
 
     fn rho(&self) -> &BoolExpr {
         &self.rho
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
     }
 
     fn flaw(&self) -> FlawId {
