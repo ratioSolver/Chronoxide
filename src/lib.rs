@@ -51,8 +51,6 @@ struct PlannerState {
     agenda: HashSet<FlawId>,
     atom_sigma: Vec<usize>,
     notified_len: usize,
-    lit_to_flaw: HashMap<usize, FlawId>,
-    lit_to_resolver: HashMap<usize, ResolverId>,
 }
 
 impl SolverState {
@@ -69,8 +67,6 @@ impl SolverState {
                 agenda: HashSet::new(),
                 atom_sigma: Vec::new(),
                 notified_len: 0,
-                lit_to_flaw: HashMap::new(),
-                lit_to_resolver: HashMap::new(),
             }),
             tx_event,
         })
@@ -94,7 +90,9 @@ impl SolverState {
         let status = flaw.status();
         let atom_id = flaw.atom_id();
         let mut planner = self.planner_state.borrow_mut();
-        let flaw_id = planner.graph.add_flaw(flaw);
+
+        let var = self.smt.borrow_mut().encode_bool(&flaw.phi()).var();
+        let flaw_id = planner.graph.add_flaw(flaw, var);
         if let Some(atom_id) = atom_id {
             planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
         }
@@ -130,15 +128,30 @@ impl SolverState {
         for lit in new_literals {
             let var_id = lit.var();
 
-            if let Some(&flaw_id) = planner.lit_to_flaw.get(&var_id) {
-                if !lit.sign() {
-                    planner.agenda.insert(flaw_id);
+            if let Some(flaw_ids) = planner.graph.lit_to_flaw.get(&var_id).cloned() {
+                for flaw_id in flaw_ids {
+                    let status = smt.get_bool_val(&planner.graph.get_flaw(flaw_id).phi());
+                    planner.graph.set_flaw_status(flaw_id, status);
+
+                    if status == Some(true) {
+                        planner.agenda.insert(flaw_id);
+                    }
                 }
-            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id)
-                && !lit.sign()
-            {
-                let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
-                planner.agenda.remove(&parent_flaw_id);
+            }
+
+            if let Some(resolver_ids) = planner.graph.lit_to_resolver.get(&var_id).cloned() {
+                for resolver_id in resolver_ids {
+                    let (status, flaw_id) = {
+                        let resolver = planner.graph.get_resolver(resolver_id);
+                        (smt.get_bool_val(resolver.rho()), resolver.flaw())
+                    };
+
+                    planner.graph.set_resolver_status(resolver_id, status);
+
+                    if status == Some(true) {
+                        planner.agenda.remove(&flaw_id);
+                    }
+                }
             }
         }
 
@@ -146,33 +159,49 @@ impl SolverState {
     }
 
     fn cancel_until(&self, level: usize) {
+        let vars_to_undo: Vec<usize> = {
+            let smt = self.smt.borrow();
+            let target_trail_len = smt.get_trail_len_at_level(level);
+            let current_trail_len = smt.current_trail_len();
+
+            smt.get_trail_slice(target_trail_len, current_trail_len).iter().map(|lit| lit.var()).collect()
+        };
+        self.smt.borrow_mut().cancel_until(level);
+
         let mut planner = self.planner_state.borrow_mut();
         let smt = self.smt.borrow();
 
-        let target_trail_len = smt.get_trail_len_at_level(level);
-        let current_trail_len = smt.current_trail_len();
+        for var_id in vars_to_undo.into_iter().rev() {
+            if let Some(flaw_ids) = planner.graph.lit_to_flaw.get(&var_id).cloned() {
+                for flaw_id in flaw_ids {
+                    let status = smt.get_bool_val(planner.graph.get_flaw(flaw_id).phi());
+                    planner.graph.set_flaw_status(flaw_id, status);
 
-        let trail_to_undo = smt.get_trail_slice(target_trail_len, current_trail_len);
-
-        for lit in trail_to_undo.iter().rev() {
-            let var_id = lit.var();
-
-            if let Some(&flaw_id) = planner.lit_to_flaw.get(&var_id) {
-                if !lit.sign() {
-                    planner.agenda.remove(&flaw_id);
+                    if status != Some(true) {
+                        planner.agenda.remove(&flaw_id);
+                    }
                 }
-            } else if let Some(&resolver_id) = planner.lit_to_resolver.get(&var_id)
-                && !lit.sign()
-            {
-                let parent_flaw_id = planner.graph.get_resolver(resolver_id).flaw();
-                planner.agenda.insert(parent_flaw_id);
+            }
+
+            if let Some(resolver_ids) = planner.graph.lit_to_resolver.get(&var_id).cloned() {
+                for resolver_id in resolver_ids {
+                    let (status, flaw_id) = {
+                        let resolver = planner.graph.get_resolver(resolver_id);
+                        (smt.get_bool_val(resolver.rho()), resolver.flaw())
+                    };
+
+                    planner.graph.set_resolver_status(resolver_id, status);
+
+                    if status != Some(true) {
+                        if planner.graph.get_flaw(flaw_id).status() == Some(true) {
+                            planner.agenda.insert(flaw_id);
+                        }
+                    }
+                }
             }
         }
 
-        planner.notified_len = target_trail_len;
-
-        drop(smt);
-        self.smt.borrow_mut().cancel_until(level);
+        planner.notified_len = smt.current_trail_len();
     }
 
     fn build_graph(&self) -> Result<(), SolverError> {
@@ -223,7 +252,8 @@ impl SolverState {
                 for resolver in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        let resolver_id = planner.graph.add_resolver(resolver);
+                        let var = self.smt.borrow_mut().encode_bool(&resolver.rho()).var();
+                        let resolver_id = planner.graph.add_resolver(resolver, var);
                         flaw.add_resolver(resolver_id);
                         planner.graph.set_current_resolver(Some(resolver_id));
                         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));

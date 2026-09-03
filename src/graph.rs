@@ -14,6 +14,8 @@ pub(super) struct Graph {
     current_flaw: Option<FlawId>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
     current_resolver: Option<ResolverId>,
+    pub(super) lit_to_flaw: HashMap<usize, Vec<FlawId>>,
+    pub(super) lit_to_resolver: HashMap<usize, Vec<ResolverId>>,
     pub(super) flaw_q: VecDeque<FlawId>,
     pub(super) atom_to_flaw: HashMap<AtomId, FlawId>,
     tx_event: broadcast::Sender<SolverEvent>,
@@ -26,6 +28,8 @@ impl Graph {
             current_flaw: None,
             resolvers: Vec::new(),
             current_resolver: None,
+            lit_to_flaw: HashMap::new(),
+            lit_to_resolver: HashMap::new(),
             flaw_q: VecDeque::new(),
             atom_to_flaw: HashMap::new(),
             tx_event,
@@ -40,7 +44,7 @@ impl Graph {
         self.flaws[id].as_mut().unwrap().as_mut()
     }
 
-    pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
+    pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>, var: usize) -> FlawId {
         let id = self.flaws.len();
         flaw.set_id(id);
 
@@ -55,9 +59,22 @@ impl Graph {
             data: flaw.to_json(),
         });
 
+        self.lit_to_flaw.entry(var).or_insert_with(Vec::new).push(id);
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
+    }
+
+    pub(super) fn set_flaw_status(&mut self, flaw_id: FlawId, status: Option<bool>) {
+        let flaw = self.get_flaw_mut(flaw_id);
+        flaw.set_status(status);
+        let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id, status });
+    }
+
+    pub(super) fn set_flaw_estimated_cost(&mut self, flaw_id: FlawId, cost: f64) {
+        let flaw = self.get_flaw_mut(flaw_id);
+        flaw.set_estimated_cost(cost);
+        let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost });
     }
 
     pub(super) fn take_flaw(&mut self, id: FlawId) -> Box<dyn Flaw> {
@@ -76,7 +93,11 @@ impl Graph {
         self.resolvers[id].as_ref().unwrap().as_ref()
     }
 
-    pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
+    pub(super) fn get_resolver_mut(&mut self, id: ResolverId) -> &mut dyn Resolver {
+        self.resolvers[id].as_mut().unwrap().as_mut()
+    }
+
+    pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>, var: usize) -> ResolverId {
         let id = self.resolvers.len();
         resolver.set_id(id);
 
@@ -91,8 +112,15 @@ impl Graph {
             data: resolver.to_json(),
         });
 
+        self.lit_to_resolver.entry(var).or_insert_with(Vec::new).push(id);
         self.resolvers.push(Some(resolver));
         id
+    }
+
+    pub(super) fn set_resolver_status(&mut self, resolver_id: ResolverId, status: Option<bool>) {
+        let resolver = self.get_resolver_mut(resolver_id);
+        resolver.set_status(status);
+        let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id, status });
     }
 
     pub(super) fn take_resolver(&mut self, id: ResolverId) -> Box<dyn Resolver> {
