@@ -43,3 +43,4 @@ test_chronoxide!(test_core_00, ok, ["tests/examples/core/example_00.rddl"]);
 test_chronoxide!(test_core_01, ok, ["tests/examples/core/example_01.rddl"]);
 test_chronoxide!(test_core_02, err, ["tests/examples/core/example_02.rddl"]);
 test_chronoxide!(test_core_03, ok, ["tests/examples/core/example_03.rddl"]);
+test_chronoxide!(test_core_04, ok, ["tests/examples/core/example_04.rddl"]);

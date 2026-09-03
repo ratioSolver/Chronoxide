@@ -324,8 +324,8 @@ impl Core for SolverState {
     fn new_int_var(&self) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), self.smt.borrow_mut().new_int())))
     }
-    fn new_real(&self, value: &str) -> Slot {
-        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid real literal")))))
+    fn new_real(&self, num: &str, den: &str) -> Slot {
+        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), ast::ArithExpr::Const(rug::Rational::from_str(&format!("{}/{}", num, den)).expect("Invalid rational literal")))))
     }
     fn new_real_var(&self) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), self.smt.borrow_mut().new_real())))
