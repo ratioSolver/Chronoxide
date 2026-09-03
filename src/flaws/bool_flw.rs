@@ -2,11 +2,11 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use semitone::ast::BoolExpr;
+use semitone::{Lit, ast::BoolExpr};
 
 pub(crate) struct BoolFlaw {
     id: FlawId,
-    phi: BoolExpr,
+    phi: Lit,
     status: Option<bool>,
 
     causes: Vec<ResolverId>,
@@ -19,7 +19,7 @@ pub(crate) struct BoolFlaw {
 }
 
 impl BoolFlaw {
-    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: BoolExpr) -> Self {
+    pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, target: BoolExpr) -> Self {
         assert!(status != Some(false), "Cannot create a BoolFlaw with status Some(false)");
         Self {
             id: 0,
@@ -42,8 +42,8 @@ impl Flaw for BoolFlaw {
         self.id = id;
     }
 
-    fn phi(&self) -> &BoolExpr {
-        &self.phi
+    fn phi(&self) -> Lit {
+        self.phi
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -77,13 +77,17 @@ impl Flaw for BoolFlaw {
         self.is_expanded = true;
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::new();
 
-        let state_1 = state.smt.borrow().get_bool_val(&self.target);
+        let rho = state.smt.borrow_mut().encode_bool(&self.target);
+        let smt = state.smt.borrow();
+
+        let state_1 = smt.get_lit_val(rho);
         if state_1 != Some(false) {
-            resolvers.push(Box::new(BoolResolver::new(self.id, self.target.clone(), state_1)));
+            resolvers.push(Box::new(BoolResolver::new(self.id, rho, state_1)));
         }
-        let state_2 = state.smt.borrow().get_bool_val(&!&self.target);
+
+        let state_2 = smt.get_lit_val(!rho);
         if state_2 != Some(false) {
-            resolvers.push(Box::new(BoolResolver::new(self.id, !self.target.clone(), state_2)));
+            resolvers.push(Box::new(BoolResolver::new(self.id, !rho, state_2)));
         }
         Ok(resolvers)
     }
@@ -98,13 +102,13 @@ impl Flaw for BoolFlaw {
 struct BoolResolver {
     id: ResolverId,
     flaw: FlawId,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
 }
 
 impl BoolResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>) -> Self {
+    fn new(flaw: FlawId, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create a BoolResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
     }
@@ -118,8 +122,8 @@ impl Resolver for BoolResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status

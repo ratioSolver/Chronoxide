@@ -2,12 +2,12 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use semitone::ast::{BoolExpr, EnumExpr};
+use semitone::{Lit, ast::EnumExpr};
 use serde_json::{Value, json};
 
 pub(crate) struct EnumFlaw {
     id: FlawId,
-    phi: BoolExpr,
+    phi: Lit,
     status: Option<bool>,
 
     causes: Vec<ResolverId>,
@@ -21,7 +21,7 @@ pub(crate) struct EnumFlaw {
 }
 
 impl EnumFlaw {
-    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
+    pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
         assert!(status != Some(false), "Cannot create an EnumFlaw with status Some(false)");
         Self {
             id: 0,
@@ -45,8 +45,8 @@ impl Flaw for EnumFlaw {
         self.id = id;
     }
 
-    fn phi(&self) -> &BoolExpr {
-        &self.phi
+    fn phi(&self) -> Lit {
+        self.phi
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -82,8 +82,8 @@ impl Flaw for EnumFlaw {
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
 
         for &val in &self.domain {
-            let rho = self.target.eq(val);
-            let status = state.smt.borrow().get_bool_val(&rho);
+            let rho = state.smt.borrow_mut().encode_bool(&self.target.eq(val));
+            let status = state.smt.borrow().get_lit_val(rho);
             if status != Some(false) {
                 resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
             }
@@ -107,13 +107,13 @@ struct EnumResolver {
     id: ResolverId,
     flaw: FlawId,
     val: i32,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
 }
 
 impl EnumResolver {
-    fn new(flaw: FlawId, val: i32, rho: BoolExpr, status: Option<bool>) -> Self {
+    fn new(flaw: FlawId, val: i32, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create an EnumResolver with status Some(false)");
         Self { id: 0, flaw, val, rho, status, sub_flaws: Vec::new() }
     }
@@ -127,8 +127,8 @@ impl Resolver for EnumResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status

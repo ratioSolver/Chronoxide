@@ -7,12 +7,12 @@ use riddle::{
     env::{Atom, AtomId, Env},
     scope::{Type, get_predicate_by_path},
 };
-use semitone::ast::{self, BoolExpr};
+use semitone::{Lit, ast};
 use std::{collections::HashSet, rc::Rc};
 
 pub(crate) struct AtomFlaw {
     id: FlawId,
-    phi: BoolExpr,
+    phi: Lit,
     status: Option<bool>,
 
     causes: Vec<ResolverId>,
@@ -26,7 +26,7 @@ pub(crate) struct AtomFlaw {
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, atom: Rc<Atom>) -> Self {
+    pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, atom: Rc<Atom>) -> Self {
         assert!(status != Some(false), "Cannot create an AtomFlaw with status Some(false)");
         Self {
             id: 0,
@@ -50,8 +50,8 @@ impl Flaw for AtomFlaw {
         self.id = id;
     }
 
-    fn phi(&self) -> &BoolExpr {
-        &self.phi
+    fn phi(&self) -> Lit {
+        self.phi
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -94,15 +94,6 @@ impl Flaw for AtomFlaw {
 
         let predicate = self.atom.predicate();
 
-        let rho = state.smt.borrow_mut().new_bool();
-        let status = state.smt.borrow().get_bool_val(&rho);
-
-        if self.atom.is_fact() {
-            resolvers.push(Box::new(FactResolver::new(self.id, rho, status, self.atom.id())));
-        } else {
-            resolvers.push(Box::new(RuleResolver::new(self.id, rho, status, self.atom.clone(), predicate.clone())));
-        }
-
         let forbidden_atoms = if let Some(&primary_cause) = self.causes.first() { state.planner_state.borrow().graph.get_causal_ancestor_atoms(primary_cause) } else { HashSet::new() };
         let candidate_ids = predicate.atoms();
 
@@ -117,13 +108,17 @@ impl Flaw for AtomFlaw {
             }
 
             if let Some(target_atom) = state.get_atom(target_id) {
-                let rho = state.smt.borrow_mut().new_bool();
-                let status = state.smt.borrow().get_bool_val(&rho);
-
+                let rho = state.smt.borrow_mut().new_lit();
                 let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
-
-                resolvers.push(Box::new(UnificationResolver::new(self.id, rho, status, self.atom.id(), target_id, unif_eqs)));
+                resolvers.push(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs)));
             }
+        }
+
+        let (rho, status) = if resolvers.is_empty() { (self.phi, self.status) } else { (state.smt.borrow_mut().new_lit(), None) };
+        if self.atom.is_fact() {
+            resolvers.push(Box::new(FactResolver::new(self.id, rho, status, self.atom.id())));
+        } else {
+            resolvers.push(Box::new(RuleResolver::new(self.id, rho, status, self.atom.clone(), predicate.clone())));
         }
 
         Ok(resolvers)
@@ -141,7 +136,7 @@ impl Flaw for AtomFlaw {
 struct RuleResolver {
     id: ResolverId,
     flaw: FlawId,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     atom: Rc<Atom>,
@@ -149,7 +144,7 @@ struct RuleResolver {
 }
 
 impl RuleResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, atom: Rc<Atom>, predicate: Rc<riddle::scope::Predicate>) -> Self {
+    fn new(flaw: FlawId, rho: Lit, status: Option<bool>, atom: Rc<Atom>, predicate: Rc<riddle::scope::Predicate>) -> Self {
         assert!(status != Some(false), "Cannot create a RuleResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom, predicate }
     }
@@ -163,8 +158,8 @@ impl Resolver for RuleResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -187,7 +182,7 @@ impl Resolver for RuleResolver {
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
         let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom.id()).copied().ok_or(SolverError::Inconsistent)?;
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::Var(atom_sigma)])) {
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::Var(atom_sigma)])) {
             return Err(SolverError::Inconsistent);
         }
         self.predicate.clone().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Error applying rule: {:?}", e)))?;
@@ -204,14 +199,14 @@ impl Resolver for RuleResolver {
 struct FactResolver {
     id: ResolverId,
     flaw: FlawId,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     atom_id: AtomId,
 }
 
 impl FactResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, atom_id: AtomId) -> Self {
+    fn new(flaw: FlawId, rho: Lit, status: Option<bool>, atom_id: AtomId) -> Self {
         assert!(status != Some(false), "Cannot create a FactResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom_id }
     }
@@ -225,8 +220,8 @@ impl Resolver for FactResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -249,7 +244,7 @@ impl Resolver for FactResolver {
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
         let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom_id).copied().ok_or(SolverError::Inconsistent)?;
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::Var(atom_sigma)])) {
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::Var(atom_sigma)])) {
             return Err(SolverError::Inconsistent);
         }
         Ok(())
@@ -265,7 +260,7 @@ impl Resolver for FactResolver {
 struct UnificationResolver {
     id: ResolverId,
     flaw: FlawId,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
     source_atom_id: AtomId,
@@ -274,7 +269,7 @@ struct UnificationResolver {
 }
 
 impl UnificationResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
+    fn new(flaw: FlawId, rho: Lit, status: Option<bool>, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
         assert!(status != Some(false), "Cannot create a UnificationResolver with status Some(false)");
         Self {
             id: 0,
@@ -297,8 +292,8 @@ impl Resolver for UnificationResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -326,7 +321,7 @@ impl Resolver for UnificationResolver {
         conjunction.push(!ast::BoolExpr::Var(source_sigma));
         conjunction.push(ast::BoolExpr::Var(target_sigma));
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!self.rho.clone(), ast::BoolExpr::And(conjunction)])) {
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::And(conjunction)])) {
             return Err(SolverError::Inconsistent);
         }
         state.add_causal_link(self.id, self.target_atom_id)?;

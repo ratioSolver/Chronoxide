@@ -14,7 +14,7 @@ use riddle::{
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
-use semitone::{SeMiTONE, ast};
+use semitone::{Lit, SeMiTONE, ast};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -87,15 +87,15 @@ impl SolverState {
                     self.build_graph()?;
 
                     if let Some(flaw_id) = self.select_flaw() {
+                        trace!("Deciding on flaw {}", flaw_id);
                         let resolver_id = self.select_resolver(flaw_id)?;
-                        trace!("Deciding on resolver {} for flaw {}", resolver_id, flaw_id);
+                        trace!("Applying resolver {}", resolver_id);
                         let rho = {
                             let planner = self.planner_state.borrow();
-                            planner.graph.get_resolver(resolver_id).rho().clone()
+                            planner.graph.get_resolver(resolver_id).rho()
                         };
-                        trace!("Deciding on rho: {}", rho);
-                        let rho_lit = self.smt.borrow_mut().encode_bool(&rho);
-                        self.smt.borrow_mut().decide(rho_lit);
+                        trace!("Deciding on literal {}", rho);
+                        self.smt.borrow_mut().decide(rho);
                     } else {
                         let check_result = self.smt.borrow_mut().check_ints();
                         match check_result {
@@ -154,8 +154,7 @@ impl SolverState {
         let atom_id = flaw.atom_id();
         let mut planner = self.planner_state.borrow_mut();
 
-        let var = self.smt.borrow_mut().encode_bool(&flaw.phi()).var();
-        let flaw_id = planner.graph.add_flaw(flaw, var);
+        let flaw_id = planner.graph.add_flaw(flaw);
         if let Some(atom_id) = atom_id {
             planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
         }
@@ -193,7 +192,7 @@ impl SolverState {
 
             if let Some(flaw_ids) = planner.graph.lit_to_flaw.get(&var_id).cloned() {
                 for flaw_id in flaw_ids {
-                    let status = smt.get_bool_val(&planner.graph.get_flaw(flaw_id).phi());
+                    let status = smt.get_lit_val(planner.graph.get_flaw(flaw_id).phi());
                     planner.graph.set_flaw_status(flaw_id, status);
 
                     if status == Some(true) {
@@ -206,9 +205,10 @@ impl SolverState {
                 for resolver_id in resolver_ids {
                     let (status, flaw_id) = {
                         let resolver = planner.graph.get_resolver(resolver_id);
-                        (smt.get_bool_val(resolver.rho()), resolver.flaw())
+                        (smt.get_lit_val(resolver.rho()), resolver.flaw())
                     };
 
+                    trace!("Updating status for resolver {} to {:?} (flaw {})", resolver_id, status, flaw_id);
                     planner.graph.set_resolver_status(resolver_id, status);
 
                     if status == Some(true) {
@@ -237,7 +237,7 @@ impl SolverState {
         for var_id in vars_to_undo.into_iter().rev() {
             if let Some(flaw_ids) = planner.graph.lit_to_flaw.get(&var_id).cloned() {
                 for flaw_id in flaw_ids {
-                    let status = smt.get_bool_val(planner.graph.get_flaw(flaw_id).phi());
+                    let status = smt.get_lit_val(planner.graph.get_flaw(flaw_id).phi());
                     planner.graph.set_flaw_status(flaw_id, status);
 
                     if status != Some(true) {
@@ -250,7 +250,7 @@ impl SolverState {
                 for resolver_id in resolver_ids {
                     let (status, flaw_id) = {
                         let resolver = planner.graph.get_resolver(resolver_id);
-                        (smt.get_bool_val(resolver.rho()), resolver.flaw())
+                        (smt.get_lit_val(resolver.rho()), resolver.flaw())
                     };
 
                     planner.graph.set_resolver_status(resolver_id, status);
@@ -289,27 +289,27 @@ impl SolverState {
                 assert!(!flaw.is_expanded());
                 let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
                 for cause_id in flaw.causes() {
-                    or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho().clone());
+                    or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho());
                 }
-                or_args.push(flaw.phi().clone());
-                if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(or_args)) {
+                or_args.push(flaw.phi());
+                if self.smt.borrow_mut().add_clause(or_args).is_err() {
                     return Err(SolverError::Inconsistent);
                 }
 
                 let resolvers = flaw.expand(self)?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
-                    let rho = resolver.rho().clone();
-                    if self.smt.borrow().get_bool_val(&rho) == Some(true) {
+                    let rho = resolver.rho();
+                    if self.smt.borrow().get_lit_val(rho) == Some(true) {
                         self.planner_state.borrow_mut().agenda.remove(&flaw_id);
                     }
-                    or_args.push(rho.clone());
-                    if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho, flaw.phi().clone()])) {
+                    or_args.push(rho);
+                    if self.smt.borrow_mut().add_clause([!rho, flaw.phi()]).is_err() {
                         return Err(SolverError::Inconsistent);
                     }
                 }
-                or_args.push(!flaw.phi().clone());
-                if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(or_args)) {
+                or_args.push(!flaw.phi());
+                if self.smt.borrow_mut().add_clause(or_args).is_err() {
                     return Err(SolverError::Inconsistent);
                 }
 
@@ -317,8 +317,7 @@ impl SolverState {
                 for resolver in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        let var = self.smt.borrow_mut().encode_bool(&resolver.rho()).var();
-                        let resolver_id = planner.graph.add_resolver(resolver, var);
+                        let resolver_id = planner.graph.add_resolver(resolver);
                         flaw.add_resolver(resolver_id);
                         planner.graph.set_current_resolver(Some(resolver_id));
                         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));
@@ -341,7 +340,7 @@ impl SolverState {
 
                 self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent)?;
                 self.sync_agenda();
-                self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(expr) != Some(false));
+                self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_lit_val(expr) != Some(false));
             } else {
                 return Err(SolverError::Inconsistent);
             }
@@ -398,8 +397,7 @@ impl Core for SolverState {
     }
     fn new_bool_var(&self) -> Slot {
         let var = self.smt.borrow_mut().new_bool();
-        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        let status = self.smt.borrow().get_bool_val(&phi);
+        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
         self.add_flaw(Box::new(BoolFlaw::new(phi, status, c_res, var.clone())));
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
@@ -491,9 +489,8 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let (phi, c_res_id) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        let status = self.smt.borrow().get_bool_val(&phi);
-        if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!phi.clone(), expr_to_bool(&term)])) {
+        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
+        if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if phi.sign() { !ast::BoolExpr::Var(phi.var()) } else { ast::BoolExpr::Var(phi.var()) }, expr_to_bool(&term)])) {
             return false;
         }
         let cnf_expr = to_cnf(term.clone());
@@ -503,7 +500,7 @@ impl Core for SolverState {
                     && terms.len() > 1
                 {
                     let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                    self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), status, c_res_id, terms)));
+                    self.add_flaw(Box::new(ClauseFlaw::new(phi, status, c_res, terms)));
                 }
             }
         } else {
@@ -511,7 +508,7 @@ impl Core for SolverState {
                 && terms.len() > 1
             {
                 let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                self.add_flaw(Box::new(ClauseFlaw::new(phi.clone(), status, c_res_id, terms)));
+                self.add_flaw(Box::new(ClauseFlaw::new(phi, status, c_res, terms)));
             }
         }
         true
@@ -519,9 +516,8 @@ impl Core for SolverState {
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
         let var = self.smt.borrow_mut().new_enum(domain.clone());
-        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        let status = self.smt.borrow().get_bool_val(&phi);
-        self.add_flaw(Box::new(EnumFlaw::new(phi.clone(), status, c_res, var.clone(), domain)));
+        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
+        self.add_flaw(Box::new(EnumFlaw::new(phi, status, c_res, var.clone(), domain)));
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, _disjunction: Disjunction) {}
@@ -538,9 +534,9 @@ impl Core for SolverState {
             unreachable!("Expected a BoolExpr::Var for atom sigma");
         };
         self.planner_state.borrow_mut().atom_sigma.push(sigma);
-        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho().clone(), Some(c_res.id())) } else { (ast::BoolExpr::True, None) };
-        let status = self.smt.borrow().get_bool_val(&phi);
-        self.add_flaw(Box::new(AtomFlaw::new(phi.clone(), status, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
+        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id())) } else { (Lit::TRUE, None) };
+        let status = self.smt.borrow().get_lit_val(phi);
+        self.add_flaw(Box::new(AtomFlaw::new(phi, status, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {

@@ -1,6 +1,6 @@
 use crate::{SolverError, SolverEvent, SolverState};
 use riddle::env::AtomId;
-use semitone::ast::BoolExpr;
+use semitone::Lit;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use tokio::sync::broadcast;
@@ -44,11 +44,11 @@ impl Graph {
         self.flaws[id].as_mut().unwrap().as_mut()
     }
 
-    pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>, var: usize) -> FlawId {
+    pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
         let id = self.flaws.len();
         flaw.set_id(id);
 
-        trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
+        trace!("Adding flaw: f{} ({})", flaw.id(), flaw.phi());
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id: id,
             phi: flaw.phi().to_string(),
@@ -59,7 +59,7 @@ impl Graph {
             data: flaw.to_json(),
         });
 
-        self.lit_to_flaw.entry(var).or_insert_with(Vec::new).push(id);
+        self.lit_to_flaw.entry(flaw.phi().var()).or_insert_with(Vec::new).push(id);
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
@@ -73,6 +73,7 @@ impl Graph {
 
     pub(super) fn set_flaw_estimated_cost(&mut self, flaw_id: FlawId, cost: f64) {
         let flaw = self.get_flaw_mut(flaw_id);
+        trace!("Setting estimated cost for flaw f{} from {} to {}", flaw_id, flaw.estimated_cost(), cost);
         flaw.set_estimated_cost(cost);
         let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost });
     }
@@ -97,11 +98,11 @@ impl Graph {
         self.resolvers[id].as_mut().unwrap().as_mut()
     }
 
-    pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>, var: usize) -> ResolverId {
+    pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
         let id = self.resolvers.len();
         resolver.set_id(id);
 
-        trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
+        trace!("Adding resolver: r{} ({}) for flaw f{}", resolver.id(), resolver.rho(), resolver.flaw());
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: id,
             flaw_id: resolver.flaw(),
@@ -112,7 +113,7 @@ impl Graph {
             data: resolver.to_json(),
         });
 
-        self.lit_to_resolver.entry(var).or_insert_with(Vec::new).push(id);
+        self.lit_to_resolver.entry(resolver.rho().var()).or_insert_with(Vec::new).push(id);
         self.resolvers.push(Some(resolver));
         id
     }
@@ -141,7 +142,7 @@ impl Graph {
 
     pub(super) fn propagate_costs<F>(&mut self, start_flaws: Vec<FlawId>, is_valid: F)
     where
-        F: Fn(&BoolExpr) -> bool,
+        F: Fn(Lit) -> bool,
     {
         let mut queue: VecDeque<FlawId> = start_flaws.into_iter().collect();
         let mut in_queue: HashSet<FlawId> = queue.iter().copied().collect();
@@ -150,12 +151,12 @@ impl Graph {
 
             let (phi, resolver_ids, old_cost, supports) = {
                 let flaw = self.get_flaw(flaw_id);
-                (flaw.phi().clone(), flaw.resolvers().to_vec(), flaw.estimated_cost(), flaw.supports().to_vec())
+                (flaw.phi(), flaw.resolvers().to_vec(), flaw.estimated_cost(), flaw.supports().to_vec())
             };
 
             let mut current_cost = f64::INFINITY;
 
-            if is_valid(&phi) {
+            if is_valid(phi) {
                 for res_id in resolver_ids {
                     let resolver = self.get_resolver(res_id);
                     if is_valid(resolver.rho()) {
@@ -168,9 +169,7 @@ impl Graph {
             }
 
             if (current_cost - old_cost).abs() > f64::EPSILON {
-                trace!("Updating cost for flaw {} from {} to {}", flaw_id, old_cost, current_cost);
-                self.get_flaw_mut(flaw_id).set_estimated_cost(current_cost);
-                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost: current_cost });
+                self.set_flaw_estimated_cost(flaw_id, current_cost);
 
                 for support_id in supports {
                     let parent_flaw_id = self.get_resolver(support_id).flaw();
@@ -212,7 +211,7 @@ pub trait Flaw {
     fn id(&self) -> FlawId;
     fn set_id(&mut self, id: FlawId);
 
-    fn phi(&self) -> &BoolExpr;
+    fn phi(&self) -> Lit;
     fn status(&self) -> Option<bool>;
     fn set_status(&mut self, status: Option<bool>);
 
@@ -244,7 +243,7 @@ pub trait Resolver {
     fn id(&self) -> ResolverId;
     fn set_id(&mut self, id: ResolverId);
 
-    fn rho(&self) -> &BoolExpr;
+    fn rho(&self) -> Lit;
     fn status(&self) -> Option<bool>;
     fn set_status(&mut self, status: Option<bool>);
 

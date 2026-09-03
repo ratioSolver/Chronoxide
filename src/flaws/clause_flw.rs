@@ -2,11 +2,11 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
-use semitone::ast::BoolExpr;
+use semitone::{Lit, ast::BoolExpr};
 
 pub(crate) struct ClauseFlaw {
     id: FlawId,
-    phi: BoolExpr,
+    phi: Lit,
     status: Option<bool>,
 
     causes: Vec<ResolverId>,
@@ -19,7 +19,7 @@ pub(crate) struct ClauseFlaw {
 }
 
 impl ClauseFlaw {
-    pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, literals: Vec<BoolExpr>) -> Self {
+    pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, literals: Vec<BoolExpr>) -> Self {
         assert!(status != Some(false), "Cannot create a ClauseFlaw with status Some(false)");
         Self {
             id: 0,
@@ -42,8 +42,8 @@ impl Flaw for ClauseFlaw {
         self.id = id;
     }
 
-    fn phi(&self) -> &BoolExpr {
-        &self.phi
+    fn phi(&self) -> Lit {
+        self.phi
     }
     fn status(&self) -> Option<bool> {
         self.status
@@ -76,10 +76,16 @@ impl Flaw for ClauseFlaw {
     fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
         self.is_expanded = true;
 
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.literals.len());
-        for literal in &self.literals {
-            let rho = literal.clone();
-            let status = state.smt.borrow().get_bool_val(&rho);
+        let rhos: Vec<Lit> = {
+            let mut smt = state.smt.borrow_mut();
+            self.literals.iter().map(|lit| smt.encode_bool(lit)).collect()
+        };
+
+        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(rhos.len());
+
+        let smt = state.smt.borrow();
+        for rho in rhos {
+            let status = smt.get_lit_val(rho);
             if status != Some(false) {
                 resolvers.push(Box::new(ClauseResolver::new(self.id, rho, status)));
             }
@@ -99,13 +105,13 @@ impl Flaw for ClauseFlaw {
 struct ClauseResolver {
     id: ResolverId,
     flaw: FlawId,
-    rho: BoolExpr,
+    rho: Lit,
     status: Option<bool>,
     sub_flaws: Vec<FlawId>,
 }
 
 impl ClauseResolver {
-    fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>) -> Self {
+    fn new(flaw: FlawId, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create a ClauseResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
     }
@@ -119,8 +125,8 @@ impl Resolver for ClauseResolver {
         self.id = id;
     }
 
-    fn rho(&self) -> &BoolExpr {
-        &self.rho
+    fn rho(&self) -> Lit {
+        self.rho
     }
     fn status(&self) -> Option<bool> {
         self.status
