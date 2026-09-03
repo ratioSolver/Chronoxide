@@ -159,7 +159,7 @@ impl Graph {
                 for res_id in resolver_ids {
                     let resolver = self.get_resolver(res_id);
                     if is_valid(resolver.rho()) {
-                        let resolver_cost = resolver.sub_flaws().iter().map(|&sub_id| self.get_flaw(sub_id).estimated_cost()).fold(resolver.intrinsic_cost(), |acc, cost| acc.max(cost));
+                        let resolver_cost = self.get_resolver_estimated_cost(res_id);
                         if resolver_cost < current_cost {
                             current_cost = resolver_cost;
                         }
@@ -180,6 +180,12 @@ impl Graph {
                 }
             }
         }
+    }
+
+    pub(super) fn get_resolver_estimated_cost(&self, id: ResolverId) -> f64 {
+        let resolver = self.get_resolver(id);
+        let max_sub_flaws_cost = resolver.sub_flaws().iter().map(|&sub_id| self.get_flaw(sub_id).estimated_cost()).fold(0.0_f64, f64::max);
+        resolver.intrinsic_cost() + max_sub_flaws_cost
     }
 
     pub(crate) fn get_causal_ancestor_atoms(&self, start_resolver_id: ResolverId) -> HashSet<riddle::env::AtomId> {

@@ -79,11 +79,72 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
-        if let Err(_) = self.smt.borrow_mut().propagate() {
-            return Err(SolverError::Inconsistent);
+        loop {
+            let prop_result = self.smt.borrow_mut().propagate();
+            match prop_result {
+                Ok(()) => {
+                    self.sync_agenda();
+                    self.build_graph()?;
+
+                    if let Some(flaw_id) = self.select_flaw() {
+                        let resolver_id = self.select_resolver(flaw_id)?;
+                        let rho = {
+                            let planner = self.planner_state.borrow();
+                            planner.graph.get_resolver(resolver_id).rho().clone()
+                        };
+                        let rho_lit = self.smt.borrow_mut().encode_bool(&rho);
+                        self.smt.borrow_mut().decide(rho_lit);
+                    } else {
+                        let check_result = self.smt.borrow_mut().check_ints();
+                        match check_result {
+                            Ok(()) => {
+                                info!("Problem solved successfully");
+                                return Ok(());
+                            }
+                            Err((bt_level, lemma)) => {
+                                if self.smt.borrow().decision_level() == 0 {
+                                    return Err(SolverError::Inconsistent);
+                                }
+                                self.cancel_until(bt_level);
+                                if self.smt.borrow_mut().add_clause(lemma).is_err() {
+                                    return Err(SolverError::Inconsistent);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err((bt_level, lemma)) => {
+                    if self.smt.borrow().decision_level() == 0 {
+                        return Err(SolverError::Inconsistent);
+                    }
+                    self.cancel_until(bt_level);
+                    if self.smt.borrow_mut().add_clause(lemma).is_err() {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
+            }
         }
-        self.build_graph()?;
-        Ok(())
+    }
+
+    fn select_flaw(&self) -> Option<FlawId> {
+        let planner = self.planner_state.borrow();
+        planner.agenda.iter().copied().max_by(|&a, &b| {
+            let cost_a = planner.graph.get_flaw(a).estimated_cost();
+            let cost_b = planner.graph.get_flaw(b).estimated_cost();
+            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+    }
+
+    fn select_resolver(&self, flaw_id: FlawId) -> Result<ResolverId, SolverError> {
+        let planner = self.planner_state.borrow();
+        let flaw = planner.graph.get_flaw(flaw_id);
+        let best_resolver = flaw.resolvers().iter().copied().filter(|&res_id| planner.graph.get_resolver(res_id).status() != Some(false)).min_by(|&a, &b| {
+            let cost_a = planner.graph.get_resolver_estimated_cost(a);
+            let cost_b = planner.graph.get_resolver_estimated_cost(b);
+            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        best_resolver.ok_or(SolverError::Inconsistent)
     }
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
@@ -206,13 +267,12 @@ impl SolverState {
 
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
-        self.sync_agenda();
         loop {
             {
                 let planner = self.planner_state.borrow();
                 if !planner.agenda.iter().any(|&flaw_id| planner.graph.get_flaw(flaw_id).estimated_cost() == f64::INFINITY) {
                     trace!("All flaws have finite estimated costs, graph building complete");
-                    return self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent);
+                    return Ok(());
                 }
             }
 
@@ -273,6 +333,9 @@ impl SolverState {
                     planner.graph.set_current_flaw(None);
                     let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
                 }
+
+                self.smt.borrow_mut().propagate().map_err(|_| SolverError::Inconsistent)?;
+                self.sync_agenda();
                 self.planner_state.borrow_mut().graph.propagate_costs(vec![flaw_id], |expr| self.smt.borrow().get_bool_val(expr) != Some(false));
             } else {
                 return Err(SolverError::Inconsistent);
