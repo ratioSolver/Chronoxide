@@ -88,10 +88,12 @@ impl SolverState {
 
                     if let Some(flaw_id) = self.select_flaw() {
                         let resolver_id = self.select_resolver(flaw_id)?;
+                        trace!("Deciding on resolver {} for flaw {}", resolver_id, flaw_id);
                         let rho = {
                             let planner = self.planner_state.borrow();
                             planner.graph.get_resolver(resolver_id).rho().clone()
                         };
+                        trace!("Deciding on rho: {}", rho);
                         let rho_lit = self.smt.borrow_mut().encode_bool(&rho);
                         self.smt.borrow_mut().decide(rho_lit);
                     } else {
@@ -298,6 +300,9 @@ impl SolverState {
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
                     let rho = resolver.rho().clone();
+                    if self.smt.borrow().get_bool_val(&rho) == Some(true) {
+                        self.planner_state.borrow_mut().agenda.remove(&flaw_id);
+                    }
                     or_args.push(rho.clone());
                     if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho, flaw.phi().clone()])) {
                         return Err(SolverError::Inconsistent);

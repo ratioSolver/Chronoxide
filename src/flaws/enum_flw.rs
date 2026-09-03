@@ -22,6 +22,7 @@ pub(crate) struct EnumFlaw {
 
 impl EnumFlaw {
     pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
+        assert!(status != Some(false), "Cannot create an EnumFlaw with status Some(false)");
         Self {
             id: 0,
             phi,
@@ -83,7 +84,9 @@ impl Flaw for EnumFlaw {
         for &val in &self.domain {
             let rho = self.target.eq(val);
             let status = state.smt.borrow().get_bool_val(&rho);
-            resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
+            if status != Some(false) {
+                resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
+            }
         }
 
         Ok(resolvers)
@@ -111,6 +114,7 @@ struct EnumResolver {
 
 impl EnumResolver {
     fn new(flaw: FlawId, val: i32, rho: BoolExpr, status: Option<bool>) -> Self {
+        assert!(status != Some(false), "Cannot create an EnumResolver with status Some(false)");
         Self { id: 0, flaw, val, rho, status, sub_flaws: Vec::new() }
     }
 }

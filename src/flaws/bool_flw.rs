@@ -20,6 +20,7 @@ pub(crate) struct BoolFlaw {
 
 impl BoolFlaw {
     pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, target: BoolExpr) -> Self {
+        assert!(status != Some(false), "Cannot create a BoolFlaw with status Some(false)");
         Self {
             id: 0,
             phi,
@@ -74,7 +75,17 @@ impl Flaw for BoolFlaw {
 
     fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
         self.is_expanded = true;
-        Ok(vec![Box::new(BoolResolver::new(self.id, self.target.clone(), state.smt.borrow().get_bool_val(&self.target))), Box::new(BoolResolver::new(self.id, !self.target.clone(), state.smt.borrow().get_bool_val(&!&self.target)))])
+        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::new();
+
+        let state_1 = state.smt.borrow().get_bool_val(&self.target);
+        if state_1 != Some(false) {
+            resolvers.push(Box::new(BoolResolver::new(self.id, self.target.clone(), state_1)));
+        }
+        let state_2 = state.smt.borrow().get_bool_val(&!&self.target);
+        if state_2 != Some(false) {
+            resolvers.push(Box::new(BoolResolver::new(self.id, !self.target.clone(), state_2)));
+        }
+        Ok(resolvers)
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -94,6 +105,7 @@ struct BoolResolver {
 
 impl BoolResolver {
     fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>) -> Self {
+        assert!(status != Some(false), "Cannot create a BoolResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
     }
 }

@@ -20,6 +20,7 @@ pub(crate) struct ClauseFlaw {
 
 impl ClauseFlaw {
     pub(crate) fn new(phi: BoolExpr, status: Option<bool>, cause: Option<ResolverId>, literals: Vec<BoolExpr>) -> Self {
+        assert!(status != Some(false), "Cannot create a ClauseFlaw with status Some(false)");
         Self {
             id: 0,
             phi,
@@ -79,7 +80,9 @@ impl Flaw for ClauseFlaw {
         for literal in &self.literals {
             let rho = literal.clone();
             let status = state.smt.borrow().get_bool_val(&rho);
-            resolvers.push(Box::new(ClauseResolver::new(self.id, rho, status)));
+            if status != Some(false) {
+                resolvers.push(Box::new(ClauseResolver::new(self.id, rho, status)));
+            }
         }
 
         Ok(resolvers)
@@ -103,6 +106,7 @@ struct ClauseResolver {
 
 impl ClauseResolver {
     fn new(flaw: FlawId, rho: BoolExpr, status: Option<bool>) -> Self {
+        assert!(status != Some(false), "Cannot create a ClauseResolver with status Some(false)");
         Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
     }
 }
