@@ -91,18 +91,10 @@ impl SolverState {
     }
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
-        let phi = flaw.phi().to_string();
-        let causes = flaw.causes().to_vec();
-        let supports = flaw.supports().to_vec();
-        let status = self.smt.borrow().get_bool_val(&flaw.phi());
-        let cost = flaw.estimated_cost();
-        let data = flaw.to_json();
-
-        let mut planner = self.planner_state.borrow_mut();
+        let status = flaw.status();
         let atom_id = flaw.atom_id();
+        let mut planner = self.planner_state.borrow_mut();
         let flaw_id = planner.graph.add_flaw(flaw);
-
-        let _ = self.tx_event.send(SolverEvent::NewFlaw { flaw_id, phi, causes, supports, status, cost, data });
         if let Some(atom_id) = atom_id {
             planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
         }
@@ -231,13 +223,7 @@ impl SolverState {
                 for resolver in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        let rho = resolver.rho().to_string();
-                        let status = self.smt.borrow().get_bool_val(&resolver.rho());
-                        let intrinsic_cost = resolver.intrinsic_cost();
-                        let sub_flaws = resolver.sub_flaws().to_vec();
-                        let data = resolver.to_json();
                         let resolver_id = planner.graph.add_resolver(resolver);
-                        let _ = self.tx_event.send(SolverEvent::NewResolver { resolver_id, flaw_id, rho, status, intrinsic_cost, sub_flaws, data });
                         flaw.add_resolver(resolver_id);
                         planner.graph.set_current_resolver(Some(resolver_id));
                         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));

@@ -43,7 +43,18 @@ impl Graph {
     pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
         let id = self.flaws.len();
         flaw.set_id(id);
+
         trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
+        let _ = self.tx_event.send(SolverEvent::NewFlaw {
+            flaw_id: id,
+            phi: flaw.phi().to_string(),
+            causes: flaw.causes().to_vec(),
+            supports: flaw.supports().to_vec(),
+            status: flaw.status(),
+            cost: flaw.estimated_cost(),
+            data: flaw.to_json(),
+        });
+
         self.flaws.push(Some(flaw));
         self.flaw_q.push_back(id);
         id
@@ -68,7 +79,18 @@ impl Graph {
     pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
         let id = self.resolvers.len();
         resolver.set_id(id);
+
         trace!("Adding resolver: {} ({})", resolver.id(), resolver.rho());
+        let _ = self.tx_event.send(SolverEvent::NewResolver {
+            resolver_id: id,
+            flaw_id: resolver.flaw(),
+            rho: resolver.rho().to_string(),
+            status: resolver.status(),
+            intrinsic_cost: resolver.intrinsic_cost(),
+            sub_flaws: resolver.sub_flaws().to_vec(),
+            data: resolver.to_json(),
+        });
+
         self.resolvers.push(Some(resolver));
         id
     }
