@@ -182,7 +182,8 @@ impl Resolver for RuleResolver {
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
         let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom.id()).copied().ok_or(SolverError::Inconsistent)?;
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::Var(atom_sigma)])) {
+        let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::Var(atom_sigma)])) {
             return Err(SolverError::Inconsistent);
         }
         self.predicate.clone().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Error applying rule: {:?}", e)))?;
@@ -244,7 +245,8 @@ impl Resolver for FactResolver {
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
         let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom_id).copied().ok_or(SolverError::Inconsistent)?;
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::Var(atom_sigma)])) {
+        let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::Var(atom_sigma)])) {
             return Err(SolverError::Inconsistent);
         }
         Ok(())
@@ -321,7 +323,8 @@ impl Resolver for UnificationResolver {
         conjunction.push(!ast::BoolExpr::Var(source_sigma));
         conjunction.push(ast::BoolExpr::Var(target_sigma));
 
-        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) }, ast::BoolExpr::And(conjunction)])) {
+        let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
+        if !state.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::And(conjunction)])) {
             return Err(SolverError::Inconsistent);
         }
         state.add_causal_link(self.id, self.target_atom_id)?;
