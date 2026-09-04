@@ -66,6 +66,15 @@ impl Graph {
     }
 
     pub(super) fn set_flaw_status(&mut self, flaw_id: FlawId, status: Option<bool>) {
+        trace!(
+            "Flaw f{} is {}",
+            flaw_id,
+            match status {
+                Some(true) => "active",
+                Some(false) => "inactive",
+                None => "unknown",
+            }
+        );
         let flaw = self.get_flaw_mut(flaw_id);
         flaw.set_status(status);
         let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id, status });
@@ -73,7 +82,7 @@ impl Graph {
 
     pub(super) fn set_flaw_estimated_cost(&mut self, flaw_id: FlawId, cost: f64) {
         let flaw = self.get_flaw_mut(flaw_id);
-        trace!("Setting estimated cost for flaw f{} from {} to {}", flaw_id, flaw.estimated_cost(), cost);
+        trace!("Flaw f{} cost {} -> {}", flaw_id, flaw.estimated_cost(), cost);
         flaw.set_estimated_cost(cost);
         let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost });
     }
@@ -119,6 +128,15 @@ impl Graph {
     }
 
     pub(super) fn set_resolver_status(&mut self, resolver_id: ResolverId, status: Option<bool>) {
+        trace!(
+            "Resolver r{} is {}",
+            resolver_id,
+            match status {
+                Some(true) => "active",
+                Some(false) => "inactive",
+                None => "unknown",
+            }
+        );
         let resolver = self.get_resolver_mut(resolver_id);
         resolver.set_status(status);
         let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id, status });

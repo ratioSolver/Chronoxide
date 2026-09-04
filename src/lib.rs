@@ -87,14 +87,13 @@ impl SolverState {
                     self.build_graph()?;
 
                     if let Some(flaw_id) = self.select_flaw() {
-                        trace!("Deciding on flaw {}", flaw_id);
+                        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flaw_id)));
                         let resolver_id = self.select_resolver(flaw_id)?;
-                        trace!("Applying resolver {}", resolver_id);
+                        let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));
                         let rho = {
                             let planner = self.planner_state.borrow();
                             planner.graph.get_resolver(resolver_id).rho()
                         };
-                        trace!("Deciding on literal {}", rho);
                         self.smt.borrow_mut().decide(rho);
                     } else {
                         let check_result = self.smt.borrow_mut().check_ints();
@@ -171,7 +170,7 @@ impl SolverState {
         let target_flaw = planner.graph.get_flaw_mut(target_flaw_id);
         target_flaw.add_support(unif_resolver_id);
 
-        trace!("Causal link created: Resolver {} supports Flaw {}", unif_resolver_id, target_flaw_id);
+        trace!("Causal link created: Resolver r{} supports Flaw f{}", unif_resolver_id, target_flaw_id);
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: target_flaw_id, resolver_id: unif_resolver_id });
         Ok(())
     }
@@ -208,7 +207,6 @@ impl SolverState {
                         (smt.get_lit_val(resolver.rho()), resolver.flaw())
                     };
 
-                    trace!("Updating status for resolver {} to {:?} (flaw {})", resolver_id, status, flaw_id);
                     planner.graph.set_resolver_status(resolver_id, status);
 
                     if status == Some(true) {
