@@ -96,6 +96,8 @@ impl SolverState {
                         };
                         self.smt.borrow_mut().decide(rho);
                     } else {
+                        let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
+                        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
                         let check_result = self.smt.borrow_mut().check_ints();
                         match check_result {
                             Ok(()) => {

@@ -20,7 +20,7 @@ struct AppState {
     first_client_connected: Arc<Notify>,
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     let subscriber = tracing_subscriber::fmt().with_max_level(Level::TRACE).finish();
     subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
