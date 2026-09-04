@@ -77,7 +77,7 @@ impl Flaw for BoolFlaw {
         self.is_expanded = true;
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::new();
 
-        let rho = state.smt.borrow_mut().encode_bool(&self.target);
+        let rho = state.smt.borrow_mut().track_expr(&self.target);
         let smt = state.smt.borrow();
 
         let state_1 = smt.get_lit_val(rho);

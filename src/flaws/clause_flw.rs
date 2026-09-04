@@ -78,7 +78,7 @@ impl Flaw for ClauseFlaw {
 
         let rhos: Vec<Lit> = {
             let mut smt = state.smt.borrow_mut();
-            self.literals.iter().map(|lit| smt.encode_bool(lit)).collect()
+            self.literals.iter().map(|lit| smt.track_expr(lit)).collect()
         };
 
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(rhos.len());

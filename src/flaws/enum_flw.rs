@@ -82,7 +82,7 @@ impl Flaw for EnumFlaw {
         let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
 
         for &val in &self.domain {
-            let rho = state.smt.borrow_mut().encode_bool(&self.target.eq(val));
+            let rho = state.smt.borrow_mut().track_expr(&self.target.eq(val));
             let status = state.smt.borrow().get_lit_val(rho);
             if status != Some(false) {
                 resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
