@@ -487,10 +487,15 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
-        if !self.smt.borrow_mut().assert(&ast::BoolExpr::Or(vec![if phi.sign() { !ast::BoolExpr::Var(phi.var()) } else { ast::BoolExpr::Var(phi.var()) }, expr_to_bool(&term)])) {
+        let cnstr = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() {
+            ast::BoolExpr::Or(vec![if c_res.rho().sign() { !ast::BoolExpr::Var(c_res.rho().var()) } else { ast::BoolExpr::Var(c_res.rho().var()) }, expr_to_bool(&term)])
+        } else {
+            expr_to_bool(&term)
+        };
+        if !self.smt.borrow_mut().assert(&cnstr) {
             return false;
         }
+        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
         let cnf_expr = to_cnf(term.clone());
         if let BoolExpr::And { terms, .. } = cnf_expr.as_ref() {
             for clause in terms {
@@ -532,8 +537,7 @@ impl Core for SolverState {
             unreachable!("Expected a BoolExpr::Var for atom sigma");
         };
         self.planner_state.borrow_mut().atom_sigma.push(sigma);
-        let (phi, c_res) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id())) } else { (Lit::TRUE, None) };
-        let status = self.smt.borrow().get_lit_val(phi);
+        let (phi, c_res, status) = if let Some(c_res) = self.planner_state.borrow().graph.get_current_resolver() { (c_res.rho(), Some(c_res.id()), self.smt.borrow().get_lit_val(c_res.rho())) } else { (Lit::TRUE, None, Some(true)) };
         self.add_flaw(Box::new(AtomFlaw::new(phi, status, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
         atm
     }
