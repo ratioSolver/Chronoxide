@@ -3,7 +3,7 @@ mod graph;
 mod objects;
 
 use crate::{
-    flaws::{atom_flw::AtomFlaw, bool_flw::BoolFlaw, clause_flw::ClauseFlaw, enum_flw::EnumFlaw},
+    flaws::{atom_flw::AtomFlaw, bool_flw::BoolFlaw, clause_flw::ClauseFlaw, disjunction_flw::DisjunctionFlaw, enum_flw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -533,7 +533,10 @@ impl Core for SolverState {
         self.add_flaw(Box::new(EnumFlaw::new(phi, status, c_res, var.clone(), domain)));
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
-    fn new_disjunction(&self, _disjunction: Disjunction) {}
+    fn new_disjunction(&self, disjunction: Disjunction) {
+        let (phi, c_res, status) = self.get_ctx();
+        self.add_flaw(Box::new(DisjunctionFlaw::new(phi, status, c_res, disjunction)));
+    }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
         self.core.new_object(class)

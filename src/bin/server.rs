@@ -112,10 +112,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                     "status": status
                                 });
                                 if !causes.is_empty() {
-                                    msg["causes"] = Value::Array(causes.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                    msg["causes"] = Value::Array(causes.iter().map(|id| Value::String(format!("r{}", id))).collect());
                                 }
                                 if !supports.is_empty() {
-                                    msg["supports"] = Value::Array(supports.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                    msg["supports"] = Value::Array(supports.iter().map(|id| Value::String(format!("r{}", id))).collect());
                                 }
                                 if cost.is_finite() {
                                     msg["cost"] = Value::from(cost);
