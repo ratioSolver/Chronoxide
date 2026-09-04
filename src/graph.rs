@@ -11,9 +11,7 @@ pub type ResolverId = usize;
 
 pub(super) struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
-    current_flaw: Option<FlawId>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
-    current_resolver: Option<ResolverId>,
     pub(super) lit_to_flaw: HashMap<usize, Vec<FlawId>>,
     pub(super) lit_to_resolver: HashMap<usize, Vec<ResolverId>>,
     pub(super) flaw_q: VecDeque<FlawId>,
@@ -25,9 +23,7 @@ impl Graph {
     pub(super) fn new(tx_event: broadcast::Sender<SolverEvent>) -> Self {
         Graph {
             flaws: Vec::new(),
-            current_flaw: None,
             resolvers: Vec::new(),
-            current_resolver: None,
             lit_to_flaw: HashMap::new(),
             lit_to_resolver: HashMap::new(),
             flaw_q: VecDeque::new(),
@@ -95,10 +91,6 @@ impl Graph {
         self.flaws[id] = Some(flaw);
     }
 
-    pub(super) fn set_current_flaw(&mut self, flaw_id: Option<FlawId>) {
-        self.current_flaw = flaw_id;
-    }
-
     pub(super) fn get_resolver(&self, id: ResolverId) -> &dyn Resolver {
         self.resolvers[id].as_ref().unwrap().as_ref()
     }
@@ -148,14 +140,6 @@ impl Graph {
 
     pub(super) fn return_resolver(&mut self, id: ResolverId, resolver: Box<dyn Resolver>) {
         self.resolvers[id] = Some(resolver);
-    }
-
-    pub(super) fn get_current_resolver(&self) -> Option<&dyn Resolver> {
-        self.current_resolver.map(|id| self.resolvers[id].as_ref().unwrap().as_ref())
-    }
-
-    pub(super) fn set_current_resolver(&mut self, resolver_id: Option<ResolverId>) {
-        self.current_resolver = resolver_id;
     }
 
     pub(super) fn propagate_costs<F>(&mut self, start_flaws: Vec<FlawId>, is_valid: F)

@@ -9,6 +9,7 @@ use riddle::{
 };
 use semitone::{Lit, ast};
 use std::{collections::HashSet, rc::Rc};
+use tracing::trace;
 
 pub(crate) struct AtomFlaw {
     id: FlawId,
@@ -103,11 +104,20 @@ impl Flaw for AtomFlaw {
             }
 
             if forbidden_atoms.contains(&target_id) {
-                tracing::trace!("Unification skipped: Atom {} is a causal ancestor of Atom {}", target_id, self.atom.id());
+                trace!("Unification skipped: Atom {} is a causal ancestor of Atom {}", target_id, self.atom.id());
                 continue;
             }
 
             if let Some(target_atom) = state.get_atom(target_id) {
+                if let Some(target_flaw_id) = state.planner_state.borrow().graph.atom_to_flaw.get(&target_id) {
+                    let state = state.planner_state.borrow();
+                    let target_flaw = state.graph.get_flaw(*target_flaw_id);
+                    if !target_flaw.is_expanded() || target_flaw.status() == Some(false) {
+                        trace!("Unification skipped: Flaw f{} for Atom {} is inactive", target_flaw.id(), target_id);
+                        continue;
+                    }
+                }
+
                 let rho = state.smt.borrow_mut().new_lit();
                 let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
                 resolvers.push(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs)));
