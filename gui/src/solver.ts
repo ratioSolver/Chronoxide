@@ -59,21 +59,15 @@ export namespace solver {
             break;
           }
           case 'flaw-status-update': {
-            const flaw = this.flaws.get(msg.id);
-            if (flaw) {
-              flaw._set_status(msg.status);
-              for (const listener of this.listeners) listener.flaw_cost_update(flaw);
-            } else
-              console.warn(`Received status update for unknown flaw with id ${msg.id}`);
+            const flaw = this.flaws.get(msg.id)!;
+            flaw._set_status(msg.status);
+            for (const listener of this.listeners) listener.flaw_status_update(flaw);
             break;
           }
           case 'flaw-cost-update': {
-            const flaw = this.flaws.get(msg.id);
-            if (flaw) {
-              flaw._set_cost(msg.cost);
-              for (const listener of this.listeners) listener.flaw_cost_update(flaw);
-            } else
-              console.warn(`Received cost update for unknown flaw with id ${msg.id}`);
+            const flaw = this.flaws.get(msg.id)!;
+            flaw._set_cost(msg.cost);
+            for (const listener of this.listeners) listener.flaw_cost_update(flaw);
             break;
           }
           case 'current-flaw': {
@@ -93,12 +87,9 @@ export namespace solver {
             break;
           }
           case 'resolver-status-update': {
-            const resolver = this.resolvers.get(msg.id);
-            if (resolver) {
-              resolver._set_status(msg.status);
-              for (const listener of this.listeners) listener.resolver_status_update(resolver);
-            } else
-              console.warn(`Received status update for unknown resolver with id ${msg.id}`);
+            const resolver = this.resolvers.get(msg.id)!;
+            resolver._set_status(msg.status);
+            for (const listener of this.listeners) listener.resolver_status_update(resolver);
             break;
           }
           case 'current-resolver': {
@@ -112,16 +103,11 @@ export namespace solver {
             break;
           }
           case 'new-causal-link': {
-            const flaw = this.flaws.get(msg.flaw_id);
-            const resolver = this.resolvers.get(msg.resolver_id);
-            if (flaw && resolver) {
-              for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
-            } else {
-              if (!flaw)
-                console.warn(`Received new causal link for unknown flaw with id ${msg.flaw_id}`);
-              if (!resolver)
-                console.warn(`Received new causal link for unknown resolver with id ${msg.resolver_id}`);
-            }
+            const flaw = this.flaws.get(msg.flaw_id)!;
+            const resolver = this.resolvers.get(msg.resolver_id)!;
+            flaw._add_support(resolver.get_id());
+            resolver._add_sub_flaw(flaw.get_id());
+            for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
             break;
           }
           default:
