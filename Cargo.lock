@@ -530,9 +530,9 @@ dependencies = [
 
 [[package]]
 name = "riddle-lang"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df76b3a3a2097a34ab09a69bac8790acc5f4c7bd2a35047e4073da10026ffe2"
+checksum = "c9941cfd1e17421fc94e8a89e8252ff7b0bad0d3af1d0b0f6329529e79933297"
 
 [[package]]
 name = "rug"

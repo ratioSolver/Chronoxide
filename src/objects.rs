@@ -1,7 +1,4 @@
-use riddle::{
-    env::Var,
-    scope::{BoolType, StringType, Type},
-};
+use riddle::{env::Var, scope::Type};
 use semitone::ast::{ArithExpr, BoolExpr, EnumExpr};
 use std::{
     any::Any,
@@ -9,12 +6,12 @@ use std::{
 };
 
 pub struct BoolVar {
-    var_type: Weak<BoolType>,
+    var_type: Weak<dyn Type>,
     pub(crate) lit: BoolExpr,
 }
 
 impl BoolVar {
-    pub(crate) fn new(var_type: Rc<BoolType>, lit: BoolExpr) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, lit: BoolExpr) -> Self {
         Self { var_type: Rc::downgrade(&var_type), lit }
     }
 }
@@ -51,12 +48,12 @@ impl Var for ArithVar {
 }
 
 pub struct StringVar {
-    var_type: Weak<StringType>,
+    var_type: Weak<dyn Type>,
     pub(crate) value: String,
 }
 
 impl StringVar {
-    pub(crate) fn new(var_type: Rc<StringType>, value: String) -> Self {
+    pub(crate) fn new(var_type: Rc<dyn Type>, value: String) -> Self {
         Self { var_type: Rc::downgrade(&var_type), value }
     }
 }

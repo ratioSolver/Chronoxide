@@ -1,11 +1,13 @@
 mod flaws;
 mod graph;
 mod objects;
+mod types;
 
 use crate::{
     flaws::{atom_flw::AtomFlaw, bool_flw::BoolFlaw, clause_flw::ClauseFlaw, disjunction_flw::DisjunctionFlaw, enum_flw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
+    types::StateVariable,
 };
 use riddle::{
     RiddleError,
@@ -57,7 +59,7 @@ struct PlannerState {
 
 impl SolverState {
     fn new(tx_event: broadcast::Sender<SolverEvent>) -> Rc<Self> {
-        Rc::new_cyclic(|core| SolverState {
+        let slv = Rc::new_cyclic(|core| SolverState {
             core: {
                 let core: Weak<SolverState> = core.clone();
                 CommonCore::new(core)
@@ -73,7 +75,12 @@ impl SolverState {
                 notified_len: 0,
             }),
             tx_event,
-        })
+        });
+        slv.core.add_type(StateVariable::new(Rc::downgrade(&slv) as Weak<dyn Core>));
+        if slv.read(include_str!("init.rddl")).is_err() {
+            panic!("Failed to initialize solver");
+        }
+        slv
     }
 
     fn get_ctx(&self) -> (Lit, Option<usize>, Option<bool>) {
