@@ -164,6 +164,9 @@ impl Resolver for DisjunctionResolver {
     fn sub_flaws(&self) -> &[FlawId] {
         &self.sub_flaws
     }
+    fn add_sub_flaw(&mut self, id: FlawId) {
+        self.sub_flaws.push(id);
+    }
 
     fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
         for stmt in &self.disjunct {

@@ -48,6 +48,7 @@ struct SolverState {
 
 struct PlannerState {
     ctx: Option<(usize, Lit)>,
+    pending_sub_flaws: Vec<FlawId>,
     graph: Graph,
     agenda: HashSet<FlawId>,
     atom_sigma: Vec<usize>,
@@ -65,6 +66,7 @@ impl SolverState {
             smt: RefCell::new(SeMiTONE::new()),
             planner_state: RefCell::new(PlannerState {
                 ctx: None,
+                pending_sub_flaws: Vec::new(),
                 graph: Graph::new(tx_event.clone()),
                 agenda: HashSet::new(),
                 atom_sigma: Vec::new(),
@@ -159,11 +161,15 @@ impl SolverState {
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let status = flaw.status();
         let atom_id = flaw.atom_id();
+        let (_phi, c_res, _status) = self.get_ctx();
         let mut planner = self.planner_state.borrow_mut();
 
         let flaw_id = planner.graph.add_flaw(flaw);
         if let Some(atom_id) = atom_id {
             planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
+        }
+        if c_res.is_some() {
+            planner.pending_sub_flaws.push(flaw_id);
         }
         if status == Some(true) {
             planner.agenda.insert(flaw_id);
@@ -330,6 +336,9 @@ impl SolverState {
                     resolver.apply(self)?;
                     {
                         let mut planner = self.planner_state.borrow_mut();
+                        for sub_flaw in planner.pending_sub_flaws.drain(..) {
+                            resolver.add_sub_flaw(sub_flaw);
+                        }
                         planner.graph.return_resolver(resolver.id(), resolver);
                         planner.ctx = None;
                     }

@@ -180,6 +180,9 @@ export namespace solver {
       this.supports = supports;
       this.status = status;
       this.cost = cost;
+      for (const support_id of supports) {
+        solver.get_resolver(support_id)!._add_sub_flaw(id);
+      }
     }
 
     get_solver(): Solver { return this.solver; }
@@ -200,16 +203,16 @@ export namespace solver {
     private readonly rho: string;
     private readonly flaw: string;
     private readonly intrinsic_cost: number;
-    private requirements: string[];
+    private sub_flaws: string[];
     private status: Status;
 
-    constructor(solver: Solver, id: string, rho: string, flaw: string, intrinsic_cost: number, requirements: string[], status: Status) {
+    constructor(solver: Solver, id: string, rho: string, flaw: string, intrinsic_cost: number, sub_flaws: string[], status: Status) {
       this.solver = solver;
       this.id = id;
       this.rho = rho;
       this.flaw = flaw;
       this.intrinsic_cost = intrinsic_cost;
-      this.requirements = requirements;
+      this.sub_flaws = sub_flaws;
       this.status = status;
     }
 
@@ -217,10 +220,11 @@ export namespace solver {
     get_id(): string { return this.id; }
     get_rho(): string { return this.rho; }
     get_flaw(): string { return this.flaw; }
-    get_requirements(): string[] { return this.requirements; }
+    get_sub_flaws(): string[] { return this.sub_flaws; }
+    _add_sub_flaw(sub_flaw_id: string) { this.sub_flaws.push(sub_flaw_id); }
     get_intrinsic_cost(): number { return this.intrinsic_cost; }
     get_cost(): number {
-      const req_costs = this.requirements.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
+      const req_costs = this.sub_flaws.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
       const max_req_cost = req_costs.length > 0 ? Math.max(...req_costs) : 0;
       return this.get_intrinsic_cost() + max_req_cost;
     }

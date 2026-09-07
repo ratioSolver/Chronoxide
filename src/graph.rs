@@ -256,6 +256,9 @@ pub trait Resolver {
     fn apply(&mut self, core: &SolverState) -> Result<(), SolverError>;
 
     fn sub_flaws(&self) -> &[FlawId];
+    fn add_sub_flaw(&mut self, id: FlawId) {
+        unreachable!("This resolver type does not support adding sub-flaws.");
+    }
 
     fn to_json(&self) -> Value;
 }

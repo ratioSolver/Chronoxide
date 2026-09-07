@@ -34,7 +34,7 @@ impl AtomFlaw {
             phi,
             status,
             causes: cause.into_iter().collect(),
-            supports: Vec::new(),
+            supports: cause.into_iter().collect(),
             resolvers: Vec::new(),
             estimated_cost: f64::INFINITY,
             is_expanded: false,
@@ -181,8 +181,12 @@ impl Resolver for RuleResolver {
     fn flaw(&self) -> FlawId {
         self.flaw
     }
+
     fn sub_flaws(&self) -> &[FlawId] {
         &self.sub_flaws
+    }
+    fn add_sub_flaw(&mut self, id: FlawId) {
+        self.sub_flaws.push(id);
     }
 
     fn intrinsic_cost(&self) -> f64 {
