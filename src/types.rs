@@ -9,18 +9,19 @@ use riddle::{
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::Lit;
+use semitone::{Lit, rational::InfRational};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    cmp::max,
-    cmp::min,
-    collections::{HashMap, HashSet},
+    cmp::{max, min},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::{Rc, Weak},
 };
 
 pub trait FlawExtractor {
     fn extract_flaws(&self, core: &SolverState) -> Vec<FlawId>;
+
+    fn to_json(&self, core: &SolverState) -> Value;
 }
 
 pub struct StateVariable {
@@ -40,6 +41,49 @@ impl StateVariable {
         });
         sv.constructors.borrow_mut().push(Rc::new(Constructor::new(Rc::downgrade(&sv) as _, ConstructorDef { args: Vec::new(), init: Vec::new(), statements: Vec::new() })));
         sv
+    }
+
+    fn atoms_by_instance(&self, core: &SolverState) -> HashMap<ObjectId, Vec<AtomId>> {
+        let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
+        let mut processed_classes = HashSet::new();
+
+        let smt = core.smt.borrow();
+        for instance_id in self.instances.borrow().iter() {
+            let Some(instance) = core.get_object(*instance_id) else {
+                continue;
+            };
+            if !processed_classes.insert(instance.class().full_name().to_string()) {
+                continue;
+            }
+            for pred in instance.class().predicates().iter() {
+                for atom_id in pred.atoms().iter() {
+                    let Some(sigma) = core.atom_sigma(*atom_id) else {
+                        continue;
+                    };
+                    if smt.get_bool_val(&sigma) != Some(true) {
+                        continue;
+                    }
+                    let Some(atom) = core.get_atom(*atom_id) else {
+                        continue;
+                    };
+                    match atom.get("tau") {
+                        Some(Slot::ObjectRef(sv)) => {
+                            atoms_by_instance.entry(sv).or_default().push(atom.id());
+                        }
+                        Some(Slot::Primitive(var)) => {
+                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>()
+                                && let Some(sv) = smt.get_enum_val(&enum_var.var)
+                            {
+                                atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
+                            }
+                        }
+                        _ => unreachable!("Atom should have a 'tau' field"),
+                    }
+                }
+            }
+        }
+
+        atoms_by_instance
     }
 }
 
@@ -125,68 +169,17 @@ impl Class for StateVariable {
 
 impl FlawExtractor for StateVariable {
     fn extract_flaws(&self, core: &SolverState) -> Vec<FlawId> {
-        let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
-        let mut processed_classes = HashSet::new();
-
-        let smt = core.smt.borrow();
-        for instance_id in self.instances.borrow().iter() {
-            let Some(instance) = core.get_object(*instance_id) else {
-                continue;
-            };
-            if !processed_classes.insert(instance.class().full_name().to_string()) {
-                continue;
-            }
-            for pred in instance.class().predicates().iter() {
-                for atom_id in pred.atoms().iter() {
-                    let Some(sigma) = core.atom_sigma(*atom_id) else {
-                        continue;
-                    };
-                    if smt.get_bool_val(&sigma) != Some(true) {
-                        continue;
-                    }
-                    let Some(atom) = core.get_atom(*atom_id) else {
-                        continue;
-                    };
-                    match atom.get("tau") {
-                        Some(Slot::ObjectRef(sv)) => {
-                            atoms_by_instance.entry(sv).or_default().push(atom.id());
-                        }
-                        Some(Slot::Primitive(var)) => {
-                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>()
-                                && let Some(sv) = smt.get_enum_val(&enum_var.var) {
-                                    atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
-                                }
-                        }
-                        _ => unreachable!("Atom should have a 'tau' field"),
-                    }
-                }
-            }
-        }
-        drop(smt);
-
-        let get_time = |atom: &Rc<Atom>, field: &str| match atom.get(field) {
-            Some(Slot::Primitive(v)) => v.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).unwrap(),
-            _ => unreachable!("Atom should have a '{}' field", field),
-        };
+        let atoms_by_instance = self.atoms_by_instance(core);
 
         let mut pending_overlaps = Vec::new();
-        let smt = core.smt.borrow();
         for (_instance_id, atoms) in atoms_by_instance {
             for i in 0..atoms.len() {
-                let atom_i = core.get_atom(atoms[i]).expect("Atom should exist");
-                let ai_start = get_time(&atom_i, "start");
-                let ai_end = get_time(&atom_i, "end");
-                let ai_start_val = smt.get_arith_val(&ai_start).unwrap();
-                let ai_end_val = smt.get_arith_val(&ai_end).unwrap();
+                let (ai_start, ai_end) = get_atom_times(core, atoms[i]);
 
                 for j in (i + 1)..atoms.len() {
-                    let atom_j = core.get_atom(atoms[j]).expect("Atom should exist");
-                    let aj_start = get_time(&atom_j, "start");
-                    let aj_end = get_time(&atom_j, "end");
-                    let aj_start_val = smt.get_arith_val(&aj_start).unwrap();
-                    let aj_end_val = smt.get_arith_val(&aj_end).unwrap();
+                    let (aj_start, aj_end) = get_atom_times(core, atoms[j]);
 
-                    if (ai_start_val < aj_end_val) && (aj_start_val < ai_end_val) {
+                    if (ai_start < aj_end) && (aj_start < ai_end) {
                         let a = min(atoms[i], atoms[j]);
                         let b = max(atoms[i], atoms[j]);
                         pending_overlaps.push((a, b));
@@ -203,15 +196,22 @@ impl FlawExtractor for StateVariable {
                 flaws.push(flaw_id);
             } else {
                 let mut state = core.planner_state.borrow_mut();
+                let mut causes = Vec::new();
 
                 let a_f = *state.graph.atom_to_flaw.get(&a).expect("Atom A missing flaw");
-                let a_r = state.graph.get_flaw(a_f).resolvers()[0];
+                let a_f = state.graph.get_flaw(a_f);
+                if let Some(cause) = a_f.causes().first() {
+                    causes.push(*cause);
+                }
 
                 let b_f = *state.graph.atom_to_flaw.get(&b).expect("Atom B missing flaw");
-                let b_r = state.graph.get_flaw(b_f).resolvers()[0];
+                let b_f = state.graph.get_flaw(b_f);
+                if let Some(cause) = b_f.causes().first() {
+                    causes.push(*cause);
+                }
 
                 let phi = core.smt.borrow_mut().new_lit();
-                let flaw_id = state.graph.add_flaw(Box::new(Peak::new(phi, None, vec![a_r, b_r], vec![a, b])));
+                let flaw_id = state.graph.add_flaw(Box::new(Peak::new(phi, None, causes, vec![a, b])));
 
                 active_overlaps.insert((a, b), flaw_id);
                 flaws.push(flaw_id);
@@ -220,6 +220,88 @@ impl FlawExtractor for StateVariable {
 
         flaws
     }
+
+    fn to_json(&self, core: &SolverState) -> Value {
+        let mut json = json!({});
+        let atoms_by_instance = self.atoms_by_instance(core);
+
+        for instance_id in self.instances.borrow().iter() {
+            if let Some(atoms) = atoms_by_instance.get(instance_id) {
+                let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+                let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+                let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+
+                for &atom_id in atoms {
+                    let (start, end) = get_atom_times(core, atom_id);
+
+                    starting_atoms.entry(start.clone()).or_default().push(atom_id);
+                    ending_atoms.entry(end.clone()).or_default().push(atom_id);
+
+                    pulses.insert(start);
+                    pulses.insert(end);
+                }
+
+                let mut intervals = Vec::new();
+                let mut active_atoms: HashSet<AtomId> = HashSet::new();
+
+                let pulses_vec: Vec<_> = pulses.into_iter().collect();
+
+                for i in 0..pulses_vec.len().saturating_sub(1) {
+                    let current_pulse = &pulses_vec[i];
+                    let next_pulse = &pulses_vec[i + 1];
+
+                    if let Some(ending) = ending_atoms.get(current_pulse) {
+                        for atom_id in ending {
+                            active_atoms.remove(atom_id);
+                        }
+                    }
+
+                    if let Some(starting) = starting_atoms.get(current_pulse) {
+                        for atom_id in starting {
+                            active_atoms.insert(*atom_id);
+                        }
+                    }
+
+                    intervals.push(json!({
+                        "start": current_pulse.to_string(),
+                        "end": next_pulse.to_string(),
+                        "atoms": &active_atoms.iter().map(|atom_id| atom_id.to_string()).collect::<Vec<_>>(),
+                    }));
+                }
+
+                json[instance_id.to_string()] = json!({
+                    "type": "StateVariable",
+                    "intervals": intervals,
+                })
+            } else {
+                json[instance_id.to_string()] = json!({
+                    "type": "StateVariable",
+                    "intervals": [],
+                })
+            }
+        }
+
+        json
+    }
+}
+
+fn get_atom_times(core: &SolverState, atom_id: AtomId) -> (InfRational, InfRational) {
+    let atom = core.get_atom(atom_id).expect("Atom should exist");
+    let smt = core.smt.borrow();
+
+    let start_time = match atom.get("start") {
+        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+        _ => unreachable!("Atom should have a 'start' field"),
+    };
+    let end_time = match atom.get("end") {
+        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+        _ => unreachable!("Atom should have an 'end' field"),
+    };
+
+    let start_val = smt.get_arith_val(&start_time).expect("Start time should have a value");
+    let end_val = smt.get_arith_val(&end_time).expect("End time should have a value");
+
+    (start_val, end_val)
 }
 
 struct Peak {

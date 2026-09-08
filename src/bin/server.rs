@@ -184,6 +184,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 });
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
+                            SolverEvent::StateUpdate { json } => {
+                                let mut msg = json.clone();
+                                msg["msg_type"] = "state-update".into();
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
                         };
                         if send_result.is_err() {
                             break;

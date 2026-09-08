@@ -100,10 +100,12 @@ impl SolverState {
         info!("Solving problem...");
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
+            let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
             match prop_result {
                 Ok(()) => {
                     self.sync_agenda();
                     self.build_graph()?;
+                    let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
                     self.extract_flaws();
 
                     if let Some(flaw_id) = self.select_flaw() {
@@ -391,7 +393,17 @@ impl SolverState {
     }
 
     fn to_json(&self) -> Value {
-        json!({"flaws": [], "resolvers": []})
+        let mut timelines_map = serde_json::Map::new();
+        let extractors = self.planner_state.borrow().extractors.clone();
+        for extractor in extractors {
+            let extractor_json = extractor.to_json(self);
+            if let Value::Object(map) = extractor_json {
+                timelines_map.extend(map);
+            }
+        }
+        json!({
+            "timelines": timelines_map
+        })
     }
 }
 
@@ -667,6 +679,7 @@ pub enum SolverEvent {
     ResolverStatusUpdate { resolver_id: ResolverId, status: Option<bool> },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
+    StateUpdate { json: Value },
 }
 
 #[derive(Clone)]
