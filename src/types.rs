@@ -152,11 +152,10 @@ impl FlawExtractor for StateVariable {
                             atoms_by_instance.entry(sv).or_default().push(atom.id());
                         }
                         Some(Slot::Primitive(var)) => {
-                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>() {
-                                if let Some(sv) = smt.get_enum_val(&enum_var.var) {
+                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>()
+                                && let Some(sv) = smt.get_enum_val(&enum_var.var) {
                                     atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
                                 }
-                            }
                         }
                         _ => unreachable!("Atom should have a 'tau' field"),
                     }
