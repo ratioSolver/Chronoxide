@@ -5,7 +5,7 @@ use crate::{
 };
 use riddle::{
     core::Core,
-    env::{Atom, AtomId, Env, ObjectId, Slot},
+    env::{AtomId, Env, ObjectId, Slot},
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
