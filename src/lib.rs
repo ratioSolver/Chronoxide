@@ -104,6 +104,7 @@ impl SolverState {
                 Ok(()) => {
                     self.sync_agenda();
                     self.build_graph()?;
+                    self.extract_flaws();
 
                     if let Some(flaw_id) = self.select_flaw() {
                         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flaw_id)));
@@ -242,6 +243,20 @@ impl SolverState {
         }
 
         planner.notified_len = current_trail_len;
+    }
+
+    fn extract_flaws(&self) {
+        let extractors = self.planner_state.borrow().extractors.clone();
+        for extractor in extractors {
+            let new_flaws = extractor.extract_flaws(self);
+
+            if !new_flaws.is_empty() {
+                let mut planner = self.planner_state.borrow_mut();
+                for flaw_id in new_flaws {
+                    planner.agenda.insert(flaw_id);
+                }
+            }
+        }
     }
 
     fn cancel_until(&self, level: usize) {

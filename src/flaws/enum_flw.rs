@@ -109,13 +109,12 @@ struct EnumResolver {
     val: i32,
     rho: Lit,
     status: Option<bool>,
-    sub_flaws: Vec<FlawId>,
 }
 
 impl EnumResolver {
     fn new(flaw: FlawId, val: i32, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create an EnumResolver with status Some(false)");
-        Self { id: 0, flaw, val, rho, status, sub_flaws: Vec::new() }
+        Self { id: 0, flaw, val, rho, status }
     }
 }
 
@@ -146,7 +145,7 @@ impl Resolver for EnumResolver {
     }
 
     fn sub_flaws(&self) -> &[FlawId] {
-        &self.sub_flaws
+        &[]
     }
 
     fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {

@@ -1,16 +1,20 @@
 use crate::{
-    SolverState,
-    graph::{Flaw, FlawId},
+    SolverError, SolverState,
+    graph::{Flaw, FlawId, Resolver, ResolverId},
     objects::{ArithVar, EnumVar},
 };
 use riddle::{
     core::Core,
-    env::{AtomId, Env, ObjectId, Slot},
+    env::{Atom, AtomId, Env, ObjectId, Slot},
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
+use semitone::Lit;
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
+    cmp::max,
+    cmp::min,
     collections::{HashMap, HashSet},
     rc::{Rc, Weak},
 };
@@ -23,6 +27,7 @@ pub struct StateVariable {
     scope: Rc<CommonScope>,
     constructors: RefCell<Vec<Rc<Constructor>>>,
     instances: RefCell<Vec<ObjectId>>,
+    active_overlaps: RefCell<HashMap<(AtomId, AtomId), FlawId>>,
 }
 
 impl StateVariable {
@@ -31,6 +36,7 @@ impl StateVariable {
             scope: Rc::new(CommonScope::new(core.clone(), Some(core))),
             constructors: RefCell::new(Vec::new()),
             instances: RefCell::new(Vec::new()),
+            active_overlaps: RefCell::new(HashMap::new()),
         });
         sv.constructors.borrow_mut().push(Rc::new(Constructor::new(Rc::downgrade(&sv) as _, ConstructorDef { args: Vec::new(), init: Vec::new(), statements: Vec::new() })));
         sv
@@ -152,48 +158,241 @@ impl FlawExtractor for StateVariable {
                                 }
                             }
                         }
-                        _ => unreachable!("Expected 'tau' to be an ObjectRef or Primitive EnumVar"),
+                        _ => unreachable!("Atom should have a 'tau' field"),
+                    }
+                }
+            }
+        }
+        drop(smt);
+
+        let get_time = |atom: &Rc<Atom>, field: &str| match atom.get(field) {
+            Some(Slot::Primitive(v)) => v.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).unwrap(),
+            _ => unreachable!("Atom should have a '{}' field", field),
+        };
+
+        let mut pending_overlaps = Vec::new();
+        let smt = core.smt.borrow();
+        for (_instance_id, atoms) in atoms_by_instance {
+            for i in 0..atoms.len() {
+                let atom_i = core.get_atom(atoms[i]).expect("Atom should exist");
+                let ai_start = get_time(&atom_i, "start");
+                let ai_end = get_time(&atom_i, "end");
+                let ai_start_val = smt.get_arith_val(&ai_start).unwrap();
+                let ai_end_val = smt.get_arith_val(&ai_end).unwrap();
+
+                for j in (i + 1)..atoms.len() {
+                    let atom_j = core.get_atom(atoms[j]).expect("Atom should exist");
+                    let aj_start = get_time(&atom_j, "start");
+                    let aj_end = get_time(&atom_j, "end");
+                    let aj_start_val = smt.get_arith_val(&aj_start).unwrap();
+                    let aj_end_val = smt.get_arith_val(&aj_end).unwrap();
+
+                    if (ai_start_val < aj_end_val) && (aj_start_val < ai_end_val) {
+                        let a = min(atoms[i], atoms[j]);
+                        let b = max(atoms[i], atoms[j]);
+                        pending_overlaps.push((a, b));
                     }
                 }
             }
         }
 
-        for (_instance_id, atoms) in atoms_by_instance {
-            for i in 0..atoms.len() {
-                for j in (i + 1)..atoms.len() {
-                    let atom_i = core.get_atom(atoms[i]).expect("Atom should exist");
-                    let atom_j = core.get_atom(atoms[j]).expect("Atom should exist");
-                    let ai_start = match atom_i.get("start") {
-                        Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
-                        _ => unreachable!("Atom should have a 'start' field"),
-                    };
-                    let ai_end = match atom_i.get("end") {
-                        Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
-                        _ => unreachable!("Atom should have an 'end' field"),
-                    };
-                    let aj_start = match atom_j.get("start") {
-                        Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
-                        _ => unreachable!("Atom should have a 'start' field"),
-                    };
-                    let aj_end = match atom_j.get("end") {
-                        Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
-                        _ => unreachable!("Atom should have an 'end' field"),
-                    };
-                    let ai_start_val = core.smt.borrow().get_arith_val(&ai_start).expect("Atom should have a 'start' field");
-                    let ai_end_val = core.smt.borrow().get_arith_val(&ai_end).expect("Atom should have an 'end' field");
-                    let aj_start_val = core.smt.borrow().get_arith_val(&aj_start).expect("Atom should have a 'start' field");
-                    let aj_end_val = core.smt.borrow().get_arith_val(&aj_end).expect("Atom should have an 'end' field");
-                    if (ai_start_val < aj_end_val) && (aj_start_val < ai_end_val) {}
-                }
+        let mut flaws = Vec::new();
+        let mut active_overlaps = self.active_overlaps.borrow_mut();
+
+        for (a, b) in pending_overlaps {
+            if let Some(&flaw_id) = active_overlaps.get(&(a, b)) {
+                flaws.push(flaw_id);
+            } else {
+                let mut state = core.planner_state.borrow_mut();
+
+                let a_f = *state.graph.atom_to_flaw.get(&a).expect("Atom A missing flaw");
+                let a_r = state.graph.get_flaw(a_f).resolvers()[0];
+
+                let b_f = *state.graph.atom_to_flaw.get(&b).expect("Atom B missing flaw");
+                let b_r = state.graph.get_flaw(b_f).resolvers()[0];
+
+                let phi = core.smt.borrow_mut().new_lit();
+                let flaw_id = state.graph.add_flaw(Box::new(Peak::new(phi, None, vec![a_r, b_r], vec![a, b])));
+
+                active_overlaps.insert((a, b), flaw_id);
+                flaws.push(flaw_id);
             }
         }
 
-        let mut flaws = Vec::new();
         flaws
     }
 }
 
 struct Peak {
-    object_id: ObjectId,
+    id: FlawId,
+    phi: Lit,
+    status: Option<bool>,
+
+    causes: Vec<ResolverId>,
+    resolvers: Vec<ResolverId>,
+
+    estimated_cost: f64,
+    is_expanded: bool,
+
     atoms: Vec<AtomId>,
+}
+
+impl Peak {
+    fn new(phi: Lit, status: Option<bool>, causes: Vec<ResolverId>, atoms: Vec<AtomId>) -> Self {
+        Self {
+            id: 0,
+            phi,
+            status,
+            causes,
+            resolvers: Vec::new(),
+            estimated_cost: f64::INFINITY,
+            is_expanded: false,
+            atoms,
+        }
+    }
+}
+
+impl Flaw for Peak {
+    fn id(&self) -> FlawId {
+        self.id
+    }
+    fn set_id(&mut self, id: FlawId) {
+        self.id = id;
+    }
+
+    fn phi(&self) -> Lit {
+        self.phi
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
+    fn causes(&self) -> &[ResolverId] {
+        &self.causes
+    }
+
+    fn is_expanded(&self) -> bool {
+        self.is_expanded
+    }
+    fn expand(&mut self, core: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+        self.is_expanded = true;
+
+        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.atoms.len() * (self.atoms.len() - 1) / 2);
+        for i in 0..self.atoms.len() {
+            for j in (i + 1)..self.atoms.len() {
+                let atom_i = core.get_atom(self.atoms[i]).expect("Atom should exist");
+                let atom_j = core.get_atom(self.atoms[j]).expect("Atom should exist");
+                let ai_start = match atom_i.get("start") {
+                    Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+                    _ => unreachable!("Atom should have a 'start' field"),
+                };
+                let ai_end = match atom_i.get("end") {
+                    Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+                    _ => unreachable!("Atom should have an 'end' field"),
+                };
+                let aj_start = match atom_j.get("start") {
+                    Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+                    _ => unreachable!("Atom should have a 'start' field"),
+                };
+                let aj_end = match atom_j.get("end") {
+                    Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+                    _ => unreachable!("Atom should have an 'end' field"),
+                };
+                let ai_before_aj = core.smt.borrow_mut().track_expr(ai_end.lt(&aj_start));
+                let ai_before_aj_status = core.smt.borrow().get_lit_val(ai_before_aj);
+                if ai_before_aj_status != Some(false) {
+                    resolvers.push(Box::new(Order::new(self.id, self.atoms[i], self.atoms[j], ai_before_aj, ai_before_aj_status)));
+                }
+                let aj_before_ai = core.smt.borrow_mut().track_expr(aj_end.lt(&ai_start));
+                let aj_before_ai_status = core.smt.borrow().get_lit_val(aj_before_ai);
+                if aj_before_ai_status != Some(false) {
+                    resolvers.push(Box::new(Order::new(self.id, self.atoms[j], self.atoms[i], aj_before_ai, aj_before_ai_status)));
+                }
+            }
+        }
+
+        Ok(resolvers)
+    }
+
+    fn resolvers(&self) -> &[ResolverId] {
+        &self.resolvers
+    }
+    fn add_resolver(&mut self, id: ResolverId) {
+        self.resolvers.push(id);
+    }
+
+    fn estimated_cost(&self) -> f64 {
+        self.estimated_cost
+    }
+    fn set_estimated_cost(&mut self, cost: f64) {
+        self.estimated_cost = cost;
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "peak",
+        })
+    }
+}
+
+struct Order {
+    id: ResolverId,
+    flaw: FlawId,
+    atm0: AtomId,
+    atm1: AtomId,
+    rho: Lit,
+    status: Option<bool>,
+}
+
+impl Order {
+    fn new(flaw: FlawId, atm0: AtomId, atm1: AtomId, rho: Lit, status: Option<bool>) -> Self {
+        assert!(status != Some(false), "Cannot create an Order with status Some(false)");
+        Self { id: 0, flaw, atm0, atm1, rho, status }
+    }
+}
+
+impl Resolver for Order {
+    fn id(&self) -> ResolverId {
+        self.id
+    }
+    fn set_id(&mut self, id: ResolverId) {
+        self.id = id;
+    }
+
+    fn rho(&self) -> Lit {
+        self.rho
+    }
+    fn status(&self) -> Option<bool> {
+        self.status
+    }
+    fn set_status(&mut self, status: Option<bool>) {
+        self.status = status;
+    }
+
+    fn flaw(&self) -> FlawId {
+        self.flaw
+    }
+
+    fn intrinsic_cost(&self) -> f64 {
+        1f64
+    }
+
+    fn sub_flaws(&self) -> &[FlawId] {
+        &[]
+    }
+
+    fn apply(&mut self, _state: &SolverState) -> Result<(), SolverError> {
+        Ok(())
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "kind": "order",
+            "atm0": *self.atm0,
+            "atm1": *self.atm1,
+        })
+    }
 }

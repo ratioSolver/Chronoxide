@@ -23,7 +23,7 @@ required-features = ["server"]
 [dependencies]
 rug = "1.30.0"
 semitone = "0.0.17"
-riddle-lang = "0.2.6"
+riddle-lang = "0.2.9"
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.1", features = ["fs"], optional = true }
 tokio = { version = "1.53.1", features = ["full"] }
