@@ -7,7 +7,7 @@ use crate::{
     flaws::{atom_flw::AtomFlaw, bool_flw::BoolFlaw, clause_flw::ClauseFlaw, disjunction_flw::DisjunctionFlaw, enum_flw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
-    types::StateVariable,
+    types::{FlawExtractor, StateVariable},
 };
 use riddle::{
     RiddleError,
@@ -53,7 +53,8 @@ struct PlannerState {
     pending_sub_flaws: Vec<FlawId>,
     graph: Graph,
     agenda: HashSet<FlawId>,
-    atom_sigma: Vec<usize>,
+    atom_sigma: Vec<ast::BoolExpr>,
+    extractors: Vec<Rc<dyn FlawExtractor>>,
     notified_len: usize,
 }
 
@@ -72,11 +73,14 @@ impl SolverState {
                 graph: Graph::new(tx_event.clone()),
                 agenda: HashSet::new(),
                 atom_sigma: Vec::new(),
+                extractors: Vec::new(),
                 notified_len: 0,
             }),
             tx_event,
         });
-        slv.core.add_type(StateVariable::new(Rc::downgrade(&slv) as Weak<dyn Core>));
+        let sv = StateVariable::new(Rc::downgrade(&slv) as Weak<dyn Core>);
+        slv.core.add_type(sv.clone());
+        slv.planner_state.borrow_mut().extractors.push(sv);
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
         }
@@ -366,6 +370,11 @@ impl SolverState {
         }
     }
 
+    fn atom_sigma(&self, atom_id: AtomId) -> Option<ast::BoolExpr> {
+        let planner = self.planner_state.borrow();
+        planner.atom_sigma.get(*atom_id).cloned()
+    }
+
     fn to_json(&self) -> Value {
         json!({"flaws": [], "resolvers": []})
     }
@@ -562,10 +571,7 @@ impl Core for SolverState {
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let atm = self.core.new_atom(predicate, fact, args);
-        let ast::BoolExpr::Var(sigma) = self.smt.borrow_mut().new_bool() else {
-            unreachable!("Expected a BoolExpr::Var for atom sigma");
-        };
-        self.planner_state.borrow_mut().atom_sigma.push(sigma);
+        self.planner_state.borrow_mut().atom_sigma.push(self.smt.borrow_mut().new_bool());
         let (phi, c_res, status) = self.get_ctx();
         self.add_flaw(Box::new(AtomFlaw::new(phi, status, c_res, self.get_atom(atm).expect("Atom should exist").clone())));
         atm

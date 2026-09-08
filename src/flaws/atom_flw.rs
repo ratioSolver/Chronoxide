@@ -194,10 +194,10 @@ impl Resolver for RuleResolver {
     }
 
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
-        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom.id()).copied().ok_or(SolverError::Inconsistent)?;
+        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom.id()).cloned().ok_or(SolverError::Inconsistent)?;
 
         let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
-        if !state.smt.borrow_mut().assert(ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::Var(atom_sigma)])) {
+        if !state.smt.borrow_mut().assert(ast::BoolExpr::Or(vec![!rho_xpr, atom_sigma])) {
             return Err(SolverError::Inconsistent);
         }
         self.predicate.clone().call(self.atom.clone()).map_err(|e| SolverError::RuntimeError(format!("Error applying rule: {:?}", e)))?;
@@ -257,10 +257,10 @@ impl Resolver for FactResolver {
     }
 
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
-        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom_id).copied().ok_or(SolverError::Inconsistent)?;
+        let atom_sigma = state.planner_state.borrow().atom_sigma.get(*self.atom_id).cloned().ok_or(SolverError::Inconsistent)?;
 
         let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
-        if !state.smt.borrow_mut().assert(ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::Var(atom_sigma)])) {
+        if !state.smt.borrow_mut().assert(ast::BoolExpr::Or(vec![!rho_xpr, atom_sigma])) {
             return Err(SolverError::Inconsistent);
         }
         Ok(())
@@ -330,12 +330,12 @@ impl Resolver for UnificationResolver {
     }
 
     fn apply(&mut self, state: &SolverState) -> Result<(), SolverError> {
-        let source_sigma = state.planner_state.borrow().atom_sigma.get(*self.source_atom_id).copied().ok_or(SolverError::Inconsistent)?;
-        let target_sigma = state.planner_state.borrow().atom_sigma.get(*self.target_atom_id).copied().ok_or(SolverError::Inconsistent)?;
+        let source_sigma = state.planner_state.borrow().atom_sigma.get(*self.source_atom_id).cloned().ok_or(SolverError::Inconsistent)?;
+        let target_sigma = state.planner_state.borrow().atom_sigma.get(*self.target_atom_id).cloned().ok_or(SolverError::Inconsistent)?;
 
         let mut conjunction = self.unification_constraints.clone();
-        conjunction.push(!ast::BoolExpr::Var(source_sigma));
-        conjunction.push(ast::BoolExpr::Var(target_sigma));
+        conjunction.push(!source_sigma);
+        conjunction.push(target_sigma);
 
         let rho_xpr = if self.rho.sign() { !ast::BoolExpr::Var(self.rho.var()) } else { ast::BoolExpr::Var(self.rho.var()) };
         if !state.smt.borrow_mut().assert(ast::BoolExpr::Or(vec![!rho_xpr, ast::BoolExpr::And(conjunction)])) {

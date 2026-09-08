@@ -1,13 +1,23 @@
+use crate::{
+    SolverState,
+    graph::{Flaw, FlawId},
+    objects::{ArithVar, EnumVar},
+};
 use riddle::{
     core::Core,
-    env::{ObjectId, Slot},
+    env::{AtomId, Env, ObjectId, Slot},
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
 use std::{
     cell::RefCell,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
 };
+
+pub trait FlawExtractor {
+    fn extract_flaws(&self, core: &SolverState) -> Vec<FlawId>;
+}
 
 pub struct StateVariable {
     scope: Rc<CommonScope>,
@@ -105,4 +115,85 @@ impl Class for StateVariable {
     fn add_instance(&self, instance: ObjectId) {
         self.instances.borrow_mut().push(instance);
     }
+}
+
+impl FlawExtractor for StateVariable {
+    fn extract_flaws(&self, core: &SolverState) -> Vec<FlawId> {
+        let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
+        let mut processed_classes = HashSet::new();
+
+        let smt = core.smt.borrow();
+        for instance_id in self.instances.borrow().iter() {
+            let Some(instance) = core.get_object(*instance_id) else {
+                continue;
+            };
+            if !processed_classes.insert(instance.class().full_name().to_string()) {
+                continue;
+            }
+            for pred in instance.class().predicates().iter() {
+                for atom_id in pred.atoms().iter() {
+                    let Some(sigma) = core.atom_sigma(*atom_id) else {
+                        continue;
+                    };
+                    if smt.get_bool_val(&sigma) != Some(true) {
+                        continue;
+                    }
+                    let Some(atom) = core.get_atom(*atom_id) else {
+                        continue;
+                    };
+                    match atom.get("tau") {
+                        Some(Slot::ObjectRef(sv)) => {
+                            atoms_by_instance.entry(sv).or_default().push(atom.id());
+                        }
+                        Some(Slot::Primitive(var)) => {
+                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>() {
+                                if let Some(sv) = smt.get_enum_val(&enum_var.var) {
+                                    atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
+                                }
+                            }
+                        }
+                        _ => unreachable!("Expected 'tau' to be an ObjectRef or Primitive EnumVar"),
+                    }
+                }
+            }
+        }
+
+        for (_instance_id, atoms) in atoms_by_instance {
+            for i in 0..atoms.len() {
+                for j in (i + 1)..atoms.len() {
+                    let atom_i = core.get_atom(atoms[i]).expect("Atom should exist");
+                    let atom_j = core.get_atom(atoms[j]).expect("Atom should exist");
+                    let ai_start = match atom_i.get("start") {
+                        Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+                        _ => unreachable!("Atom should have a 'start' field"),
+                    };
+                    let ai_end = match atom_i.get("end") {
+                        Some(Slot::Primitive(var_i)) => var_i.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+                        _ => unreachable!("Atom should have an 'end' field"),
+                    };
+                    let aj_start = match atom_j.get("start") {
+                        Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+                        _ => unreachable!("Atom should have a 'start' field"),
+                    };
+                    let aj_end = match atom_j.get("end") {
+                        Some(Slot::Primitive(var_j)) => var_j.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+                        _ => unreachable!("Atom should have an 'end' field"),
+                    };
+                    let ai_start_val = core.smt.borrow().get_arith_val(&ai_start).expect("Atom should have a 'start' field");
+                    let ai_end_val = core.smt.borrow().get_arith_val(&ai_end).expect("Atom should have an 'end' field");
+                    let aj_start_val = core.smt.borrow().get_arith_val(&aj_start).expect("Atom should have a 'start' field");
+                    let aj_end_val = core.smt.borrow().get_arith_val(&aj_end).expect("Atom should have an 'end' field");
+                    if (ai_start_val < aj_end_val) && (aj_start_val < ai_end_val) {}
+                }
+            }
+        }
+
+        let mut flaws = Vec::new();
+        flaws
+    }
+}
+
+struct Peak {
+    object_id: ObjectId,
+    atoms: Vec<AtomId>,
 }
