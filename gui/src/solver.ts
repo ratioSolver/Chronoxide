@@ -11,6 +11,7 @@ export namespace solver {
     private readonly resolvers: Map<string, Resolver> = new Map();
     private current_flaw: Flaw | null = null;
     private current_resolver: Resolver | null = null;
+    private timelines: Map<string, Timeline> = new Map();
     private readonly connection_listeners: Set<ConnectionListener> = new Set();
     private readonly listeners: Set<SolverListener> = new Set();
 
@@ -110,6 +111,12 @@ export namespace solver {
             for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
             break;
           }
+          case 'state-update': {
+            for (const [id, timeline] of Object.entries(msg.timelines))
+              this.timelines.set(id, timeline);
+            for (const listener of this.listeners) listener.timelines_update(this.timelines);
+            break;
+          }
           default:
             console.warn('Received unknown message type from solver:', msg);
         }
@@ -123,6 +130,8 @@ export namespace solver {
 
     get_current_flaw(): Flaw | null { return this.current_flaw; }
     get_current_resolver(): Resolver | null { return this.current_resolver; }
+
+    get_timelines(): Map<string, Timeline> { return this.timelines; }
 
     add_connection_listener(listener: ConnectionListener) { this.connection_listeners.add(listener); }
     remove_connection_listener(listener: ConnectionListener) { this.connection_listeners.delete(listener); }
@@ -147,6 +156,7 @@ export namespace solver {
     resolver_status_update(resolver: Resolver): void;
     current_resolver(resolver: Resolver | null): void;
     new_causal_link(flaw: Flaw, resolver: Resolver): void;
+    timelines_update(timelines: Map<string, Timeline>): void;
   }
 
   export class Flaw {
@@ -218,7 +228,10 @@ export namespace solver {
     _set_status(status: Status) { this.status = status; }
   }
 
-  type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage> };
+  export type StateVariableInterval = { start: string; end: string; atoms: string[]; };
+  export type StateVariableTimeline = { type: 'StateVariable'; intervals: StateVariableInterval[]; };
+  export type Timeline = StateVariableTimeline;
+  type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage>, timelines: Record<string, Timeline> };
   type PartialFlawMessage = { phi: string, causes?: string[], supports?: string[], cost?: number, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
   type PartialResolverMessage = { rho: string, flaw_id: string, sub_flaws?: string[], intrinsic_cost: number, status: Status };
@@ -235,4 +248,5 @@ export namespace solver {
     | ({ msg_type: 'resolver-status-update' } & { id: string, status: Status })
     | ({ msg_type: 'current-resolver' } & { id: string | undefined })
     | ({ msg_type: 'new-causal-link' } & { flaw_id: string, resolver_id: string })
+    | ({ msg_type: 'state-update' } & SolverMessage);
 }

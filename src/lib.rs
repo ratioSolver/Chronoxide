@@ -100,17 +100,21 @@ impl SolverState {
         info!("Solving problem...");
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
+            #[cfg(feature = "server")]
             let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
             match prop_result {
                 Ok(()) => {
                     self.sync_agenda();
                     self.build_graph()?;
+                    #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
                     self.extract_flaws();
 
                     if let Some(flaw_id) = self.select_flaw() {
+                        #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flaw_id)));
                         let resolver_id = self.select_resolver(flaw_id)?;
+                        #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver_id)));
                         let rho = {
                             let planner = self.planner_state.borrow();
@@ -118,7 +122,9 @@ impl SolverState {
                         };
                         self.smt.borrow_mut().decide(rho);
                     } else {
+                        #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
+                        #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
                         let check_result = self.smt.borrow_mut().check_ints();
                         match check_result {
@@ -199,6 +205,7 @@ impl SolverState {
         target_flaw.add_support(unif_resolver_id);
 
         trace!("Causal link created: Resolver r{} supports Flaw f{}", unif_resolver_id, target_flaw_id);
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: target_flaw_id, resolver_id: unif_resolver_id });
         Ok(())
     }
@@ -320,6 +327,7 @@ impl SolverState {
             if let Some(flaw_id) = next_flaw_id {
                 let mut flaw = {
                     let mut planner = self.planner_state.borrow_mut();
+                    #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flaw_id)));
                     planner.graph.take_flaw(flaw_id)
                 };
@@ -360,6 +368,7 @@ impl SolverState {
                         planner.ctx = Some((resolver_id, rho));
                         planner.graph.take_resolver(resolver_id)
                     };
+                    #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver.id())));
                     resolver.apply(self)?;
                     {
@@ -370,11 +379,13 @@ impl SolverState {
                         planner.graph.return_resolver(resolver.id(), resolver);
                         planner.ctx = None;
                     }
+                    #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
                 }
                 {
                     let mut planner = self.planner_state.borrow_mut();
                     planner.graph.return_flaw(flaw_id, flaw);
+                    #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
                 }
 
@@ -402,6 +413,8 @@ impl SolverState {
             }
         }
         json!({
+            "flaws": [],
+            "resolvers": [],
             "timelines": timelines_map
         })
     }

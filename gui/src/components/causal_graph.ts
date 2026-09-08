@@ -103,7 +103,8 @@ export function causal_graph(slv: solver.Solver): VNode {
     new_resolver: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     resolver_status_update: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     current_resolver: (_resolver: solver.Resolver | null) => { if (chart) chart.setOption(get_option()); },
-    new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); }
+    new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
+    timelines_update: (_timelines: Map<string, solver.Timeline>) => { }
   };
 
   let resize_handler: () => void;

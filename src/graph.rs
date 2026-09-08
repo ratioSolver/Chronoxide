@@ -45,6 +45,7 @@ impl Graph {
         flaw.set_id(id);
 
         trace!("Adding flaw: f{} ({})", flaw.id(), flaw.phi());
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id: id,
             phi: flaw.phi().to_string(),
@@ -73,6 +74,7 @@ impl Graph {
         );
         let flaw = self.get_flaw_mut(flaw_id);
         flaw.set_status(status);
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id, status });
     }
 
@@ -80,6 +82,7 @@ impl Graph {
         let flaw = self.get_flaw_mut(flaw_id);
         trace!("Flaw f{} cost {} -> {}", flaw_id, flaw.estimated_cost(), cost);
         flaw.set_estimated_cost(cost);
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost });
     }
 
@@ -104,6 +107,7 @@ impl Graph {
         resolver.set_id(id);
 
         trace!("Adding resolver: r{} ({}) for flaw f{}", resolver.id(), resolver.rho(), resolver.flaw());
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: id,
             flaw_id: resolver.flaw(),
@@ -131,6 +135,7 @@ impl Graph {
         );
         let resolver = self.get_resolver_mut(resolver_id);
         resolver.set_status(status);
+        #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id, status });
     }
 
