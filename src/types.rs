@@ -1,6 +1,7 @@
 use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
+    inf_rat_to_json,
     objects::{ArithVar, EnumVar},
 };
 use riddle::{
@@ -9,7 +10,7 @@ use riddle::{
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::{Lit, rational::InfRational};
+use semitone::{Lit, ast, rational::InfRational};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -17,6 +18,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::{Rc, Weak},
 };
+use tracing::debug;
 
 pub trait FlawExtractor {
     fn extract_flaws(&self, core: &SolverState) -> Vec<FlawId>;
@@ -197,21 +199,32 @@ impl FlawExtractor for StateVariable {
             } else {
                 let mut state = core.planner_state.borrow_mut();
                 let mut causes = Vec::new();
+                let mut and_args = Vec::with_capacity(2);
 
                 let a_f = *state.graph.atom_to_flaw.get(&a).expect("Atom A missing flaw");
                 let a_f = state.graph.get_flaw(a_f);
                 if let Some(cause) = a_f.causes().first() {
                     causes.push(*cause);
+                    let rho = state.graph.get_resolver(*cause).rho();
+                    and_args.push(if rho.sign() { ast::BoolExpr::Not(Box::new(ast::BoolExpr::Var(rho.var()))) } else { ast::BoolExpr::Var(rho.var()) });
                 }
 
                 let b_f = *state.graph.atom_to_flaw.get(&b).expect("Atom B missing flaw");
                 let b_f = state.graph.get_flaw(b_f);
                 if let Some(cause) = b_f.causes().first() {
                     causes.push(*cause);
+                    let rho = state.graph.get_resolver(*cause).rho();
+                    and_args.push(if rho.sign() { ast::BoolExpr::Not(Box::new(ast::BoolExpr::Var(rho.var()))) } else { ast::BoolExpr::Var(rho.var()) });
                 }
 
-                let phi = core.smt.borrow_mut().new_lit();
-                let flaw_id = state.graph.add_flaw(Box::new(Peak::new(phi, None, causes, vec![a, b])));
+                let phi = match and_args.len() {
+                    0 => ast::BoolExpr::True,
+                    1 => and_args.pop().unwrap(),
+                    _ => ast::BoolExpr::And(and_args),
+                };
+                let phi = core.smt.borrow_mut().track_expr(phi);
+                let status = core.smt.borrow().get_lit_val(phi);
+                let flaw_id = state.graph.add_flaw(Box::new(Peak::new(phi, status, causes, vec![a, b])));
 
                 active_overlaps.insert((a, b), flaw_id);
                 flaws.push(flaw_id);
@@ -240,6 +253,9 @@ impl FlawExtractor for StateVariable {
                     pulses.insert(start);
                     pulses.insert(end);
                 }
+                debug!("Starting atoms: {:?}", starting_atoms.iter().map(|(k, v)| (k.to_string(), v.iter().map(|id| id.to_string()).collect::<Vec<_>>())).collect::<BTreeMap<_, _>>());
+                debug!("Ending atoms: {:?}", ending_atoms.iter().map(|(k, v)| (k.to_string(), v.iter().map(|id| id.to_string()).collect::<Vec<_>>())).collect::<BTreeMap<_, _>>());
+                debug!("Pulses: {:?}", pulses.iter().map(|p| p.to_string()).collect::<Vec<_>>());
 
                 let mut intervals = Vec::new();
                 let mut active_atoms: HashSet<AtomId> = HashSet::new();
@@ -250,21 +266,21 @@ impl FlawExtractor for StateVariable {
                     let current_pulse = &pulses_vec[i];
                     let next_pulse = &pulses_vec[i + 1];
 
-                    if let Some(ending) = ending_atoms.get(current_pulse) {
-                        for atom_id in ending {
-                            active_atoms.remove(atom_id);
-                        }
-                    }
-
                     if let Some(starting) = starting_atoms.get(current_pulse) {
                         for atom_id in starting {
                             active_atoms.insert(*atom_id);
                         }
                     }
 
+                    if let Some(ending) = ending_atoms.get(current_pulse) {
+                        for atom_id in ending {
+                            active_atoms.remove(atom_id);
+                        }
+                    }
+
                     intervals.push(json!({
-                        "start": current_pulse.to_string(),
-                        "end": next_pulse.to_string(),
+                        "start": inf_rat_to_json(current_pulse),
+                        "end": inf_rat_to_json(next_pulse),
                         "atoms": &active_atoms.iter().map(|atom_id| atom_id.to_string()).collect::<Vec<_>>(),
                     }));
                 }

@@ -15,28 +15,56 @@ export function timelines(slv: solver.Solver): VNode {
     const data: any[] = [];
 
     let yIndex = 0;
-    for (const [objId, timeline] of Object.entries(slv.get_timelines())) {
+    for (const [objId, timeline] of slv.get_timelines()) {
       categories.push(`${objId}`);
 
-      if (timeline.type === 'StateVariable') {
-        for (const interval of timeline.intervals) {
-          const start = parseFloat(interval.start) || 0;
-          const end = interval.end.includes('inf') ? 9999 : parseFloat(interval.end);
+      switch (timeline.type) {
+        case 'StateVariable':
+          for (const interval of timeline.intervals) {
+            const start = interval.start.num / interval.start.den;
+            const end = interval.end.num / interval.end.den;
 
-          data.push({
-            name: `Atomi: ${interval.atoms.join(', ')}`,
-            value: [
-              yIndex,
-              start,
-              end,
-              interval.atoms
-            ],
-            itemStyle: {
-              color: '#5b8ff9',
-              borderWidth: 1,
-              borderColor: '#1e3a8a'
-            }
-          });
+            data.push({
+              name: `Atoms: ${interval.atoms.join(', ')}`,
+              value: [
+                yIndex,
+                start,
+                end,
+                interval.atoms
+              ],
+              itemStyle: {
+                color: '#5b8ff9',
+                borderWidth: 1,
+                borderColor: '#1e3a8a'
+              }
+            });
+          }
+          break;
+        case 'ReusableResource': {
+          const capacity = timeline.capacity.num / timeline.capacity.den;
+          for (const interval of timeline.intervals) {
+            const start = interval.start.num / interval.start.den;
+            const end = interval.end.num / interval.end.den;
+            const amount = interval.amount.num / interval.amount.den;
+
+            const fillRatio = amount / capacity;
+
+            data.push({
+              name: `Amount: ${amount}`,
+              value: [
+                yIndex,
+                start,
+                end,
+                fillRatio
+              ],
+              itemStyle: {
+                color: amount > capacity ? '#ef4444' : '#10b981',
+                borderWidth: 1,
+                borderColor: '#047857'
+              }
+            });
+          }
+          break;
         }
       }
 
@@ -91,7 +119,7 @@ export function timelines(slv: solver.Solver): VNode {
     const rectShape = echarts.graphic.clipRectByRect({
       x: startCoord[0],
       y: startCoord[1] - height / 2,
-      width: Math.max(endCoord[0] - startCoord[0], 2), // Larghezza minima 2px
+      width: Math.max(endCoord[0] - startCoord[0], 2),
       height: height
     }, {
       x: params.coordSys.x,
@@ -104,12 +132,29 @@ export function timelines(slv: solver.Solver): VNode {
       type: 'rect',
       transition: ['shape'],
       shape: rectShape,
-      style: api.style()
+      style: {
+        fill: api.visual('color'),
+        stroke: '#1e3a8a',
+        lineWidth: 1
+      }
     };
   };
 
+  const updateChart = () => {
+    if (!chart) return;
+    const calculatedHeight = Math.max(200, (slv.get_timelines().size * 50) + 100);
+
+    const dom = chart.getDom();
+    if (dom) {
+      dom.style.height = `${calculatedHeight}px`;
+    }
+
+    chart.resize();
+    chart.setOption(get_option(), true);
+  };
+
   const solver_listener: solver.SolverListener = {
-    initialized: () => { },
+    initialized: () => { updateChart(); },
     new_flaw: (_flaw: solver.Flaw) => { },
     flaw_status_update: (_flaw: solver.Flaw) => { },
     flaw_cost_update: (_flaw: solver.Flaw | null) => { },
@@ -118,31 +163,39 @@ export function timelines(slv: solver.Solver): VNode {
     resolver_status_update: (_resolver: solver.Resolver) => { },
     current_resolver: (_resolver: solver.Resolver | null) => { },
     new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { },
-    timelines_update: (_timelines: Map<string, solver.Timeline>) => { if (chart) chart.setOption(get_option()); }
+    timelines_update: (_timelines: Map<string, solver.Timeline>) => { updateChart(); }
   };
 
   let resize_handler: () => void;
 
-  return h('div#timelines.flex-grow-1', {
-    style: { height: '100%', minHeight: '300px' },
-    hook: {
-      insert: (vnode) => {
-        chart = echarts.init(vnode.elm as HTMLDivElement);
-        chart.setOption(get_option());
+  return h('div#timelines-wrapper.flex-grow-1', {
+    style: {
+      height: '100%',
+      overflowY: 'auto',
+      minHeight: '0'
+    }
+  }, [
+    h('div', {
+      hook: {
+        insert: (vnode) => {
+          chart = echarts.init(vnode.elm as HTMLDivElement);
 
-        resize_handler = () => chart?.resize();
-        window.addEventListener('resize', resize_handler);
+          updateChart();
 
-        slv.add_listener(solver_listener);
-      },
-      destroy: () => {
-        window.removeEventListener('resize', resize_handler);
-        slv.remove_listener(solver_listener);
-        if (chart) {
-          chart.dispose();
-          chart = undefined;
+          resize_handler = () => chart?.resize();
+          window.addEventListener('resize', resize_handler);
+
+          slv.add_listener(solver_listener);
+        },
+        destroy: () => {
+          window.removeEventListener('resize', resize_handler);
+          slv.remove_listener(solver_listener);
+          if (chart) {
+            chart.dispose();
+            chart = undefined;
+          }
         }
       }
-    }
-  });
+    })
+  ]);
 }

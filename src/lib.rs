@@ -12,11 +12,14 @@ use crate::{
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
-    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, to_cnf},
+    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
-use semitone::{Lit, SeMiTONE, ast};
+use semitone::{
+    Lit, SeMiTONE, ast,
+    rational::{InfRational, Rational},
+};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -332,15 +335,6 @@ impl SolverState {
                     planner.graph.take_flaw(flaw_id)
                 };
                 assert!(!flaw.is_expanded());
-                let mut or_args = Vec::with_capacity(flaw.causes().len() + 1);
-                for cause_id in flaw.causes() {
-                    or_args.push(!self.planner_state.borrow().graph.get_resolver(*cause_id).rho());
-                }
-                or_args.push(flaw.phi());
-                if self.smt.borrow_mut().add_clause(or_args).is_err() {
-                    return Err(SolverError::Inconsistent);
-                }
-
                 let resolvers = flaw.expand(self)?;
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
                 for resolver in &resolvers {
@@ -404,20 +398,80 @@ impl SolverState {
     }
 
     fn to_json(&self) -> Value {
+        let smt = self.smt.borrow();
+        let mut json = to_json(&smt, self);
+        let mut objects_map = serde_json::Map::new();
+        for object in &self.core.get_objects() {
+            objects_map.insert(object.id().to_string(), to_json(&smt, object.as_ref()));
+        }
+        json.as_object_mut().unwrap().insert("objects".to_string(), Value::Object(objects_map));
+        let mut atoms_map = serde_json::Map::new();
+        for atom in &self.core.get_atoms() {
+            atoms_map.insert(atom.id().to_string(), to_json(&smt, atom.as_ref()));
+        }
+        json.as_object_mut().unwrap().insert("atoms".to_string(), Value::Object(atoms_map));
+        drop(smt);
+
         let mut timelines_map = serde_json::Map::new();
-        let extractors = self.planner_state.borrow().extractors.clone();
-        for extractor in extractors {
+        for extractor in &self.planner_state.borrow().extractors {
             let extractor_json = extractor.to_json(self);
             if let Value::Object(map) = extractor_json {
                 timelines_map.extend(map);
             }
         }
-        json!({
-            "flaws": [],
-            "resolvers": [],
-            "timelines": timelines_map
-        })
+        json.as_object_mut().unwrap().insert("timelines".to_string(), Value::Object(timelines_map));
+        json.as_object_mut().unwrap().insert("flaws".to_string(), Value::Array(vec![]));
+        json.as_object_mut().unwrap().insert("resolvers".to_string(), Value::Array(vec![]));
+
+        json
     }
+}
+
+fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
+    let mut env_json = serde_json::Map::new();
+    for (name, slot) in env.get_slots() {
+        match slot {
+            Slot::Primitive(p) => {
+                if let Some(bool_var) = p.clone().as_any().downcast_ref::<BoolVar>() {
+                    match smt.get_bool_val(&bool_var.lit) {
+                        Some(true) => {
+                            env_json.insert(name, json!(true));
+                        }
+                        Some(false) => {
+                            env_json.insert(name, json!(false));
+                        }
+                        None => {
+                            env_json.insert(name, serde_json::Value::Null);
+                        }
+                    }
+                } else if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+                    let value = smt.get_arith_val(&arith_var.lin).expect("Expected an arithmetic variable to have a value");
+                    env_json.insert(name, inf_rat_to_json(&value));
+                } else if let Some(string_var) = p.clone().as_any().downcast_ref::<StringVar>() {
+                    env_json.insert(name, json!(string_var.value));
+                }
+            }
+            Slot::ObjectRef(obj_id) => {
+                env_json.insert(
+                    name,
+                    json!({
+                        "type": "object_ref",
+                        "id": obj_id.to_string()
+                    }),
+                );
+            }
+            Slot::AtomRef(atm_id) => {
+                env_json.insert(
+                    name,
+                    json!({
+                        "type": "atom_ref",
+                        "id": atm_id.to_string()
+                    }),
+                );
+            }
+        }
+    }
+    Value::Object(env_json)
 }
 
 impl Scope for SolverState {
@@ -448,6 +502,10 @@ impl Scope for SolverState {
 impl Env for SolverState {
     fn parent(&self) -> Option<Rc<dyn Env>> {
         None
+    }
+
+    fn get_slots(&self) -> HashMap<String, Slot> {
+        self.core.get_slots()
     }
 
     fn get(&self, name: &str) -> Option<Slot> {
@@ -509,6 +567,8 @@ impl Core for SolverState {
         if let Slot::Primitive(p) = &term {
             if let Some(bool_var) = p.clone().as_any().downcast_ref::<BoolVar>() {
                 Ok(Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), ast::BoolExpr::Not(Box::new(bool_var.lit.clone()))))))
+            } else if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+                Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_var.var_type().clone(), ast::ArithExpr::Neg(Box::new(arith_var.lin.clone()))))))
             } else {
                 Err(RiddleError::TypeError(format!("Expected a boolean variable, got {}", term)))
             }
@@ -759,6 +819,38 @@ impl Solver {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
         reply_rx.await.map_err(|_| SolverError::Inconsistent)?
+    }
+}
+
+pub fn inf_rat_to_json(val: &InfRational) -> Value {
+    let mut json = rat_to_json(val.rational_part());
+    if !val.infinitesimal_part().is_zero() {
+        let inf = val.infinitesimal_part();
+        json.as_object_mut().unwrap().insert(
+            "inf".to_string(),
+            json!({
+                "num": inf.numer().to_string(),
+                "den": inf.denom().to_string()
+            }),
+        );
+    }
+    json
+}
+
+pub fn rat_to_json(val: &Rational) -> Value {
+    match val {
+        Rational::Finite(r) => json!({
+            "num": r.numer().to_string(),
+            "den": r.denom().to_string()
+        }),
+        Rational::PositiveInf => json!({
+            "num": 1,
+            "den": 0
+        }),
+        Rational::NegativeInf => json!({
+            "num": -1,
+            "den": 0
+        }),
     }
 }
 

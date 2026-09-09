@@ -228,14 +228,18 @@ export namespace solver {
     _set_status(status: Status) { this.status = status; }
   }
 
-  export type StateVariableInterval = { start: string; end: string; atoms: string[]; };
+  export type StateVariableInterval = { start: InfRational; end: InfRational; atoms: string[]; };
   export type StateVariableTimeline = { type: 'StateVariable'; intervals: StateVariableInterval[]; };
-  export type Timeline = StateVariableTimeline;
+  export type ReusableResourceInterval = { start: InfRational; end: InfRational; amount: InfRational; };
+  export type ReusableResourceTimeline = { type: 'ReusableResource'; capacity: InfRational; intervals: ReusableResourceInterval[]; };
+  export type Timeline = StateVariableTimeline | ReusableResourceTimeline;
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage>, timelines: Record<string, Timeline> };
   type PartialFlawMessage = { phi: string, causes?: string[], supports?: string[], cost?: number, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
   type PartialResolverMessage = { rho: string, flaw_id: string, sub_flaws?: string[], intrinsic_cost: number, status: Status };
   type ResolverMessage = ({ id: string } & PartialResolverMessage);
+  export type Rational = { num: number, den: number };
+  export type InfRational = Rational & { inf?: Rational };
   export type Status = true | false | null;
 
   type ServerMessage =
