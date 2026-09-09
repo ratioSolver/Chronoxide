@@ -207,7 +207,7 @@ impl SolverState {
         let target_flaw = planner.graph.get_flaw_mut(target_flaw_id);
         target_flaw.add_support(unif_resolver_id);
 
-        trace!("Causal link created: Resolver r{} supports Flaw f{}", unif_resolver_id, target_flaw_id);
+        trace!("Causal link created: Resolver {} supports Flaw {}", unif_resolver_id, target_flaw_id);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: target_flaw_id, resolver_id: unif_resolver_id });
         Ok(())

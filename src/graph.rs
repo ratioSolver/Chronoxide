@@ -25,7 +25,7 @@ impl Deref for FlawId {
 
 impl fmt::Display for FlawId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "f-{}", self.0)
+        write!(f, "f{}", self.0)
     }
 }
 
@@ -44,7 +44,7 @@ impl Deref for ResolverId {
 
 impl fmt::Display for ResolverId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "r-{}", self.0)
+        write!(f, "r{}", self.0)
     }
 }
 
@@ -83,7 +83,7 @@ impl Graph {
         let id = FlawId(self.flaws.len());
         flaw.set_id(id);
 
-        trace!("Adding flaw: f{} ({})", flaw.id(), flaw.phi());
+        trace!("Adding flaw: {} ({})", flaw.id(), flaw.phi());
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id: id,
@@ -103,7 +103,7 @@ impl Graph {
 
     pub(super) fn set_flaw_status(&mut self, flaw_id: FlawId, status: Option<bool>) {
         trace!(
-            "Flaw f{} is {}",
+            "Flaw {} is {}",
             flaw_id,
             match status {
                 Some(true) => "active",
@@ -119,7 +119,7 @@ impl Graph {
 
     pub(super) fn set_flaw_estimated_cost(&mut self, flaw_id: FlawId, cost: f64) {
         let flaw = self.get_flaw_mut(flaw_id);
-        trace!("Flaw f{} cost {} -> {}", flaw_id, flaw.estimated_cost(), cost);
+        trace!("Flaw {} cost {} -> {}", flaw_id, flaw.estimated_cost(), cost);
         flaw.set_estimated_cost(cost);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id, cost });
@@ -145,7 +145,7 @@ impl Graph {
         let id = ResolverId(self.resolvers.len());
         resolver.set_id(id);
 
-        trace!("Adding resolver: r{} ({}) for flaw f{}", resolver.id(), resolver.rho(), resolver.flaw());
+        trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), resolver.rho(), resolver.flaw());
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: id,
@@ -164,7 +164,7 @@ impl Graph {
 
     pub(super) fn set_resolver_status(&mut self, resolver_id: ResolverId, status: Option<bool>) {
         trace!(
-            "Resolver r{} is {}",
+            "Resolver {} is {}",
             resolver_id,
             match status {
                 Some(true) => "active",

@@ -113,7 +113,7 @@ impl Flaw for AtomFlaw {
                     let state = state.planner_state.borrow();
                     let target_flaw = state.graph.get_flaw(*target_flaw_id);
                     if !target_flaw.is_expanded() || target_flaw.status() == Some(false) {
-                        trace!("Unification skipped: Flaw f{} for Atom {} is inactive", target_flaw.id(), target_id);
+                        trace!("Unification skipped: Flaw {} for Atom {} is inactive", target_flaw.id(), target_id);
                         continue;
                     }
                 }
