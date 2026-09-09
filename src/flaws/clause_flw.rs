@@ -73,25 +73,21 @@ impl Flaw for ClauseFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
 
-        let rhos: Vec<Lit> = {
-            let mut smt = state.smt.borrow_mut();
-            self.literals.iter().map(|lit| smt.track_expr(lit)).collect()
-        };
+        let mut state = core.planner_state.borrow_mut();
+        let mut smt = core.smt.borrow_mut();
+        let rhos: Vec<Lit> = { self.literals.iter().map(|lit| smt.track_expr(lit)).collect() };
 
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(rhos.len());
-
-        let smt = state.smt.borrow();
         for rho in rhos {
             let status = smt.get_lit_val(rho);
             if status != Some(false) {
-                resolvers.push(Box::new(ClauseResolver::new(self.id, rho, status)));
+                self.resolvers.push(state.graph.add_resolver(Box::new(ClauseResolver::new(self.id, rho, status))));
             }
         }
 
-        Ok(resolvers)
+        Ok(())
     }
 
     fn to_json(&self) -> serde_json::Value {

@@ -10,10 +10,8 @@ use std::{
 use tokio::sync::broadcast;
 use tracing::trace;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FlawId(usize);
-
 
 impl Deref for FlawId {
     type Target = usize;
@@ -29,10 +27,8 @@ impl fmt::Display for FlawId {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ResolverId(usize);
-
 
 impl Deref for ResolverId {
     type Target = usize;
@@ -55,6 +51,7 @@ pub(super) struct Graph {
     pub(super) lit_to_resolver: HashMap<usize, Vec<ResolverId>>,
     pub(super) flaw_q: VecDeque<FlawId>,
     pub(super) atom_to_flaw: HashMap<AtomId, FlawId>,
+    pub(super) atom_to_res: HashMap<AtomId, ResolverId>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -67,6 +64,7 @@ impl Graph {
             lit_to_resolver: HashMap::new(),
             flaw_q: VecDeque::new(),
             atom_to_flaw: HashMap::new(),
+            atom_to_res: HashMap::new(),
             tx_event,
         }
     }
@@ -274,7 +272,7 @@ pub trait Flaw {
     }
 
     fn is_expanded(&self) -> bool;
-    fn expand(&mut self, core: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError>;
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError>;
 
     fn resolvers(&self) -> &[ResolverId];
     fn add_resolver(&mut self, id: ResolverId);

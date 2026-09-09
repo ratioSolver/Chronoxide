@@ -374,10 +374,10 @@ impl Flaw for Peak {
     fn is_expanded(&self) -> bool {
         self.is_expanded
     }
-    fn expand(&mut self, core: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
 
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.atoms.len() * (self.atoms.len() - 1) / 2);
+        let mut state = core.planner_state.borrow_mut();
         for i in 0..self.atoms.len() {
             for j in (i + 1)..self.atoms.len() {
                 let atom_i = core.get_atom(self.atoms[i]).expect("Atom should exist");
@@ -401,17 +401,17 @@ impl Flaw for Peak {
                 let ai_before_aj = core.smt.borrow_mut().track_expr(ai_end.lt(&aj_start));
                 let ai_before_aj_status = core.smt.borrow().get_lit_val(ai_before_aj);
                 if ai_before_aj_status != Some(false) {
-                    resolvers.push(Box::new(Order::new(self.id, self.atoms[i], self.atoms[j], ai_before_aj, ai_before_aj_status)));
+                    self.resolvers.push(state.graph.add_resolver(Box::new(Order::new(self.id, self.atoms[i], self.atoms[j], ai_before_aj, ai_before_aj_status))));
                 }
                 let aj_before_ai = core.smt.borrow_mut().track_expr(aj_end.lt(&ai_start));
                 let aj_before_ai_status = core.smt.borrow().get_lit_val(aj_before_ai);
                 if aj_before_ai_status != Some(false) {
-                    resolvers.push(Box::new(Order::new(self.id, self.atoms[j], self.atoms[i], aj_before_ai, aj_before_ai_status)));
+                    self.resolvers.push(state.graph.add_resolver(Box::new(Order::new(self.id, self.atoms[j], self.atoms[i], aj_before_ai, aj_before_ai_status))));
                 }
             }
         }
 
-        Ok(resolvers)
+        Ok(())
     }
 
     fn resolvers(&self) -> &[ResolverId] {

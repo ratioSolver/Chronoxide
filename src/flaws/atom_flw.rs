@@ -89,15 +89,15 @@ impl Flaw for AtomFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::new();
 
         let predicate = self.atom.predicate();
 
-        let forbidden_atoms = if let Some(&primary_cause) = self.causes.first() { state.planner_state.borrow().graph.get_causal_ancestor_atoms(primary_cause) } else { HashSet::new() };
+        let forbidden_atoms = if let Some(&primary_cause) = self.causes.first() { core.planner_state.borrow().graph.get_causal_ancestor_atoms(primary_cause) } else { HashSet::new() };
         let candidate_ids = predicate.atoms();
 
+        let mut state = core.planner_state.borrow_mut();
         for target_id in candidate_ids {
             if target_id == self.atom.id() {
                 continue;
@@ -108,9 +108,8 @@ impl Flaw for AtomFlaw {
                 continue;
             }
 
-            if let Some(target_atom) = state.get_atom(target_id) {
-                if let Some(target_flaw_id) = state.planner_state.borrow().graph.atom_to_flaw.get(&target_id) {
-                    let state = state.planner_state.borrow();
+            if let Some(target_atom) = core.get_atom(target_id) {
+                if let Some(target_flaw_id) = state.graph.atom_to_flaw.get(&target_id) {
                     let target_flaw = state.graph.get_flaw(*target_flaw_id);
                     if !target_flaw.is_expanded() || target_flaw.status() == Some(false) {
                         trace!("Unification skipped: Flaw {} for Atom {} is inactive", target_flaw.id(), target_id);
@@ -118,20 +117,24 @@ impl Flaw for AtomFlaw {
                     }
                 }
 
-                let rho = state.smt.borrow_mut().new_lit();
+                let rho = core.smt.borrow_mut().new_lit();
                 let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
-                resolvers.push(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs)));
+                self.resolvers.push(state.graph.add_resolver(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs))));
             }
         }
 
-        let (rho, status) = if resolvers.is_empty() { (self.phi, self.status) } else { (state.smt.borrow_mut().new_lit(), None) };
+        let (rho, status) = if self.resolvers.is_empty() { (self.phi, self.status) } else { (core.smt.borrow_mut().new_lit(), None) };
         if self.atom.is_fact() {
-            resolvers.push(Box::new(FactResolver::new(self.id, rho, status, self.atom.id())));
+            let res_id = state.graph.add_resolver(Box::new(FactResolver::new(self.id, rho, status, self.atom.id())));
+            state.graph.atom_to_res.insert(self.atom.id(), res_id);
+            self.resolvers.push(res_id);
         } else {
-            resolvers.push(Box::new(RuleResolver::new(self.id, rho, status, self.atom.clone(), predicate.clone())));
+            let res_id = state.graph.add_resolver(Box::new(RuleResolver::new(self.id, rho, status, self.atom.clone(), predicate.clone())));
+            state.graph.atom_to_res.insert(self.atom.id(), res_id);
+            self.resolvers.push(res_id);
         }
 
-        Ok(resolvers)
+        Ok(())
     }
 
     fn to_json(&self) -> serde_json::Value {

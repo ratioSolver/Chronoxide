@@ -335,32 +335,35 @@ impl SolverState {
                     planner.graph.take_flaw(flaw_id)
                 };
                 assert!(!flaw.is_expanded());
-                let resolvers = flaw.expand(self)?;
+                flaw.expand(self)?;
+                let resolvers = flaw.resolvers();
                 let mut or_args = Vec::with_capacity(resolvers.len() + 1);
-                for resolver in &resolvers {
-                    let rho = resolver.rho();
-                    if self.smt.borrow().get_lit_val(rho) == Some(true) {
-                        self.planner_state.borrow_mut().agenda.remove(&flaw_id);
+                let mut state = self.planner_state.borrow_mut();
+                let mut smt = self.smt.borrow_mut();
+                for resolver_id in resolvers {
+                    let rho = state.graph.get_resolver(*resolver_id).rho();
+                    if smt.get_lit_val(rho) == Some(true) {
+                        state.agenda.remove(&flaw_id);
                     }
                     or_args.push(rho);
-                    if self.smt.borrow_mut().add_clause([!rho, flaw.phi()]).is_err() {
+                    if smt.add_clause([!rho, flaw.phi()]).is_err() {
                         return Err(SolverError::Inconsistent);
                     }
                 }
                 or_args.push(!flaw.phi());
-                if self.smt.borrow_mut().add_clause(or_args).is_err() {
+                if smt.add_clause(or_args).is_err() {
                     return Err(SolverError::Inconsistent);
                 }
+                drop(smt);
+                drop(state);
 
                 let flaw_id = flaw.id();
-                for resolver in resolvers {
+                for resolver_id in resolvers {
                     let mut resolver = {
                         let mut planner = self.planner_state.borrow_mut();
-                        let rho = resolver.rho();
-                        let resolver_id = planner.graph.add_resolver(resolver);
-                        flaw.add_resolver(resolver_id);
-                        planner.ctx = Some((resolver_id, rho));
-                        planner.graph.take_resolver(resolver_id)
+                        let res = planner.graph.take_resolver(*resolver_id);
+                        planner.ctx = Some((*resolver_id, res.rho()));
+                        res
                     };
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(resolver.id())));

@@ -73,23 +73,23 @@ impl Flaw for BoolFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::new();
 
-        let rho = state.smt.borrow_mut().track_expr(&self.target);
-        let smt = state.smt.borrow();
+        let mut state = core.planner_state.borrow_mut();
+        let mut smt = core.smt.borrow_mut();
+        let rho = smt.track_expr(&self.target);
 
         let state_1 = smt.get_lit_val(rho);
         if state_1 != Some(false) {
-            resolvers.push(Box::new(BoolResolver::new(self.id, rho, state_1)));
+            self.resolvers.push(state.graph.add_resolver(Box::new(BoolResolver::new(self.id, rho, state_1))));
         }
 
         let state_2 = smt.get_lit_val(!rho);
         if state_2 != Some(false) {
-            resolvers.push(Box::new(BoolResolver::new(self.id, !rho, state_2)));
+            self.resolvers.push(state.graph.add_resolver(Box::new(BoolResolver::new(self.id, !rho, state_2))));
         }
-        Ok(resolvers)
+        Ok(())
     }
 
     fn to_json(&self) -> serde_json::Value {

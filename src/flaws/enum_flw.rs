@@ -76,20 +76,20 @@ impl Flaw for EnumFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
 
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.domain.len());
-
+        let mut state = core.planner_state.borrow_mut();
+        let mut smt = core.smt.borrow_mut();
         for &val in &self.domain {
-            let rho = state.smt.borrow_mut().track_expr(self.target.eq(val));
-            let status = state.smt.borrow().get_lit_val(rho);
+            let rho = smt.track_expr(self.target.eq(val));
+            let status = smt.get_lit_val(rho);
             if status != Some(false) {
-                resolvers.push(Box::new(EnumResolver::new(self.id, val, rho, status)));
+                self.resolvers.push(state.graph.add_resolver(Box::new(EnumResolver::new(self.id, val, rho, status))));
             }
         }
 
-        Ok(resolvers)
+        Ok(())
     }
 
     fn to_json(&self) -> Value {

@@ -80,18 +80,16 @@ impl Flaw for DisjunctionFlaw {
         self.is_expanded
     }
 
-    fn expand(&mut self, state: &SolverState) -> Result<Vec<Box<dyn Resolver>>, SolverError> {
+    fn expand(&mut self, core: &SolverState) -> Result<(), SolverError> {
         self.is_expanded = true;
 
-        let mut resolvers: Vec<Box<dyn Resolver>> = Vec::with_capacity(self.disjunction.disjuncts.len());
+        let mut state = core.planner_state.borrow_mut();
+        let mut smt = core.smt.borrow_mut();
         for (disjunct, cost) in &self.disjunction.disjuncts {
-            let rho = state.smt.borrow_mut().new_bool();
-            let rho = state.smt.borrow_mut().track_expr(rho);
-            let resolver = DisjunctionResolver::new(self.id, rho, None, self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec(), expr_to_cost(cost));
-            resolvers.push(Box::new(resolver));
+            self.resolvers.push(state.graph.add_resolver(Box::new(DisjunctionResolver::new(self.id, smt.new_lit(), None, self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec(), expr_to_cost(cost)))));
         }
 
-        Ok(resolvers)
+        Ok(())
     }
 
     fn to_json(&self) -> serde_json::Value {
