@@ -11,13 +11,9 @@ use tokio::sync::broadcast;
 use tracing::trace;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Default)]
 pub struct FlawId(usize);
 
-impl Default for FlawId {
-    fn default() -> Self {
-        FlawId(0)
-    }
-}
 
 impl Deref for FlawId {
     type Target = usize;
@@ -34,13 +30,9 @@ impl fmt::Display for FlawId {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Default)]
 pub struct ResolverId(usize);
 
-impl Default for ResolverId {
-    fn default() -> Self {
-        ResolverId(0)
-    }
-}
 
 impl Deref for ResolverId {
     type Target = usize;
