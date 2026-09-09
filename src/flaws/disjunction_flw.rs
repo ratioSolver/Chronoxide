@@ -29,7 +29,7 @@ impl DisjunctionFlaw {
     pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, disjunction: Disjunction) -> Self {
         assert!(status != Some(false), "Cannot create a ClauseFlaw with status Some(false)");
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes: cause.into_iter().collect(),
@@ -131,7 +131,17 @@ struct DisjunctionResolver {
 
 impl DisjunctionResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>, scp: Rc<dyn Scope>, env: Rc<dyn Env>, disjunct: Vec<Statement>, cost: f64) -> Self {
-        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), scp, env, disjunct, cost }
+        Self {
+            id: ResolverId::default(),
+            flaw,
+            rho,
+            status,
+            sub_flaws: Vec::new(),
+            scp,
+            env,
+            disjunct,
+            cost,
+        }
     }
 }
 

@@ -30,7 +30,7 @@ impl AtomFlaw {
     pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, atom: Rc<Atom>) -> Self {
         assert!(status != Some(false), "Cannot create an AtomFlaw with status Some(false)");
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes: cause.into_iter().collect(),
@@ -156,7 +156,7 @@ struct RuleResolver {
 impl RuleResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>, atom: Rc<Atom>, predicate: Rc<riddle::scope::Predicate>) -> Self {
         assert!(status != Some(false), "Cannot create a RuleResolver with status Some(false)");
-        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom, predicate }
+        Self { id: ResolverId::default(), flaw, rho, status, sub_flaws: Vec::new(), atom, predicate }
     }
 }
 
@@ -223,7 +223,7 @@ struct FactResolver {
 impl FactResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>, atom_id: AtomId) -> Self {
         assert!(status != Some(false), "Cannot create a FactResolver with status Some(false)");
-        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new(), atom_id }
+        Self { id: ResolverId::default(), flaw, rho, status, sub_flaws: Vec::new(), atom_id }
     }
 }
 
@@ -288,7 +288,7 @@ impl UnificationResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>, source_atom_id: AtomId, target_atom_id: AtomId, unification_constraints: Vec<ast::BoolExpr>) -> Self {
         assert!(status != Some(false), "Cannot create a UnificationResolver with status Some(false)");
         Self {
-            id: 0,
+            id: ResolverId::default(),
             flaw,
             rho,
             status,

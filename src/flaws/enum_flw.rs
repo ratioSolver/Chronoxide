@@ -24,7 +24,7 @@ impl EnumFlaw {
     pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, target: EnumExpr, domain: Vec<i32>) -> Self {
         assert!(status != Some(false), "Cannot create an EnumFlaw with status Some(false)");
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes: cause.into_iter().collect(),
@@ -114,7 +114,7 @@ struct EnumResolver {
 impl EnumResolver {
     fn new(flaw: FlawId, val: i32, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create an EnumResolver with status Some(false)");
-        Self { id: 0, flaw, val, rho, status }
+        Self { id: ResolverId::default(), flaw, val, rho, status }
     }
 }
 

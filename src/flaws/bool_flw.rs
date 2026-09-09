@@ -22,7 +22,7 @@ impl BoolFlaw {
     pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, target: BoolExpr) -> Self {
         assert!(status != Some(false), "Cannot create a BoolFlaw with status Some(false)");
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes: cause.into_iter().collect(),
@@ -110,7 +110,7 @@ struct BoolResolver {
 impl BoolResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create a BoolResolver with status Some(false)");
-        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
+        Self { id: ResolverId::default(), flaw, rho, status, sub_flaws: Vec::new() }
     }
 }
 

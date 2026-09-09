@@ -2,12 +2,59 @@ use crate::{SolverError, SolverEvent, SolverState};
 use riddle::env::AtomId;
 use semitone::Lit;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt,
+    ops::Deref,
+};
 use tokio::sync::broadcast;
 use tracing::trace;
 
-pub type FlawId = usize;
-pub type ResolverId = usize;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FlawId(usize);
+
+impl Default for FlawId {
+    fn default() -> Self {
+        FlawId(0)
+    }
+}
+
+impl Deref for FlawId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for FlawId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "f-{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ResolverId(usize);
+
+impl Default for ResolverId {
+    fn default() -> Self {
+        ResolverId(0)
+    }
+}
+
+impl Deref for ResolverId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for ResolverId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "r-{}", self.0)
+    }
+}
 
 pub(super) struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
@@ -33,15 +80,15 @@ impl Graph {
     }
 
     pub(super) fn get_flaw(&self, id: FlawId) -> &dyn Flaw {
-        self.flaws[id].as_ref().unwrap().as_ref()
+        self.flaws[*id].as_ref().unwrap().as_ref()
     }
 
     pub(super) fn get_flaw_mut(&mut self, id: FlawId) -> &mut dyn Flaw {
-        self.flaws[id].as_mut().unwrap().as_mut()
+        self.flaws[*id].as_mut().unwrap().as_mut()
     }
 
     pub(super) fn add_flaw(&mut self, mut flaw: Box<dyn Flaw>) -> FlawId {
-        let id = self.flaws.len();
+        let id = FlawId(self.flaws.len());
         flaw.set_id(id);
 
         trace!("Adding flaw: f{} ({})", flaw.id(), flaw.phi());
@@ -87,23 +134,23 @@ impl Graph {
     }
 
     pub(super) fn take_flaw(&mut self, id: FlawId) -> Box<dyn Flaw> {
-        self.flaws[id].take().expect("Flaw already taken or missing!")
+        self.flaws[*id].take().expect("Flaw already taken or missing!")
     }
 
     pub(super) fn return_flaw(&mut self, id: FlawId, flaw: Box<dyn Flaw>) {
-        self.flaws[id] = Some(flaw);
+        self.flaws[*id] = Some(flaw);
     }
 
     pub(super) fn get_resolver(&self, id: ResolverId) -> &dyn Resolver {
-        self.resolvers[id].as_ref().unwrap().as_ref()
+        self.resolvers[*id].as_ref().unwrap().as_ref()
     }
 
     pub(super) fn get_resolver_mut(&mut self, id: ResolverId) -> &mut dyn Resolver {
-        self.resolvers[id].as_mut().unwrap().as_mut()
+        self.resolvers[*id].as_mut().unwrap().as_mut()
     }
 
     pub(super) fn add_resolver(&mut self, mut resolver: Box<dyn Resolver>) -> ResolverId {
-        let id = self.resolvers.len();
+        let id = ResolverId(self.resolvers.len());
         resolver.set_id(id);
 
         trace!("Adding resolver: r{} ({}) for flaw f{}", resolver.id(), resolver.rho(), resolver.flaw());
@@ -140,11 +187,11 @@ impl Graph {
     }
 
     pub(super) fn take_resolver(&mut self, id: ResolverId) -> Box<dyn Resolver> {
-        self.resolvers[id].take().expect("Resolver already taken or missing!")
+        self.resolvers[*id].take().expect("Resolver already taken or missing!")
     }
 
     pub(super) fn return_resolver(&mut self, id: ResolverId, resolver: Box<dyn Resolver>) {
-        self.resolvers[id] = Some(resolver);
+        self.resolvers[*id] = Some(resolver);
     }
 
     pub(super) fn propagate_costs<F>(&mut self, start_flaws: Vec<FlawId>, is_valid: F)

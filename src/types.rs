@@ -337,7 +337,7 @@ struct Peak {
 impl Peak {
     fn new(phi: Lit, status: Option<bool>, causes: Vec<ResolverId>, atoms: Vec<AtomId>) -> Self {
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes,
@@ -447,7 +447,7 @@ struct Order {
 impl Order {
     fn new(flaw: FlawId, atm0: AtomId, atm1: AtomId, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create an Order with status Some(false)");
-        Self { id: 0, flaw, atm0, atm1, rho, status }
+        Self { id: ResolverId::default(), flaw, atm0, atm1, rho, status }
     }
 }
 

@@ -52,7 +52,7 @@ struct SolverState {
 }
 
 struct PlannerState {
-    ctx: Option<(usize, Lit)>,
+    ctx: Option<(ResolverId, Lit)>,
     pending_sub_flaws: Vec<FlawId>,
     graph: Graph,
     agenda: HashSet<FlawId>,
@@ -90,7 +90,7 @@ impl SolverState {
         slv
     }
 
-    fn get_ctx(&self) -> (Lit, Option<usize>, Option<bool>) {
+    fn get_ctx(&self) -> (Lit, Option<ResolverId>, Option<bool>) {
         if let Some((res_id, lit)) = self.planner_state.borrow().ctx { (lit, Some(res_id), self.smt.borrow().get_lit_val(lit)) } else { (Lit::TRUE, None, Some(true)) }
     }
 

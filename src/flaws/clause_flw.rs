@@ -22,7 +22,7 @@ impl ClauseFlaw {
     pub(crate) fn new(phi: Lit, status: Option<bool>, cause: Option<ResolverId>, literals: Vec<BoolExpr>) -> Self {
         assert!(status != Some(false), "Cannot create a ClauseFlaw with status Some(false)");
         Self {
-            id: 0,
+            id: FlawId::default(),
             phi,
             status,
             causes: cause.into_iter().collect(),
@@ -113,7 +113,7 @@ struct ClauseResolver {
 impl ClauseResolver {
     fn new(flaw: FlawId, rho: Lit, status: Option<bool>) -> Self {
         assert!(status != Some(false), "Cannot create a ClauseResolver with status Some(false)");
-        Self { id: 0, flaw, rho, status, sub_flaws: Vec::new() }
+        Self { id: ResolverId::default(), flaw, rho, status, sub_flaws: Vec::new() }
     }
 }
 
