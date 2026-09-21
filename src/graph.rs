@@ -50,7 +50,6 @@ pub(super) struct Graph {
     pub(super) lit_to_flaw: HashMap<usize, Vec<FlawId>>,
     pub(super) lit_to_resolver: HashMap<usize, Vec<ResolverId>>,
     pub(super) flaw_q: VecDeque<FlawId>,
-    pub(super) atom_to_flaw: HashMap<AtomId, FlawId>,
     pub(super) atom_to_res: HashMap<AtomId, ResolverId>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
@@ -63,7 +62,6 @@ impl Graph {
             lit_to_flaw: HashMap::new(),
             lit_to_resolver: HashMap::new(),
             flaw_q: VecDeque::new(),
-            atom_to_flaw: HashMap::new(),
             atom_to_res: HashMap::new(),
             tx_event,
         }

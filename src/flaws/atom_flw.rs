@@ -109,17 +109,16 @@ impl Flaw for AtomFlaw {
             }
 
             if let Some(target_atom) = core.get_atom(target_id) {
-                if let Some(target_flaw_id) = state.graph.atom_to_flaw.get(&target_id) {
-                    let target_flaw = state.graph.get_flaw(*target_flaw_id);
-                    if !target_flaw.is_expanded() || target_flaw.status() == Some(false) {
-                        trace!("Unification skipped: Flaw {} for Atom {} is inactive", target_flaw.id(), target_id);
+                if let Some(target_res_id) = state.graph.atom_to_res.get(&target_id) {
+                    let target_res = state.graph.get_resolver(*target_res_id);
+                    if target_res.status() == Some(false) {
                         continue;
                     }
-                }
 
-                let rho = core.smt.borrow_mut().new_lit();
-                let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
-                self.resolvers.push(state.graph.add_resolver(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs))));
+                    let rho = core.smt.borrow_mut().new_lit();
+                    let unif_eqs = build_unification_equations(&self.atom, &target_atom, &predicate);
+                    self.resolvers.push(state.graph.add_resolver(Box::new(UnificationResolver::new(self.id, rho, None, self.atom.id(), target_id, unif_eqs))));
+                }
             }
         }
 

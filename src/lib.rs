@@ -111,7 +111,7 @@ impl SolverState {
                     self.build_graph()?;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
-                    self.extract_flaws();
+                    self.extract_flaws()?;
 
                     if let Some(flaw_id) = self.select_flaw() {
                         #[cfg(feature = "server")]
@@ -183,14 +183,10 @@ impl SolverState {
 
     pub fn add_flaw(&self, flaw: Box<dyn Flaw>) {
         let status = flaw.status();
-        let atom_id = flaw.atom_id();
         let (_phi, c_res, _status) = self.get_ctx();
         let mut planner = self.planner_state.borrow_mut();
 
         let flaw_id = planner.graph.add_flaw(flaw);
-        if let Some(atom_id) = atom_id {
-            planner.graph.atom_to_flaw.insert(atom_id, flaw_id);
-        }
         if c_res.is_some() {
             planner.pending_sub_flaws.push(flaw_id);
         }
@@ -202,12 +198,13 @@ impl SolverState {
     pub(crate) fn add_causal_link(&self, unif_resolver_id: ResolverId, target_atom_id: AtomId) -> Result<(), SolverError> {
         let mut planner = self.planner_state.borrow_mut();
 
-        let target_flaw_id = *planner.graph.atom_to_flaw.get(&target_atom_id).ok_or_else(|| SolverError::RuntimeError(format!("Atom ID {} has no corresponding Flaw", target_atom_id)))?;
+        let target_res_id = *planner.graph.atom_to_res.get(&target_atom_id).expect("Target atom must have a corresponding resolver in the graph");
+        let target_flaw_id = planner.graph.get_resolver(target_res_id).flaw();
 
         let target_flaw = planner.graph.get_flaw_mut(target_flaw_id);
         target_flaw.add_support(unif_resolver_id);
 
-        trace!("Causal link created: Resolver {} supports Flaw {}", unif_resolver_id, target_flaw_id);
+        trace!("Causal link created: Resolver {} supports Flaw {}", unif_resolver_id, target_res_id);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: target_flaw_id, resolver_id: unif_resolver_id });
         Ok(())
@@ -257,7 +254,7 @@ impl SolverState {
         planner.notified_len = current_trail_len;
     }
 
-    fn extract_flaws(&self) {
+    fn extract_flaws(&self) -> Result<(), SolverError> {
         let extractors = self.planner_state.borrow().extractors.clone();
         for extractor in extractors {
             let new_flaws = extractor.extract_flaws(self);
@@ -269,6 +266,7 @@ impl SolverState {
                 }
             }
         }
+        Ok(())
     }
 
     fn cancel_until(&self, level: usize) {

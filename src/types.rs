@@ -201,17 +201,13 @@ impl FlawExtractor for StateVariable {
                 let mut causes = Vec::new();
                 let mut and_args = Vec::with_capacity(2);
 
-                let a_f = *state.graph.atom_to_flaw.get(&a).expect("Atom A missing flaw");
-                let a_f = state.graph.get_flaw(a_f);
-                if let Some(cause) = a_f.causes().first() {
+                if let Some(cause) = state.graph.atom_to_res.get(&a) {
                     causes.push(*cause);
                     let rho = state.graph.get_resolver(*cause).rho();
                     and_args.push(if rho.sign() { ast::BoolExpr::Not(Box::new(ast::BoolExpr::Var(rho.var()))) } else { ast::BoolExpr::Var(rho.var()) });
                 }
 
-                let b_f = *state.graph.atom_to_flaw.get(&b).expect("Atom B missing flaw");
-                let b_f = state.graph.get_flaw(b_f);
-                if let Some(cause) = b_f.causes().first() {
+                if let Some(cause) = state.graph.atom_to_res.get(&b) {
                     causes.push(*cause);
                     let rho = state.graph.get_resolver(*cause).rho();
                     and_args.push(if rho.sign() { ast::BoolExpr::Not(Box::new(ast::BoolExpr::Var(rho.var()))) } else { ast::BoolExpr::Var(rho.var()) });
