@@ -82,8 +82,8 @@ enum Update {
 }
 
 pub struct Graph {
-    flaws: Vec<Box<dyn Flaw>>,
-    resolvers: Vec<Box<dyn Resolver>>,
+    flaws: Vec<Option<Box<dyn Flaw>>>,
+    resolvers: Vec<Option<Box<dyn Resolver>>>,
 
     h_flaw: Vec<f64>,
     h_resolver: Vec<f64>,
@@ -120,14 +120,6 @@ impl Graph {
         }
     }
 
-    pub(super) fn flaw_cost(&self, flaw_id: FlawId) -> f64 {
-        self.h_flaw[*flaw_id]
-    }
-
-    pub(super) fn resolver_cost(&self, resolver_id: ResolverId) -> f64 {
-        self.h_resolver[*resolver_id]
-    }
-
     pub(super) fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
         let f_id = FlawId(self.flaws.len());
         flaw.set_id(f_id);
@@ -152,12 +144,42 @@ impl Graph {
 
         let cost = smt.new_dl_var();
 
-        self.flaws.push(flaw);
+        self.flaws.push(Some(flaw));
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
 
         Ok(f_id)
+    }
+
+    pub(super) fn take_flaw(&mut self, id: FlawId) -> Option<Box<dyn Flaw>> {
+        self.flaws[*id].take()
+    }
+
+    pub(super) fn return_flaw(&mut self, flaw: Box<dyn Flaw>) {
+        let id = flaw.id();
+        self.flaws[*id] = Some(flaw);
+    }
+
+    fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
+        if smt.get_bool_val(&self.flaw_phi[*flaw_id]) == Some(false) {
+            f64::INFINITY
+        } else {
+            let mut min_cost = f64::INFINITY;
+
+            for &resolver_id in self.flaws[*flaw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
+                let resolver_cost = self.h_resolver[*resolver_id];
+                if resolver_cost < min_cost {
+                    min_cost = resolver_cost;
+                }
+            }
+
+            min_cost
+        }
+    }
+
+    pub(super) fn flaw_cost(&self, flaw_id: FlawId) -> f64 {
+        self.h_flaw[*flaw_id]
     }
 
     pub(super) fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
@@ -176,12 +198,38 @@ impl Graph {
             return Err(SolverError::Inconsistent);
         }
 
-        self.resolvers.push(resolver);
+        self.resolvers.push(Some(resolver));
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
         self.h_resolver.push(f64::INFINITY);
 
         Ok(r_id)
+    }
+
+    pub(super) fn take_resolver(&mut self, id: ResolverId) -> Option<Box<dyn Resolver>> {
+        self.resolvers[*id].take()
+    }
+
+    pub(super) fn return_resolver(&mut self, resolver: Box<dyn Resolver>) {
+        let id = resolver.id();
+        self.resolvers[*id] = Some(resolver);
+    }
+
+    pub(super) fn resolver_cost(&self, resolver_id: ResolverId) -> f64 {
+        self.h_resolver[*resolver_id]
+    }
+
+    fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
+        if smt.get_bool_val(&self.resolver_rho[*resolver_id]) == Some(false) {
+            f64::INFINITY
+        } else {
+            #[cfg(feature = "h_add")]
+            let precondition_cost: f64 = self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
+            #[cfg(feature = "h_max")]
+            let precondition_cost: f64 = self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
+
+            self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
+        }
     }
 
     pub(super) fn push(&mut self) {
@@ -221,8 +269,8 @@ impl Graph {
                 self.trail.push(Update::Flaw(f_id, old_cost));
                 self.h_flaw[*f_id] = c_cost;
 
-                for &r_id in self.flaws[*f_id].required_by().iter() {
-                    let parent_flaw_id = self.resolvers[*r_id].flaw();
+                for &r_id in self.flaws[*f_id].as_ref().expect("Flaw should exist").required_by().iter() {
+                    let parent_flaw_id = self.resolvers[*r_id].as_ref().expect("Resolver should exist").flaw();
                     let r_old_cost = self.h_resolver[*r_id];
                     let r_new_cost = self.compute_resolver_cost(smt, r_id);
 
@@ -237,36 +285,6 @@ impl Graph {
                     }
                 }
             }
-        }
-    }
-
-    fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
-        if smt.get_bool_val(&self.flaw_phi[*flaw_id]) == Some(false) {
-            f64::INFINITY
-        } else {
-            let mut min_cost = f64::INFINITY;
-
-            for &resolver_id in self.flaws[*flaw_id].resolvers().iter() {
-                let resolver_cost = self.h_resolver[*resolver_id];
-                if resolver_cost < min_cost {
-                    min_cost = resolver_cost;
-                }
-            }
-
-            min_cost
-        }
-    }
-
-    fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
-        if smt.get_bool_val(&self.resolver_rho[*resolver_id]) == Some(false) {
-            f64::INFINITY
-        } else {
-            #[cfg(feature = "h_add")]
-            let precondition_cost: f64 = self.resolvers[*resolver_id].preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
-            #[cfg(feature = "h_max")]
-            let precondition_cost: f64 = self.resolvers[*resolver_id].preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
-
-            self.resolvers[*resolver_id].intrinsic_cost().to_f64() + precondition_cost
         }
     }
 }
