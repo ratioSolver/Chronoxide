@@ -9,7 +9,9 @@ repository = "https://github.com/ratioSolver/Chronoxide"
 license-file = "LICENSE.txt"
 
 [features]
-default = ["server"]
+default = ["server", "h_max"]
+h_max = []
+h_add = []
 server = ["dep:axum", "dep:tower-http"]
 
 [lib]
@@ -22,7 +24,7 @@ required-features = ["server"]
 
 [dependencies]
 rug = "1.30.0"
-semitone = "0.0.18"
+semitone = "0.0.20"
 riddle-lang = "0.2.12"
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.1", features = ["fs"], optional = true }
