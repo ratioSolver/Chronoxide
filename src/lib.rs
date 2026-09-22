@@ -13,7 +13,7 @@ use semitone::{SeMiTONE, ast};
 use serde_json::Value;
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
     str::FromStr,
 };
@@ -37,6 +37,7 @@ struct SolverState {
     slv: Weak<SolverState>,
     smt: RefCell<SeMiTONE>,
     graph: RefCell<Graph>,
+    ctx: RefCell<Option<(ResolverId, ast::BoolExpr)>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -50,6 +51,7 @@ impl SolverState {
             slv: core.clone(),
             smt: RefCell::new(SeMiTONE::new()),
             graph: RefCell::new(Graph::new(tx_event.clone())),
+            ctx: RefCell::new(None),
             tx_event,
         });
         if slv.read(include_str!("init.rddl")).is_err() {
@@ -65,7 +67,49 @@ impl SolverState {
 
     fn solve(&self) -> Result<(), SolverError> {
         info!("Solving problem...");
+        loop {
+            let prop_result = self.smt.borrow_mut().propagate();
+            match prop_result {
+                Ok(_) => {
+                    self.build_graph()?;
+                    break;
+                }
+                Err((bt_level, lemma)) => {
+                    if self.smt.borrow().decision_level() == 0 {
+                        return Err(SolverError::Inconsistent);
+                    }
+                    self.cancel_until(bt_level);
+                    if self.smt.borrow_mut().add_clause(lemma).is_err() {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
+            }
+        }
         Ok(())
+    }
+
+    fn build_graph(&self) -> Result<(), SolverError> {
+        info!("Building graph...");
+        while !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
+            let flaw_id = match self.graph.borrow_mut().pop_flaw() {
+                Some(flaw_id) => flaw_id,
+                None => return Err(SolverError::Inconsistent),
+            };
+            let mut flaw = self.graph.borrow_mut().take_flaw(flaw_id).expect("Flaw should exist in graph");
+            flaw.expand(self)?;
+            for resolver_id in flaw.resolvers() {
+                let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
+                self.ctx.borrow_mut().replace((resolver_id, self.graph.borrow().resolver_rho(resolver_id).into()));
+                resolver.apply(self)?;
+                self.graph.borrow_mut().return_resolver(resolver);
+            }
+            self.graph.borrow_mut().return_flaw(flaw);
+        }
+        Ok(())
+    }
+
+    fn cancel_until(&self, level: usize) {
+        self.smt.borrow_mut().cancel_until(level);
     }
 
     fn to_json(&self) -> Value {

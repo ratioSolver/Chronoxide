@@ -1,6 +1,8 @@
-use riddle::env::BoolExpr;
-
-use crate::graph::{Flaw, FlawId, ResolverId};
+use crate::{
+    SolverState,
+    graph::{Flaw, FlawId, Resolver, ResolverId},
+};
+use semitone::ast::BoolExpr;
 
 pub(crate) struct BoolFlaw {
     id: FlawId,
@@ -33,7 +35,51 @@ impl Flaw for BoolFlaw {
         self.causes.clone()
     }
 
+    fn expand(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
+        let mut graph = slv.graph.borrow_mut();
+        let mut smt = slv.smt.borrow_mut();
+        assert!(smt.get_bool_val(&self.expr).is_none());
+        self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
+        self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+        Ok(())
+    }
+
     fn resolvers(&self) -> Vec<ResolverId> {
         self.resolvers.clone()
+    }
+}
+
+struct BoolResolver {
+    id: ResolverId,
+    flaw: FlawId,
+}
+
+impl BoolResolver {
+    fn new(flaw: FlawId) -> Self {
+        Self { id: ResolverId::default(), flaw }
+    }
+}
+
+impl Resolver for BoolResolver {
+    fn id(&self) -> ResolverId {
+        self.id
+    }
+    fn set_id(&mut self, id: ResolverId) {
+        self.id = id;
+    }
+    fn flaw(&self) -> FlawId {
+        self.flaw
+    }
+
+    fn intrinsic_cost(&self) -> rug::Rational {
+        rug::Rational::from(1)
+    }
+
+    fn apply(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
+        Ok(())
+    }
+
+    fn preconditions(&self) -> Vec<FlawId> {
+        vec![]
     }
 }

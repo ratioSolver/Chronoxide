@@ -3,7 +3,7 @@ compile_error!("Features 'h_add' and 'h_max' are mutually exclusive. Please enab
 #[cfg(not(any(feature = "h_add", feature = "h_max")))]
 compile_error!("Please enable one of the features 'h_add' or 'h_max'.");
 
-use crate::{SolverError, SolverEvent};
+use crate::{SolverError, SolverEvent, SolverState};
 use semitone::{
     SeMiTONE,
     ast::{BoolExpr, DlVar},
@@ -58,6 +58,9 @@ pub trait Flaw {
         self.causes()
     }
 
+    /// Expands this flaw by adding resolvers to the graph that can potentially solve it.
+    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError>;
+
     /// Resolvers that can potentially solve this flaw.
     fn resolvers(&self) -> Vec<ResolverId>;
 }
@@ -72,6 +75,9 @@ pub trait Resolver {
 
     /// The intrinsic cost of selecting this resolver, independent from the current state of the graph.
     fn intrinsic_cost(&self) -> rug::Rational;
+
+    /// Applies this resolver.
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError>;
 
     /// Preconditions that must be satisfied for this resolver to be applicable.
     fn preconditions(&self) -> Vec<FlawId>;
@@ -97,6 +103,8 @@ pub struct Graph {
     trail: Vec<Update>,
     trail_lim: Vec<usize>,
 
+    flaw_q: VecDeque<FlawId>,
+
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -117,11 +125,13 @@ impl Graph {
             trail: Vec::new(),
             trail_lim: Vec::new(),
 
+            flaw_q: VecDeque::new(),
+
             tx_event,
         }
     }
 
-    pub(super) fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+    pub fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
         let f_id = FlawId(self.flaws.len());
         flaw.set_id(f_id);
 
@@ -150,6 +160,8 @@ impl Graph {
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
+
+        self.flaw_q.push_back(f_id);
 
         Ok(f_id)
     }
@@ -180,11 +192,15 @@ impl Graph {
         }
     }
 
-    pub(super) fn flaw_cost(&self, flaw_id: FlawId) -> f64 {
+    pub fn flaw_phi(&self, flaw_id: FlawId) -> BoolExpr {
+        self.flaw_phi[*flaw_id].clone()
+    }
+
+    pub fn flaw_cost(&self, flaw_id: FlawId) -> f64 {
         self.h_flaw[*flaw_id]
     }
 
-    pub(super) fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
+    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
         let r_id = ResolverId(self.resolvers.len());
         trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
         resolver.set_id(r_id);
@@ -218,7 +234,11 @@ impl Graph {
         self.resolvers[*id] = Some(resolver);
     }
 
-    pub(super) fn resolver_cost(&self, resolver_id: ResolverId) -> f64 {
+    pub fn resolver_rho(&self, resolver_id: ResolverId) -> BoolExpr {
+        self.resolver_rho[*resolver_id].clone()
+    }
+
+    pub fn resolver_cost(&self, resolver_id: ResolverId) -> f64 {
         self.h_resolver[*resolver_id]
     }
 
@@ -233,6 +253,19 @@ impl Graph {
 
             self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
         }
+    }
+
+    pub(super) fn has_estimated_solution(&self, smt: &SeMiTONE) -> bool {
+        for flaw in self.flaws.iter().filter_map(|f| f.as_ref()) {
+            if smt.get_bool_val(&self.flaw_phi[*flaw.id()]) == Some(true) && self.h_flaw[*flaw.id()] == f64::INFINITY {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
+        self.flaw_q.pop_front()
     }
 
     pub(super) fn push(&mut self) {
