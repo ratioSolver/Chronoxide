@@ -3,15 +3,13 @@ compile_error!("Features 'h_add' and 'h_max' are mutually exclusive. Please enab
 #[cfg(not(any(feature = "h_add", feature = "h_max")))]
 compile_error!("Please enable one of the features 'h_add' or 'h_max'.");
 
+use crate::{SolverError, SolverEvent};
 use semitone::{
-    Lit, SeMiTONE,
-    ast::DlVar,
-    rational::{InfRational, Rational},
+    SeMiTONE,
+    ast::{BoolExpr, DlVar},
 };
 use std::{collections::VecDeque, fmt, ops::Deref};
 use tokio::sync::broadcast;
-
-use crate::SolverEvent;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FlawId(usize);
@@ -50,11 +48,10 @@ impl fmt::Display for ResolverId {
 pub trait Flaw {
     /// Unique identifier of this flaw in the graph.
     fn id(&self) -> FlawId;
+    /// Sets the unique identifier of this flaw in the graph.
+    fn set_id(&mut self, id: FlawId);
     /// Causes for this flaw to exist in the graph.
     fn causes(&self) -> Vec<ResolverId>;
-
-    fn phi(&self) -> Lit;
-    fn cost(&self) -> DlVar;
 
     fn required_by(&self) -> Vec<ResolverId> {
         self.causes()
@@ -67,14 +64,13 @@ pub trait Flaw {
 pub trait Resolver {
     /// Unique identifier of this resolver in the graph.
     fn id(&self) -> ResolverId;
+    /// Sets the unique identifier of this resolver in the graph.
+    fn set_id(&mut self, id: ResolverId);
     /// Flaw that this resolver is attempting to solve.
     fn flaw(&self) -> FlawId;
 
-    fn rho(&self) -> Lit;
-    fn cost(&self) -> DlVar;
-
     /// The intrinsic cost of selecting this resolver, independent from the current state of the graph.
-    fn intrinsic_cost(&self) -> InfRational;
+    fn intrinsic_cost(&self) -> rug::Rational;
 
     /// Preconditions that must be satisfied for this resolver to be applicable.
     fn preconditions(&self) -> Vec<FlawId>;
@@ -92,6 +88,11 @@ pub struct Graph {
     h_flaw: Vec<f64>,
     h_resolver: Vec<f64>,
 
+    flaw_phi: Vec<BoolExpr>,
+    flaw_cost: Vec<DlVar>,
+    resolver_rho: Vec<BoolExpr>,
+    resolver_cost: Vec<DlVar>,
+
     trail: Vec<Update>,
     trail_lim: Vec<usize>,
 
@@ -106,6 +107,11 @@ impl Graph {
 
             h_flaw: Vec::new(),
             h_resolver: Vec::new(),
+
+            flaw_phi: Vec::new(),
+            flaw_cost: Vec::new(),
+            resolver_rho: Vec::new(),
+            resolver_cost: Vec::new(),
 
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -122,13 +128,60 @@ impl Graph {
         self.h_resolver[*resolver_id]
     }
 
-    pub fn add_flaw(&mut self, smt: &mut SeMiTONE, flaw: Box<dyn Flaw>) -> FlawId {
+    pub(super) fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
         let f_id = FlawId(self.flaws.len());
+        flaw.set_id(f_id);
+
+        let causes = flaw.causes();
+        let phi = match causes.len() {
+            0 => BoolExpr::True,
+            _ => {
+                let phi = smt.new_bool();
+                // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
+                let mut clause = Vec::with_capacity(causes.len() + 1);
+                for &r_id in causes.iter() {
+                    clause.push(!self.resolver_rho[r_id.0].clone());
+                }
+                clause.push(phi.clone());
+                if !smt.assert(BoolExpr::Or(clause)) {
+                    return Err(SolverError::Inconsistent);
+                }
+                phi
+            }
+        };
+
+        let cost = smt.new_dl_var();
 
         self.flaws.push(flaw);
+        self.flaw_phi.push(phi);
+        self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
 
-        f_id
+        Ok(f_id)
+    }
+
+    pub(super) fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
+        let r_id = ResolverId(self.resolvers.len());
+        resolver.set_id(r_id);
+
+        let flaw_id = resolver.flaw();
+        // ρ → ϕ (applying the resolver implies solving the flaw)
+        if !smt.assert(BoolExpr::Or(vec![!rho.clone(), self.flaw_phi[*flaw_id].clone()])) {
+            return Err(SolverError::Inconsistent);
+        }
+
+        let cost = smt.new_dl_var();
+        let parent_cost_var = self.flaw_cost[*flaw_id];
+        if !smt.assert(BoolExpr::Or(vec![!rho.clone(), BoolExpr::DlGe(parent_cost_var, cost, resolver.intrinsic_cost())])) {
+            return Err(SolverError::Inconsistent);
+        }
+
+        self.resolvers.push(resolver);
+        self.resolver_rho.push(rho);
+        self.resolver_cost.push(cost);
+        self.h_resolver.push(f64::INFINITY);
+
+        Ok(r_id)
     }
 
     pub(super) fn push(&mut self) {
@@ -188,13 +241,12 @@ impl Graph {
     }
 
     fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
-        let flaw = &self.flaws[*flaw_id];
-        if smt.get_lit_val(flaw.phi()) == Some(false) {
+        if smt.get_bool_val(&self.flaw_phi[*flaw_id]) == Some(false) {
             f64::INFINITY
         } else {
             let mut min_cost = f64::INFINITY;
 
-            for &resolver_id in flaw.resolvers().iter() {
+            for &resolver_id in self.flaws[*flaw_id].resolvers().iter() {
                 let resolver_cost = self.h_resolver[*resolver_id];
                 if resolver_cost < min_cost {
                     min_cost = resolver_cost;
@@ -206,21 +258,15 @@ impl Graph {
     }
 
     fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
-        let resolver = &self.resolvers[*resolver_id];
-        if smt.get_lit_val(resolver.rho()) == Some(false) {
+        if smt.get_bool_val(&self.resolver_rho[*resolver_id]) == Some(false) {
             f64::INFINITY
         } else {
-            let intrinsic_cost = match resolver.intrinsic_cost().rational_part() {
-                Rational::Finite(cost) => cost.to_f64(),
-                _ => unreachable!("Resolver intrinsic cost is infinite, which should not happen."),
-            };
-
             #[cfg(feature = "h_add")]
-            let precondition_cost: f64 = resolver.preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
+            let precondition_cost: f64 = self.resolvers[*resolver_id].preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
             #[cfg(feature = "h_max")]
-            let precondition_cost: f64 = resolver.preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
+            let precondition_cost: f64 = self.resolvers[*resolver_id].preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
 
-            intrinsic_cost + precondition_cost
+            self.resolvers[*resolver_id].intrinsic_cost().to_f64() + precondition_cost
         }
     }
 }
