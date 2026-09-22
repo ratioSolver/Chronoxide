@@ -10,6 +10,7 @@ use semitone::{
 };
 use std::{collections::VecDeque, fmt, ops::Deref};
 use tokio::sync::broadcast;
+use tracing::trace;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FlawId(usize);
@@ -24,7 +25,7 @@ impl Deref for FlawId {
 
 impl fmt::Display for FlawId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "f{}", self.0)
+        write!(f, "ϕ{}", self.0)
     }
 }
 
@@ -41,7 +42,7 @@ impl Deref for ResolverId {
 
 impl fmt::Display for ResolverId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "r{}", self.0)
+        write!(f, "ρ{}", self.0)
     }
 }
 
@@ -141,6 +142,7 @@ impl Graph {
                 phi
             }
         };
+        trace!("Adding flaw: {} ({})", flaw.id(), phi);
 
         let cost = smt.new_dl_var();
 
@@ -184,6 +186,7 @@ impl Graph {
 
     pub(super) fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
         let r_id = ResolverId(self.resolvers.len());
+        trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
         resolver.set_id(r_id);
 
         let flaw_id = resolver.flaw();
