@@ -1,11 +1,11 @@
 use crate::{
     graph::{FlawId, Graph, ResolverId},
-    objects::{ArithVar, BoolVar, StringVar},
+    objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
-    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot},
+    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var},
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
@@ -20,6 +20,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
 
+mod flaws;
 mod graph;
 mod objects;
 
@@ -120,7 +121,10 @@ impl Core for SolverState {
     fn new_bool(&self, value: bool) -> Slot {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), if value { ast::BoolExpr::True } else { ast::BoolExpr::False })))
     }
-    fn new_bool_var(&self) -> Slot {}
+    fn new_bool_var(&self) -> Slot {
+        let var = self.smt.borrow_mut().new_bool();
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
+    }
     fn new_int(&self, value: &str) -> Slot {
         Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid integer literal")))))
     }
@@ -210,9 +214,15 @@ impl Core for SolverState {
         Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(left_lin), Box::new(right_lin))))))
     }
 
-    fn assert(&self, term: Rc<BoolExpr>) -> bool {}
-    fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {}
-    fn new_disjunction(&self, disjunction: Disjunction) {}
+    fn assert(&self, _term: Rc<BoolExpr>) -> bool {
+        true
+    }
+    fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
+        let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
+        let var = self.smt.borrow_mut().new_enum(domain.clone());
+        Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
+    }
+    fn new_disjunction(&self, _disjunction: Disjunction) {}
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
         self.core.new_object(class)
@@ -220,7 +230,10 @@ impl Core for SolverState {
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
         self.core.get_object(id)
     }
-    fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {}
+    fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
+        let atm = self.core.new_atom(predicate, fact, args);
+        atm
+    }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
     }
