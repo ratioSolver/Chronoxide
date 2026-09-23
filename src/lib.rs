@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw},
+    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw},
     graph::{FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -60,10 +60,6 @@ impl SolverState {
             panic!("Failed to initialize solver");
         }
         slv
-    }
-
-    fn get_ctx(&self) -> (Option<ResolverId>, ast::BoolExpr) {
-        if let Some((resolver_id, rho)) = self.ctx.borrow().clone() { (Some(resolver_id), rho) } else { (None, ast::BoolExpr::True) }
     }
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
@@ -192,10 +188,9 @@ impl Core for SolverState {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), if value { ast::BoolExpr::True } else { ast::BoolExpr::False })))
     }
     fn new_bool_var(&self) -> Slot {
-        let (c_res, rho) = self.get_ctx();
         let mut smt = self.smt.borrow_mut();
         let var = smt.new_bool();
-        self.graph.borrow_mut().add_flaw(&mut smt, Box::new(BoolFlaw::new(c_res, rho))).expect("Failed to add BoolFlaw to graph");
+        self.graph.borrow_mut().add_flaw(&mut smt, Box::new(BoolFlaw::new(self.ctx.borrow().as_ref().map(|(res_id, _)| *res_id), var.clone()))).expect("Failed to add BoolFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -288,9 +283,14 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let (c_res, rho) = self.get_ctx();
-        if !self.smt.borrow_mut().assert(!rho | expr_to_bool(term.as_ref())) {
-            return false;
+        if let Some((_c_res, rho)) = self.ctx.borrow().as_ref() {
+            if !self.smt.borrow_mut().assert(!rho | expr_to_bool(term.as_ref())) {
+                return false;
+            }
+        } else {
+            if !self.smt.borrow_mut().assert(expr_to_bool(term.as_ref())) {
+                return false;
+            }
         }
 
         let cnf_expr = to_cnf(term.clone());
@@ -301,15 +301,14 @@ impl Core for SolverState {
                         && terms.len() > 1
                     {
                         let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(c_res, terms))).expect("Failed to add ClauseFlaw to graph");
+                        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(self.ctx.borrow().as_ref().map(|(res_id, _)| *res_id), terms))).expect("Failed to add ClauseFlaw to graph");
                     }
                 }
             }
-            BoolExpr::Or { terms, .. }
-                if terms.len() > 1 => {
-                    let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                    self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(c_res, terms))).expect("Failed to add ClauseFlaw to graph");
-                }
+            BoolExpr::Or { terms, .. } if terms.len() > 1 => {
+                let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(self.ctx.borrow().as_ref().map(|(res_id, _)| *res_id), terms))).expect("Failed to add ClauseFlaw to graph");
+            }
             _ => {}
         }
 
@@ -320,7 +319,9 @@ impl Core for SolverState {
         let var = self.smt.borrow_mut().new_enum(domain.clone());
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
-    fn new_disjunction(&self, _disjunction: Disjunction) {}
+    fn new_disjunction(&self, disjunction: Disjunction) {
+        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(DisjunctionFlaw::new(self.ctx.borrow().as_ref().map(|(res_id, _)| *res_id), disjunction))).expect("Failed to add DisjunctionFlaw to graph");
+    }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
         self.core.new_object(class)

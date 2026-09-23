@@ -84,6 +84,11 @@ pub trait Resolver {
     /// Preconditions that must be satisfied for this resolver to be applicable.
     fn preconditions(&self) -> Vec<FlawId>;
 
+    /// Adds a precondition to this resolver.
+    fn add_precondition(&mut self, flaw_id: FlawId) {
+        unimplemented!("add_precondition is not implemented for this resolver");
+    }
+
     fn to_json(&self) -> serde_json::Value;
 }
 

@@ -1,11 +1,10 @@
-use semitone::ast::BoolExpr;
-use serde_json::{Value, json};
-use tracing::trace;
-
 use crate::{
     SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
+use semitone::ast::BoolExpr;
+use serde_json::{Value, json};
+use tracing::trace;
 
 pub(crate) struct ClauseFlaw {
     id: FlawId,
