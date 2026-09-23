@@ -105,7 +105,7 @@ impl SolverState {
             flaw.expand(self)?;
             for resolver_id in flaw.resolvers() {
                 let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
-                self.ctx.borrow_mut().replace((resolver_id, self.graph.borrow().resolver_rho(resolver_id).into()));
+                self.ctx.borrow_mut().replace((resolver_id, self.graph.borrow().resolver_rho(resolver_id)));
                 resolver.apply(self)?;
                 self.graph.borrow_mut().return_resolver(resolver);
             }
@@ -305,12 +305,11 @@ impl Core for SolverState {
                     }
                 }
             }
-            BoolExpr::Or { terms, .. } => {
-                if terms.len() > 1 {
+            BoolExpr::Or { terms, .. }
+                if terms.len() > 1 => {
                     let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
                     self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(c_res, terms))).expect("Failed to add ClauseFlaw to graph");
                 }
-            }
             _ => {}
         }
 
