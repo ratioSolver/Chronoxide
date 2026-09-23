@@ -85,7 +85,7 @@ pub trait Resolver {
     fn preconditions(&self) -> Vec<FlawId>;
 
     /// Adds a precondition to this resolver.
-    fn add_precondition(&mut self, flaw_id: FlawId) {
+    fn add_precondition(&mut self, _flaw_id: FlawId) {
         unimplemented!("add_precondition is not implemented for this resolver");
     }
 
