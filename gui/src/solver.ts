@@ -46,15 +46,15 @@ export namespace solver {
         switch (msg.msg_type) {
           case 'status': {
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
-              this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes ?? [], flaw_msg.supports ?? [], flaw_msg.status, flaw_msg.cost));
+              this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes ?? [], flaw_msg.required_by ?? [], flaw_msg.status, flaw_msg.cost));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
-              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.sub_flaws ?? [], resolver_msg.status));
+              this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.preconditions ?? [], resolver_msg.status));
 
             for (const listener of this.listeners) listener.initialized();
             break;
           }
           case 'new-flaw': {
-            const flaw = new Flaw(this, msg.id, msg.phi, msg.causes ?? [], msg.supports ?? [], msg.status, msg.cost);
+            const flaw = new Flaw(this, msg.id, msg.phi, msg.causes ?? [], msg.required_by ?? [], msg.status, msg.cost);
             this.flaws.set(msg.id, flaw);
             for (const listener of this.listeners) listener.new_flaw(flaw);
             break;
@@ -82,7 +82,7 @@ export namespace solver {
             break;
           }
           case 'new-resolver': {
-            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.sub_flaws ?? [], msg.status);
+            const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.preconditions ?? [], msg.status);
             this.resolvers.set(msg.id, resolver);
             for (const listener of this.listeners) listener.new_resolver(resolver);
             break;
@@ -106,8 +106,8 @@ export namespace solver {
           case 'new-causal-link': {
             const flaw = this.flaws.get(msg.flaw_id)!;
             const resolver = this.resolvers.get(msg.resolver_id)!;
-            flaw._add_support(resolver.get_id());
-            resolver._add_sub_flaw(flaw.get_id());
+            flaw._add_required_by(resolver.get_id());
+            resolver._add_precondition(flaw.get_id());
             for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
             break;
           }
@@ -164,20 +164,20 @@ export namespace solver {
     private readonly id: string;
     private readonly phi: string;
     private readonly causes: string[];
-    private supports: string[];
+    private required_by: string[];
     private status: Status;
     private cost?: number;
 
-    constructor(solver: Solver, id: string, phi: string, causes: string[], supports: string[], status: Status, cost?: number) {
+    constructor(solver: Solver, id: string, phi: string, causes: string[], required_by: string[], status: Status, cost?: number) {
       this.solver = solver;
       this.id = id;
       this.phi = phi;
       this.causes = causes;
-      this.supports = supports;
+      this.required_by = required_by;
       this.status = status;
       this.cost = cost;
-      for (const support_id of supports) {
-        solver.get_resolver(support_id)!._add_sub_flaw(id);
+      for (const support_id of required_by) {
+        solver.get_resolver(support_id)!._add_precondition(id);
       }
     }
 
@@ -185,8 +185,8 @@ export namespace solver {
     get_id(): string { return this.id; }
     get_phi(): string { return this.phi; }
     get_causes(): string[] { return this.causes; }
-    get_supports(): string[] { return this.supports; }
-    _add_support(support_id: string) { this.supports.push(support_id); }
+    get_required_by(): string[] { return this.required_by; }
+    _add_required_by(res_id: string) { this.required_by.push(res_id); }
     get_status(): Status { return this.status; }
     _set_status(status: Status) { this.status = status; }
     get_cost(): number { return this.cost ?? Infinity; }
@@ -199,16 +199,16 @@ export namespace solver {
     private readonly rho: string;
     private readonly flaw: string;
     private readonly intrinsic_cost: number;
-    private sub_flaws: string[];
+    private preconditions: string[];
     private status: Status;
 
-    constructor(solver: Solver, id: string, rho: string, flaw: string, intrinsic_cost: number, sub_flaws: string[], status: Status) {
+    constructor(solver: Solver, id: string, rho: string, flaw: string, intrinsic_cost: number, preconditions: string[], status: Status) {
       this.solver = solver;
       this.id = id;
       this.rho = rho;
       this.flaw = flaw;
       this.intrinsic_cost = intrinsic_cost;
-      this.sub_flaws = sub_flaws;
+      this.preconditions = preconditions;
       this.status = status;
     }
 
@@ -216,11 +216,11 @@ export namespace solver {
     get_id(): string { return this.id; }
     get_rho(): string { return this.rho; }
     get_flaw(): string { return this.flaw; }
-    get_sub_flaws(): string[] { return this.sub_flaws; }
-    _add_sub_flaw(sub_flaw_id: string) { this.sub_flaws.push(sub_flaw_id); }
+    get_preconditions(): string[] { return this.preconditions; }
+    _add_precondition(flaw_id: string) { this.preconditions.push(flaw_id); }
     get_intrinsic_cost(): number { return this.intrinsic_cost; }
     get_cost(): number {
-      const req_costs = this.sub_flaws.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
+      const req_costs = this.preconditions.map(req_id => this.solver.get_flaw(req_id)!.get_cost());
       const max_req_cost = req_costs.length > 0 ? Math.max(...req_costs) : 0;
       return this.get_intrinsic_cost() + max_req_cost;
     }
@@ -234,9 +234,9 @@ export namespace solver {
   export type ReusableResourceTimeline = { type: 'ReusableResource'; capacity: InfRational; intervals: ReusableResourceInterval[]; };
   export type Timeline = StateVariableTimeline | ReusableResourceTimeline;
   type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage>, timelines: Record<string, Timeline> };
-  type PartialFlawMessage = { phi: string, causes?: string[], supports?: string[], cost?: number, status: Status };
+  type PartialFlawMessage = { phi: string, causes?: string[], required_by?: string[], cost?: number, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
-  type PartialResolverMessage = { rho: string, flaw_id: string, sub_flaws?: string[], intrinsic_cost: number, status: Status };
+  type PartialResolverMessage = { rho: string, flaw_id: string, preconditions?: string[], intrinsic_cost: number, status: Status };
   type ResolverMessage = ({ id: string } & PartialResolverMessage);
   export type Rational = { num: number, den: number };
   export type InfRational = Rational & { inf?: Rational };

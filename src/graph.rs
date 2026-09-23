@@ -63,6 +63,8 @@ pub trait Flaw {
 
     /// Resolvers that can potentially solve this flaw.
     fn resolvers(&self) -> Vec<ResolverId>;
+
+    fn to_json(&self) -> serde_json::Value;
 }
 
 pub trait Resolver {
@@ -81,6 +83,8 @@ pub trait Resolver {
 
     /// Preconditions that must be satisfied for this resolver to be applicable.
     fn preconditions(&self) -> Vec<FlawId>;
+
+    fn to_json(&self) -> serde_json::Value;
 }
 
 enum Update {
@@ -154,6 +158,17 @@ impl Graph {
         };
         trace!("Adding flaw: {} ({})", flaw.id(), phi);
 
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewFlaw {
+            flaw_id: f_id,
+            phi: phi.to_string(),
+            causes: flaw.causes().to_vec(),
+            required_by: flaw.required_by().to_vec(),
+            status: smt.get_bool_val(&phi),
+            cost: f64::INFINITY,
+            data: flaw.to_json(),
+        });
+
         let cost = smt.new_dl_var();
 
         self.flaws.push(Some(flaw));
@@ -204,6 +219,17 @@ impl Graph {
         let r_id = ResolverId(self.resolvers.len());
         trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
         resolver.set_id(r_id);
+
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewResolver {
+            resolver_id: r_id,
+            flaw_id: resolver.flaw(),
+            rho: rho.to_string(),
+            status: smt.get_bool_val(&rho),
+            intrinsic_cost: resolver.intrinsic_cost().to_f64(),
+            preconditions: resolver.preconditions().to_vec(),
+            data: resolver.to_json(),
+        });
 
         let flaw_id = resolver.flaw();
         // ρ → ϕ (applying the resolver implies solving the flaw)

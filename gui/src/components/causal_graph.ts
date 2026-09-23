@@ -62,10 +62,10 @@ export function causal_graph(slv: solver.Solver): VNode {
       lineStyle: edge_style(resolver.get_status()),
     }));
     for (const flaw of flaws)
-      for (const support_id of flaw.get_supports())
+      for (const res_id of flaw.get_required_by())
         links.push({
           source: flaw.get_id(),
-          target: support_id,
+          target: res_id,
           lineStyle: edge_style(flaw.get_status()),
         });
 

@@ -47,6 +47,12 @@ impl Flaw for BoolFlaw {
     fn resolvers(&self) -> Vec<ResolverId> {
         self.resolvers.clone()
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "bool"
+        })
+    }
 }
 
 struct BoolResolver {
@@ -75,11 +81,15 @@ impl Resolver for BoolResolver {
         rug::Rational::from(1)
     }
 
-    fn apply(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
+    fn apply(&mut self, _slv: &SolverState) -> Result<(), crate::SolverError> {
         Ok(())
     }
 
     fn preconditions(&self) -> Vec<FlawId> {
         vec![]
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::Value::Null
     }
 }

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
@@ -55,7 +55,7 @@ async fn main() {
         }
     }
     match slv.solve().await {
-        Ok(_) => trace!("Solver finished successfully"),
+        Ok(_) => info!("Solver finished successfully"),
         Err(e) => match e {
             SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
             SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
@@ -105,7 +105,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         };
 
                         let send_result = match event {
-                            SolverEvent::NewFlaw{ flaw_id, phi, causes, supports, status, cost, data } => {
+                            SolverEvent::NewFlaw{ flaw_id, phi, causes, required_by, status, cost, data } => {
                                 let mut msg = json!({
                                     "msg_type": "new-flaw",
                                     "id": format!("{}", flaw_id),
@@ -115,8 +115,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 if !causes.is_empty() {
                                     msg["causes"] = Value::Array(causes.iter().map(|id| Value::String(format!("{}", id))).collect());
                                 }
-                                if !supports.is_empty() {
-                                    msg["supports"] = Value::Array(supports.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                if !required_by.is_empty() {
+                                    msg["required_by"] = Value::Array(required_by.iter().map(|id| Value::String(format!("{}", id))).collect());
                                 }
                                 if cost.is_finite() {
                                     msg["cost"] = Value::from(cost);
@@ -147,7 +147,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 });
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
-                            SolverEvent::NewResolver { resolver_id, rho, flaw_id, sub_flaws, intrinsic_cost, status, data } => {
+                            SolverEvent::NewResolver { resolver_id, rho, flaw_id, preconditions, intrinsic_cost, status, data } => {
                                 let mut msg = json!({
                                     "msg_type": "new-resolver",
                                     "id": format!("{}", resolver_id),
@@ -156,8 +156,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                     "intrinsic_cost": intrinsic_cost,
                                     "status": status,
                                 });
-                                if !sub_flaws.is_empty() {
-                                    msg["sub_flaws"] = Value::Array(sub_flaws.iter().map(|id| Value::String(format!("{}", id))).collect());
+                                if !preconditions.is_empty() {
+                                    msg["preconditions"] = Value::Array(preconditions.iter().map(|id| Value::String(format!("{}", id))).collect());
                                 }
                                 msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
