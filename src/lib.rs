@@ -1,11 +1,12 @@
 use crate::{
+    flaws::bool_flaw::BoolFlaw,
     graph::{FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
-    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var},
+    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
     language::Disjunction,
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
@@ -41,7 +42,6 @@ struct SolverState {
     smt: RefCell<SeMiTONE>,
     graph: RefCell<Graph>,
     ctx: RefCell<Option<(ResolverId, ast::BoolExpr)>>,
-    tx_event: broadcast::Sender<SolverEvent>,
 }
 
 impl SolverState {
@@ -53,14 +53,17 @@ impl SolverState {
             },
             slv: core.clone(),
             smt: RefCell::new(SeMiTONE::new()),
-            graph: RefCell::new(Graph::new(tx_event.clone())),
+            graph: RefCell::new(Graph::new(tx_event)),
             ctx: RefCell::new(None),
-            tx_event,
         });
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
         }
         slv
+    }
+
+    fn get_ctx(&self) -> (Option<ResolverId>, ast::BoolExpr) {
+        if let Some((resolver_id, rho)) = self.ctx.borrow().clone() { (Some(resolver_id), rho) } else { (None, ast::BoolExpr::True) }
     }
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
@@ -94,11 +97,11 @@ impl SolverState {
     fn build_graph(&self) -> Result<(), SolverError> {
         info!("Building graph...");
         while !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
-            let flaw_id = match self.graph.borrow_mut().pop_flaw() {
-                Some(flaw_id) => flaw_id,
-                None => return Err(SolverError::Inconsistent),
+            let (mut flaw, id) = {
+                let mut graph = self.graph.borrow_mut();
+                let id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
+                (graph.take_flaw(id).expect("Flaw should exist in graph"), id)
             };
-            let mut flaw = self.graph.borrow_mut().take_flaw(flaw_id).expect("Flaw should exist in graph");
             flaw.expand(self)?;
             for resolver_id in flaw.resolvers() {
                 let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
@@ -107,6 +110,8 @@ impl SolverState {
                 self.graph.borrow_mut().return_resolver(resolver);
             }
             self.graph.borrow_mut().return_flaw(flaw);
+            let smt = self.smt.borrow();
+            self.graph.borrow_mut().propagate(&smt, id);
         }
         Ok(())
     }
@@ -187,7 +192,10 @@ impl Core for SolverState {
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), if value { ast::BoolExpr::True } else { ast::BoolExpr::False })))
     }
     fn new_bool_var(&self) -> Slot {
-        let var = self.smt.borrow_mut().new_bool();
+        let (c_res, rho) = self.get_ctx();
+        let mut smt = self.smt.borrow_mut();
+        let var = smt.new_bool();
+        self.graph.borrow_mut().add_flaw(&mut smt, Box::new(BoolFlaw::new(c_res, rho))).expect("Failed to add BoolFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -279,7 +287,31 @@ impl Core for SolverState {
         Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(left_lin), Box::new(right_lin))))))
     }
 
-    fn assert(&self, _term: Rc<BoolExpr>) -> bool {
+    fn assert(&self, term: Rc<BoolExpr>) -> bool {
+        let (_c_res, rho) = self.get_ctx();
+        if !self.smt.borrow_mut().assert(!rho | expr_to_bool(term.as_ref())) {
+            return false;
+        }
+
+        let cnf_expr = to_cnf(term.clone());
+        match cnf_expr.as_ref() {
+            BoolExpr::And { terms, .. } => {
+                for clause in terms {
+                    if let BoolExpr::Or { terms, .. } = clause.as_ref()
+                        && terms.len() > 1
+                    {
+                        let _terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                    }
+                }
+            }
+            BoolExpr::Or { terms, .. } => {
+                if terms.len() > 1 {
+                    let _terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                }
+            }
+            _ => {}
+        }
+
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
@@ -302,6 +334,67 @@ impl Core for SolverState {
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
     }
+}
+
+fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
+    match expr {
+        BoolExpr::Term { term, .. } => {
+            if let Slot::Primitive(var) = term
+                && let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>()
+            {
+                return var.lit.clone();
+            }
+            unreachable!("Expected BoolVar in BoolExpr::Term");
+        }
+        BoolExpr::Eq { left, right, .. } => eq_to_bool(left, right),
+        BoolExpr::Lt { left, right, .. } => {
+            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
+                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+            {
+                return left.lin.lt(&right.lin);
+            }
+            unreachable!("Expected compatible primitive types in BoolExpr::Lt");
+        }
+        BoolExpr::Leq { left, right, .. } => {
+            if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
+                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+            {
+                return left.lin.le(&right.lin);
+            }
+            unreachable!("Expected compatible primitive types in BoolExpr::Leq");
+        }
+        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
+        BoolExpr::Not { term, .. } => !expr_to_bool(term),
+    }
+}
+
+fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
+    match (left, right) {
+        (Slot::Primitive(left), Slot::Primitive(right)) => {
+            if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
+                return left.lit.eq(&right.lit);
+            } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
+                return left.lin.eq(&right.lin);
+            } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
+                return left.var.eq(&right.var);
+            }
+        }
+        (Slot::Primitive(left), Slot::ObjectRef(right)) => {
+            if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
+                return left.var.eq(**right as i32);
+            }
+        }
+        (Slot::ObjectRef(left), Slot::Primitive(right)) => {
+            if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
+                return right.var.eq(**left as i32);
+            }
+        }
+        _ => {
+            unreachable!("Expected compatible types in equality");
+        }
+    }
+    unreachable!("Expected compatible types in equality");
 }
 
 #[derive(Clone)]
@@ -450,6 +543,7 @@ pub fn rat_to_json(val: &Rational) -> Value {
     }
 }
 
+#[derive(Debug)]
 pub enum SolverError {
     RuntimeError(String),
     Inconsistent,

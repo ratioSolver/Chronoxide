@@ -38,9 +38,18 @@ impl Flaw for BoolFlaw {
     fn expand(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        assert!(smt.get_bool_val(&self.expr).is_none());
-        self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
-        self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+        match smt.get_bool_val(&self.expr) {
+            Some(true) => {
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
+            }
+            Some(false) => {
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+            }
+            None => {
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+            }
+        }
         Ok(())
     }
 

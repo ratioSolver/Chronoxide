@@ -87,24 +87,18 @@ pub trait Resolver {
     fn to_json(&self) -> serde_json::Value;
 }
 
-enum Update {
-    Flaw(FlawId, f64),
-    Resolver(ResolverId, f64),
-}
-
 pub struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
 
     h_flaw: Vec<f64>,
-    h_resolver: Vec<f64>,
 
     flaw_phi: Vec<BoolExpr>,
     flaw_cost: Vec<DlVar>,
     resolver_rho: Vec<BoolExpr>,
     resolver_cost: Vec<DlVar>,
 
-    trail: Vec<Update>,
+    trail: Vec<(FlawId, f64)>,
     trail_lim: Vec<usize>,
 
     flaw_q: VecDeque<FlawId>,
@@ -119,7 +113,6 @@ impl Graph {
             resolvers: Vec::new(),
 
             h_flaw: Vec::new(),
-            h_resolver: Vec::new(),
 
             flaw_phi: Vec::new(),
             flaw_cost: Vec::new(),
@@ -197,7 +190,7 @@ impl Graph {
             let mut min_cost = f64::INFINITY;
 
             for &resolver_id in self.flaws[*flaw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
-                let resolver_cost = self.h_resolver[*resolver_id];
+                let resolver_cost = self.compute_resolver_cost(smt, resolver_id);
                 if resolver_cost < min_cost {
                     min_cost = resolver_cost;
                 }
@@ -246,7 +239,6 @@ impl Graph {
         self.resolvers.push(Some(resolver));
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
-        self.h_resolver.push(f64::INFINITY);
 
         Ok(r_id)
     }
@@ -262,10 +254,6 @@ impl Graph {
 
     pub fn resolver_rho(&self, resolver_id: ResolverId) -> BoolExpr {
         self.resolver_rho[*resolver_id].clone()
-    }
-
-    pub fn resolver_cost(&self, resolver_id: ResolverId) -> f64 {
-        self.h_resolver[*resolver_id]
     }
 
     fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
@@ -305,11 +293,8 @@ impl Graph {
 
         let target_len = self.trail_lim[level];
         while self.trail.len() > target_len {
-            let update = self.trail.pop().unwrap();
-            match update {
-                Update::Flaw(f, old_cost) => self.h_flaw[*f] = old_cost,
-                Update::Resolver(r, old_cost) => self.h_resolver[*r] = old_cost,
-            }
+            let (f, old_cost) = self.trail.pop().unwrap();
+            self.h_flaw[*f] = old_cost;
         }
         self.trail_lim.truncate(level);
     }
@@ -328,22 +313,16 @@ impl Graph {
             let c_cost = self.compute_flaw_cost(smt, f_id);
 
             if c_cost != old_cost {
-                self.trail.push(Update::Flaw(f_id, old_cost));
+                self.trail.push((f_id, old_cost));
                 self.h_flaw[*f_id] = c_cost;
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id: f_id, cost: c_cost });
 
                 for &r_id in self.flaws[*f_id].as_ref().expect("Flaw should exist").required_by().iter() {
                     let parent_flaw_id = self.resolvers[*r_id].as_ref().expect("Resolver should exist").flaw();
-                    let r_old_cost = self.h_resolver[*r_id];
-                    let r_new_cost = self.compute_resolver_cost(smt, r_id);
-
-                    if r_new_cost != r_old_cost {
-                        self.trail.push(Update::Resolver(r_id, r_old_cost));
-                        self.h_resolver[*r_id] = r_new_cost;
-
-                        if !in_queue[*parent_flaw_id] {
-                            queue.push_back(parent_flaw_id);
-                            in_queue[*parent_flaw_id] = true;
-                        }
+                    if !in_queue[*parent_flaw_id] {
+                        queue.push_back(parent_flaw_id);
+                        in_queue[*parent_flaw_id] = true;
                     }
                 }
             }

@@ -159,7 +159,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 if !preconditions.is_empty() {
                                     msg["preconditions"] = Value::Array(preconditions.iter().map(|id| Value::String(format!("{}", id))).collect());
                                 }
-                                msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
+                                if let Some(data) = data.as_object() {
+                                    msg.as_object_mut().unwrap().extend(data.clone());
+                                }
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
                             SolverEvent::ResolverStatusUpdate { resolver_id, status } => {
