@@ -104,6 +104,9 @@ pub trait Resolver {
 pub struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
+    c_flaw: Option<FlawId>,
+    c_res: Option<(ResolverId, BoolExpr)>,
+    c_preconditions: Vec<FlawId>,
 
     h_flaw: Vec<f64>,
 
@@ -125,6 +128,9 @@ impl Graph {
         Self {
             flaws: Vec::new(),
             resolvers: Vec::new(),
+            c_flaw: None,
+            c_res: None,
+            c_preconditions: Vec::new(),
 
             h_flaw: Vec::new(),
 
@@ -145,6 +151,9 @@ impl Graph {
     pub fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
         let f_id = FlawId(self.flaws.len());
         flaw.set_id(f_id);
+        if self.c_res.is_some() {
+            self.c_preconditions.push(f_id);
+        }
 
         let causes = flaw.causes();
         let phi = match causes.len() {
@@ -189,12 +198,18 @@ impl Graph {
     }
 
     pub(super) fn take_flaw(&mut self, id: FlawId) -> Option<Box<dyn Flaw>> {
+        self.c_flaw.replace(id);
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(id)));
         self.flaws[*id].take()
     }
 
     pub(super) fn return_flaw(&mut self, flaw: Box<dyn Flaw>) {
         let id = flaw.id();
         self.flaws[*id] = Some(flaw);
+        self.c_flaw.take();
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
     }
 
     fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
@@ -257,13 +272,26 @@ impl Graph {
         Ok(r_id)
     }
 
-    pub(super) fn take_resolver(&mut self, id: ResolverId) -> Option<Box<dyn Resolver>> {
-        self.resolvers[*id].take()
+    pub(super) fn current_resolver(&self) -> Option<(ResolverId, BoolExpr)> {
+        self.c_res.clone()
     }
 
-    pub(super) fn return_resolver(&mut self, resolver: Box<dyn Resolver>) {
+    pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
+        self.c_res.replace((res_id, self.resolver_rho[*res_id].clone()));
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(res_id)));
+        self.resolvers[*res_id].take()
+    }
+
+    pub(super) fn return_resolver(&mut self, mut resolver: Box<dyn Resolver>) {
+        for pre in self.c_preconditions.drain(..) {
+            resolver.add_precondition(pre);
+        }
         let id = resolver.id();
         self.resolvers[*id] = Some(resolver);
+        self.c_res.take();
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 
     pub fn resolver_rho(&self, resolver_id: ResolverId) -> BoolExpr {
