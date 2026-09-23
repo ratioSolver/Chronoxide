@@ -1,32 +1,33 @@
-use crate::{
-    SolverState,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
-};
 use semitone::ast::BoolExpr;
 use serde_json::{Value, json};
 use tracing::trace;
 
-pub(crate) struct BoolFlaw {
+use crate::{
+    SolverState,
+    graph::{Flaw, FlawId, Resolver, ResolverId},
+};
+
+pub(crate) struct ClauseFlaw {
     id: FlawId,
 
     causes: Vec<ResolverId>,
     resolvers: Vec<ResolverId>,
 
-    expr: BoolExpr,
+    literals: Vec<BoolExpr>,
 }
 
-impl BoolFlaw {
-    pub(crate) fn new(cause: Option<ResolverId>, expr: BoolExpr) -> Self {
+impl ClauseFlaw {
+    pub(crate) fn new(cause: Option<ResolverId>, literals: Vec<BoolExpr>) -> Self {
         Self {
             id: FlawId::default(),
             causes: cause.into_iter().collect(),
             resolvers: Vec::with_capacity(2),
-            expr,
+            literals,
         }
     }
 }
 
-impl Flaw for BoolFlaw {
+impl Flaw for ClauseFlaw {
     fn id(&self) -> FlawId {
         self.id
     }
@@ -37,20 +38,13 @@ impl Flaw for BoolFlaw {
         self.causes.clone()
     }
 
-    fn expand(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
-        trace!("Expanding BoolFlaw {} with expression: {}", self.id, self.expr);
+    fn expand(&mut self, slv: &crate::SolverState) -> Result<(), crate::SolverError> {
+        trace!("Expanding ClauseFlaw {} with literals: {}", self.id, self.literals.iter().map(|l| format!("{}", l)).collect::<Vec<_>>().join(", "));
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        match smt.get_bool_val(&self.expr) {
-            Some(true) => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
-            }
-            Some(false) => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
-            }
-            None => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+        for literal in &self.literals {
+            if smt.get_bool_val(literal) != Some(false) {
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(ClauseResolver::new(self.id)), literal.clone())?);
             }
         }
         Ok(())
@@ -62,23 +56,23 @@ impl Flaw for BoolFlaw {
 
     fn to_json(&self) -> Value {
         json!({
-            "kind": "bool"
+            "kind": "clause",
         })
     }
 }
 
-struct BoolResolver {
+struct ClauseResolver {
     id: ResolverId,
     flaw: FlawId,
 }
 
-impl BoolResolver {
+impl ClauseResolver {
     fn new(flaw: FlawId) -> Self {
         Self { id: ResolverId::default(), flaw }
     }
 }
 
-impl Resolver for BoolResolver {
+impl Resolver for ClauseResolver {
     fn id(&self) -> ResolverId {
         self.id
     }

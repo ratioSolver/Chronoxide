@@ -1,5 +1,5 @@
 use crate::{
-    flaws::bool_flaw::BoolFlaw,
+    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw},
     graph::{FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -288,7 +288,7 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        let (_c_res, rho) = self.get_ctx();
+        let (c_res, rho) = self.get_ctx();
         if !self.smt.borrow_mut().assert(!rho | expr_to_bool(term.as_ref())) {
             return false;
         }
@@ -300,13 +300,15 @@ impl Core for SolverState {
                     if let BoolExpr::Or { terms, .. } = clause.as_ref()
                         && terms.len() > 1
                     {
-                        let _terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                        let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(c_res, terms))).expect("Failed to add ClauseFlaw to graph");
                     }
                 }
             }
             BoolExpr::Or { terms, .. } => {
                 if terms.len() > 1 {
-                    let _terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                    let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
+                    self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(c_res, terms))).expect("Failed to add ClauseFlaw to graph");
                 }
             }
             _ => {}
