@@ -1,5 +1,3 @@
-use std::{rc::Rc, str::FromStr};
-
 use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
@@ -10,6 +8,7 @@ use riddle::{
     scope::Scope,
 };
 use serde_json::Value;
+use std::{rc::Rc, str::FromStr};
 
 pub(crate) struct DisjunctionFlaw {
     id: FlawId,
@@ -25,7 +24,7 @@ impl DisjunctionFlaw {
         Self {
             id: FlawId::default(),
             causes: cause.into_iter().collect(),
-            resolvers: Vec::with_capacity(2),
+            resolvers: Vec::with_capacity(disjunction.disjuncts.len()),
             disjunction,
         }
     }
@@ -75,7 +74,7 @@ struct DisjunctionResolver {
 }
 
 impl DisjunctionResolver {
-    pub(crate) fn new(flaw: FlawId, cost: rug::Rational, scp: Rc<dyn Scope>, env: Rc<dyn Env>, disjunct: Vec<Statement>) -> Self {
+    fn new(flaw: FlawId, cost: rug::Rational, scp: Rc<dyn Scope>, env: Rc<dyn Env>, disjunct: Vec<Statement>) -> Self {
         Self { id: ResolverId::default(), flaw, cost, preconditions: vec![], scp, env, disjunct }
     }
 }
@@ -92,7 +91,7 @@ impl Resolver for DisjunctionResolver {
     }
 
     fn intrinsic_cost(&self) -> rug::Rational {
-        rug::Rational::from(1)
+        self.cost.clone()
     }
 
     fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
@@ -109,10 +108,6 @@ impl Resolver for DisjunctionResolver {
 
     fn add_precondition(&mut self, flaw_id: FlawId) {
         self.preconditions.push(flaw_id);
-    }
-
-    fn to_json(&self) -> Value {
-        Value::Null
     }
 }
 

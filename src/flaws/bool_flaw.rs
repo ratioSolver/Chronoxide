@@ -88,20 +88,4 @@ impl Resolver for BoolResolver {
     fn flaw(&self) -> FlawId {
         self.flaw
     }
-
-    fn intrinsic_cost(&self) -> rug::Rational {
-        rug::Rational::from(1)
-    }
-
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), crate::SolverError> {
-        Ok(())
-    }
-
-    fn preconditions(&self) -> Vec<FlawId> {
-        vec![]
-    }
-
-    fn to_json(&self) -> Value {
-        Value::Null
-    }
 }

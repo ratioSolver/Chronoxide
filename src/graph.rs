@@ -8,6 +8,7 @@ use semitone::{
     SeMiTONE,
     ast::{BoolExpr, DlVar},
 };
+use serde_json::Value;
 use std::{collections::VecDeque, fmt, ops::Deref};
 use tokio::sync::broadcast;
 use tracing::trace;
@@ -76,20 +77,28 @@ pub trait Resolver {
     fn flaw(&self) -> FlawId;
 
     /// The intrinsic cost of selecting this resolver, independent from the current state of the graph.
-    fn intrinsic_cost(&self) -> rug::Rational;
+    fn intrinsic_cost(&self) -> rug::Rational {
+        rug::Rational::from(1)
+    }
 
     /// Applies this resolver.
-    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError>;
+    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
+        Ok(())
+    }
 
     /// Preconditions that must be satisfied for this resolver to be applicable.
-    fn preconditions(&self) -> Vec<FlawId>;
+    fn preconditions(&self) -> Vec<FlawId> {
+        vec![]
+    }
 
     /// Adds a precondition to this resolver.
     fn add_precondition(&mut self, _flaw_id: FlawId) {
         unimplemented!("add_precondition is not implemented for this resolver");
     }
 
-    fn to_json(&self) -> serde_json::Value;
+    fn to_json(&self) -> Value {
+        Value::Null
+    }
 }
 
 pub struct Graph {
