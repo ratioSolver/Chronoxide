@@ -5,7 +5,7 @@ use crate::{
 use riddle::{
     core::Core,
     env::{Atom, AtomId, Env},
-    scope::{Predicate, get_predicate_by_path},
+    scope::{Predicate, Type, get_predicate_by_path},
 };
 use semitone::ast::{self, BoolExpr::And};
 use serde_json::{Value, json};
@@ -53,14 +53,15 @@ impl Flaw for AtomFlaw {
     }
 
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        trace!("Expanding AtomFlaw {} for atom: {}", self.id, self.atom);
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
+        let predicate = atom.predicate();
+        trace!("Expanding AtomFlaw for atom {} with predicate {}", self.atom, predicate.name());
 
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         let sigma = slv.sigma.borrow();
 
-        for target in atom.predicate().atoms() {
+        for target in predicate.atoms() {
             if target == self.atom {
                 continue;
             }
@@ -132,6 +133,7 @@ impl Resolver for GoalResolver {
     }
 
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        trace!("Applying GoalResolver for atom {}", self.atom);
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
         atom.predicate().call(atom).map_err(|e| SolverError::RuntimeError(format!("Failed to apply GoalResolver for atom {}: {}", self.atom, e)))?;
 
@@ -173,6 +175,7 @@ impl Resolver for FactResolver {
     }
 
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        trace!("Applying FactResolver for atom {}", self.atom);
         let (_, rho) = slv.graph.borrow().current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
         let mut smt = slv.smt.borrow_mut();
         let sigma = smt.track_expr(slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?);
@@ -213,6 +216,14 @@ impl Resolver for UnificationResolver {
 
     fn intrinsic_cost(&self) -> rug::Rational {
         rug::Rational::from(0)
+    }
+
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        trace!("Applying UnificationResolver for atoms {} and {}", self.current_atom, self.target_atom);
+        let mut graph = slv.graph.borrow_mut();
+        let mut smt = slv.smt.borrow_mut();
+
+        graph.add_causal_link(&mut smt, self.flaw)
     }
 
     fn to_json(&self) -> Value {

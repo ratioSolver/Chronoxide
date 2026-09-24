@@ -354,7 +354,8 @@ impl Core for SolverState {
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
-        let atm = self.core.new_atom(predicate, fact, args);
+        let atm = self.core.new_atom(predicate.clone(), fact, args);
+        trace!("Created new atom {} with predicate {}", atm, predicate.full_name());
         self.sigma.borrow_mut().push(smt.new_bool());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
         let flaw = graph.add_flaw(&mut smt, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
