@@ -39,8 +39,9 @@ impl Flaw for ClauseFlaw {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         for literal in &self.literals {
-            if smt.get_bool_val(literal) != Some(false) {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(ClauseResolver::new(self.id)), literal.clone())?);
+            let expr = smt.track_expr(literal);
+            if smt.get_lit_val(expr) != Some(false) {
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(ClauseResolver::new(self.id)), expr)?);
             }
         }
         Ok(())

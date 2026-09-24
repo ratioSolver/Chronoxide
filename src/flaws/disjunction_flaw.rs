@@ -46,7 +46,7 @@ impl Flaw for DisjunctionFlaw {
         let mut smt = slv.smt.borrow_mut();
 
         for (disjunct, cost) in &self.disjunction.disjuncts {
-            let rho = smt.new_bool();
+            let rho = smt.new_lit();
             let resolver_id = graph.add_resolver(&mut smt, Box::new(DisjunctionResolver::new(self.id, expr_to_cost(cost), self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec())), rho)?;
             self.resolvers.push(resolver_id);
         }

@@ -196,9 +196,10 @@ impl Core for SolverState {
     }
     fn new_bool_var(&self) -> Slot {
         let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
         let var = smt.new_bool();
-        let cause = self.graph.borrow().current_resolver().map(|(res_id, _)| res_id);
-        self.graph.borrow_mut().add_flaw(&mut smt, Box::new(BoolFlaw::new(cause, var.clone()))).expect("Failed to add BoolFlaw to graph");
+        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+        graph.add_flaw(&mut smt, Box::new(BoolFlaw::new(cause, var.clone()))).expect("Failed to add BoolFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -291,14 +292,12 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
+        let mut smt = self.smt.borrow_mut();
+        let expr = smt.track_expr(expr_to_bool(term.as_ref()));
         if let Some((_c_res, rho)) = self.graph.borrow().current_resolver().as_ref() {
-            if !self.smt.borrow_mut().assert(!rho | expr_to_bool(term.as_ref())) {
-                return false;
-            }
+            smt.add_clause(vec![!*rho, expr]).expect("Failed to add clause for resolver implication");
         } else {
-            if !self.smt.borrow_mut().assert(expr_to_bool(term.as_ref())) {
-                return false;
-            }
+            smt.add_clause(vec![expr]).expect("Failed to add clause for assertion");
         }
 
         let cnf_expr = to_cnf(term.clone());
@@ -308,16 +307,18 @@ impl Core for SolverState {
                     if let BoolExpr::Or { terms, .. } = clause.as_ref()
                         && terms.len() > 1
                     {
-                        let cause = self.graph.borrow().current_resolver().map(|(res_id, _)| res_id);
+                        let mut graph = self.graph.borrow_mut();
+                        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
                         let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                        graph.add_flaw(&mut smt, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
                     }
                 }
             }
             BoolExpr::Or { terms, .. } if terms.len() > 1 => {
-                let cause = self.graph.borrow().current_resolver().map(|(res_id, _)| res_id);
+                let mut graph = self.graph.borrow_mut();
+                let cause = graph.current_resolver().map(|(res_id, _)| res_id);
                 let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                graph.add_flaw(&mut smt, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
             }
             _ => {}
         }
@@ -325,15 +326,19 @@ impl Core for SolverState {
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
-        let var = self.smt.borrow_mut().new_enum(domain.clone());
-        let cause = self.graph.borrow().current_resolver().map(|(res_id, _)| res_id);
-        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
+        let var = smt.new_enum(domain.clone());
+        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+        graph.add_flaw(&mut smt, Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
-        let cause = self.graph.borrow().current_resolver().map(|(res_id, _)| res_id);
-        self.graph.borrow_mut().add_flaw(&mut self.smt.borrow_mut(), Box::new(DisjunctionFlaw::new(cause, disjunction))).expect("Failed to add DisjunctionFlaw to graph");
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+        graph.add_flaw(&mut smt, Box::new(DisjunctionFlaw::new(cause, disjunction))).expect("Failed to add DisjunctionFlaw to graph");
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {

@@ -41,16 +41,17 @@ impl Flaw for BoolFlaw {
         trace!("Expanding BoolFlaw {} with expression: {}", self.id, self.expr);
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        match smt.get_bool_val(&self.expr) {
+        let expr = smt.track_expr(&self.expr);
+        match smt.get_lit_val(expr) {
             Some(true) => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), expr)?);
             }
             Some(false) => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !expr)?);
             }
             None => {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), self.expr.clone())?);
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !self.expr.clone())?);
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), expr)?);
+                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(BoolResolver::new(self.id)), !expr)?);
             }
         }
         Ok(())

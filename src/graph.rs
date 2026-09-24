@@ -105,16 +105,16 @@ pub struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
     c_flaw: Option<FlawId>,
-    c_res: Option<(ResolverId, BoolExpr)>,
+    c_res: Option<(ResolverId, Lit)>,
     c_preconditions: Vec<FlawId>,
 
     h_flaw: Vec<f64>,
 
     flaw_status: Vec<Option<bool>>,
-    flaw_phi: Vec<BoolExpr>,
+    flaw_phi: Vec<Lit>,
     flaw_cost: Vec<DlVar>,
     resolver_status: Vec<Option<bool>>,
-    resolver_rho: Vec<BoolExpr>,
+    resolver_rho: Vec<Lit>,
     resolver_cost: Vec<DlVar>,
 
     trail: Vec<(FlawId, f64)>,
@@ -161,18 +161,16 @@ impl Graph {
 
         let causes = flaw.causes();
         let phi = match causes.len() {
-            0 => BoolExpr::True,
+            0 => Lit::TRUE,
             _ => {
-                let phi = smt.new_bool();
+                let phi = smt.new_lit();
                 // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
                 let mut clause = Vec::with_capacity(causes.len() + 1);
                 for &r_id in causes.iter() {
-                    clause.push(!self.resolver_rho[r_id.0].clone());
+                    clause.push(!self.resolver_rho[r_id.0]);
                 }
-                clause.push(phi.clone());
-                if !smt.assert(BoolExpr::Or(clause)) {
-                    return Err(SolverError::Inconsistent);
-                }
+                clause.push(phi);
+                smt.add_clause(clause).expect("Failed to add clause for flaw causes");
                 phi
             }
         };
@@ -184,7 +182,7 @@ impl Graph {
             phi: phi.to_string(),
             causes: flaw.causes().to_vec(),
             required_by: flaw.required_by().to_vec(),
-            status: smt.get_bool_val(&phi),
+            status: smt.get_lit_val(phi),
             cost: f64::INFINITY,
             data: flaw.to_json(),
         });
@@ -192,7 +190,7 @@ impl Graph {
         let cost = smt.new_dl_var();
 
         self.flaws.push(Some(flaw));
-        self.flaw_status.push(smt.get_bool_val(&phi));
+        self.flaw_status.push(smt.get_lit_val(phi));
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
@@ -218,7 +216,7 @@ impl Graph {
     }
 
     fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
-        if smt.get_bool_val(&self.flaw_phi[*flaw_id]) == Some(false) {
+        if smt.get_lit_val(self.flaw_phi[*flaw_id]) == Some(false) {
             f64::INFINITY
         } else {
             let mut min_cost = f64::INFINITY;
@@ -234,8 +232,8 @@ impl Graph {
         }
     }
 
-    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
-        assert!(smt.get_bool_val(&rho) != Some(false), "Cannot add resolver with a false ρ");
+    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
+        assert!(smt.get_lit_val(rho) != Some(false), "Cannot add resolver with a false ρ");
         let r_id = ResolverId(self.resolvers.len());
         trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
         resolver.set_id(r_id);
@@ -245,7 +243,7 @@ impl Graph {
             resolver_id: r_id,
             flaw_id: resolver.flaw(),
             rho: rho.to_string(),
-            status: smt.get_bool_val(&rho),
+            status: smt.get_lit_val(rho),
             intrinsic_cost: resolver.intrinsic_cost().to_f64(),
             preconditions: resolver.preconditions().to_vec(),
             data: resolver.to_json(),
@@ -253,30 +251,27 @@ impl Graph {
 
         let flaw_id = resolver.flaw();
         // ρ → ϕ (applying the resolver implies solving the flaw)
-        if !smt.assert(BoolExpr::Or(vec![!rho.clone(), self.flaw_phi[*flaw_id].clone()])) {
-            return Err(SolverError::Inconsistent);
-        }
+        smt.add_clause(vec![!rho, self.flaw_phi[*flaw_id]]).expect("Failed to add clause for resolver implication");
 
         let cost = smt.new_dl_var();
         let parent_cost_var = self.flaw_cost[*flaw_id];
-        if !smt.assert(BoolExpr::Or(vec![!rho.clone(), BoolExpr::DlGe(parent_cost_var, cost, resolver.intrinsic_cost())])) {
-            return Err(SolverError::Inconsistent);
-        }
+        let dl_cnstr = smt.track_expr(BoolExpr::DlGe(parent_cost_var, cost, resolver.intrinsic_cost()));
+        smt.add_clause(vec![!rho, dl_cnstr]).expect("Failed to add clause for resolver cost implication");
 
         self.resolvers.push(Some(resolver));
-        self.resolver_status.push(smt.get_bool_val(&rho));
+        self.resolver_status.push(smt.get_lit_val(rho));
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
 
         Ok(r_id)
     }
 
-    pub(super) fn current_resolver(&self) -> Option<(ResolverId, BoolExpr)> {
-        self.c_res.clone()
+    pub(super) fn current_resolver(&self) -> Option<(ResolverId, Lit)> {
+        self.c_res
     }
 
     pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
-        self.c_res.replace((res_id, self.resolver_rho[*res_id].clone()));
+        self.c_res.replace((res_id, self.resolver_rho[*res_id]));
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(res_id)));
         self.resolvers[*res_id].take()
@@ -294,7 +289,7 @@ impl Graph {
     }
 
     fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
-        if smt.get_bool_val(&self.resolver_rho[*resolver_id]) == Some(false) {
+        if smt.get_lit_val(self.resolver_rho[*resolver_id]) == Some(false) {
             f64::INFINITY
         } else {
             #[cfg(feature = "h_add")]
@@ -308,7 +303,7 @@ impl Graph {
 
     pub(super) fn has_estimated_solution(&self, smt: &SeMiTONE) -> bool {
         for flaw in self.flaws.iter().filter_map(|f| f.as_ref()) {
-            if smt.get_bool_val(&self.flaw_phi[*flaw.id()]) == Some(true) && self.h_flaw[*flaw.id()] == f64::INFINITY {
+            if smt.get_lit_val(self.flaw_phi[*flaw.id()]) == Some(true) && self.h_flaw[*flaw.id()] == f64::INFINITY {
                 return false;
             }
         }
@@ -323,10 +318,10 @@ impl Graph {
         for flaw in &self.flaws {
             if let Some(flaw) = flaw.as_ref() {
                 let f_id = flaw.id();
-                if smt.get_bool_val(&self.flaw_phi[*f_id]) == Some(true) {
+                if smt.get_lit_val(self.flaw_phi[*f_id]) == Some(true) {
                     let mut is_resolved = false;
                     for r_id in flaw.resolvers() {
-                        if smt.get_bool_val(&self.resolver_rho[*r_id]) == Some(true) {
+                        if smt.get_lit_val(self.resolver_rho[*r_id]) == Some(true) {
                             is_resolved = true;
                             break;
                         }
@@ -342,8 +337,8 @@ impl Graph {
 
     pub(super) fn pick_branching_literal(&self, smt: &mut SeMiTONE) -> Option<Lit> {
         for &f_id in &self.flaw_q {
-            if smt.get_bool_val(&self.flaw_phi[*f_id]).is_none() {
-                return Some(!smt.track_expr(self.flaw_phi[*f_id].clone()));
+            if smt.get_lit_val(self.flaw_phi[*f_id]).is_none() {
+                return Some(!self.flaw_phi[*f_id]);
             }
         }
 
@@ -359,7 +354,7 @@ impl Graph {
 
         let flaw = self.flaws[*best_flaw_id].as_ref().unwrap();
         for &r_id in flaw.resolvers().iter() {
-            if smt.get_bool_val(&self.resolver_rho[*r_id]) == Some(false) {
+            if smt.get_lit_val(self.resolver_rho[*r_id]) == Some(false) {
                 continue;
             }
 
@@ -370,7 +365,7 @@ impl Graph {
             }
         }
 
-        Some(smt.track_expr(self.resolver_rho[*best_res_id.expect("There should be at least one resolver for the flaw")].clone()))
+        Some(self.resolver_rho[*best_res_id.expect("There should be at least one resolver for the flaw")])
     }
 
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
@@ -381,7 +376,7 @@ impl Graph {
         let mut affected_flaws = Vec::new();
 
         for i in 0..self.flaws.len() {
-            let current = smt.get_bool_val(&self.flaw_phi[i]);
+            let current = smt.get_lit_val(self.flaw_phi[i]);
             if current != self.flaw_status[i] {
                 #[cfg(feature = "server")]
                 let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: FlawId(i), status: current });
@@ -395,7 +390,7 @@ impl Graph {
         }
 
         for i in 0..self.resolvers.len() {
-            let current = smt.get_bool_val(&self.resolver_rho[i]);
+            let current = smt.get_lit_val(self.resolver_rho[i]);
             if current != self.resolver_status[i] {
                 #[cfg(feature = "server")]
                 let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: ResolverId(i), status: current });
