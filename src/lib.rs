@@ -69,48 +69,58 @@ impl SolverState {
         info!("Solving problem...");
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
+            self.graph.borrow_mut().sync(&self.smt.borrow());
+
             match prop_result {
                 Ok(_) => {
-                    self.build_graph()?;
-                    break;
+                    if !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
+                        trace!("Expanding graph...");
+                        let (mut flaw, id) = {
+                            let mut graph = self.graph.borrow_mut();
+                            let id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
+                            (graph.take_flaw(id).expect("Flaw should exist in graph"), id)
+                        };
+
+                        flaw.expand(self)?;
+
+                        for resolver_id in flaw.resolvers() {
+                            let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
+                            resolver.apply(self)?;
+                            self.graph.borrow_mut().return_resolver(resolver);
+                        }
+
+                        let mut graph = self.graph.borrow_mut();
+                        graph.return_flaw(flaw);
+                        graph.propagate_costs(&self.smt.borrow(), &[id]);
+                        continue;
+                    }
+
+                    let mut graph = self.graph.borrow_mut();
+                    let mut smt = self.smt.borrow_mut();
+                    if let Some(decision_var) = graph.pick_branching_literal(&mut smt) {
+                        graph.push();
+                        smt.decide(decision_var);
+                    } else {
+                        trace!("No more decisions to make, solution found");
+                        break;
+                    }
                 }
                 Err((bt_level, lemma)) => {
-                    if self.smt.borrow().decision_level() == 0 {
+                    let mut smt = self.smt.borrow_mut();
+                    if smt.decision_level() == 0 {
                         return Err(SolverError::Inconsistent);
                     }
-                    self.cancel_until(bt_level);
-                    if self.smt.borrow_mut().add_clause(lemma).is_err() {
+                    smt.cancel_until(bt_level);
+                    let mut graph = self.graph.borrow_mut();
+                    graph.cancel_until(bt_level);
+                    graph.sync(&smt);
+                    if smt.add_clause(lemma).is_err() {
                         return Err(SolverError::Inconsistent);
                     }
                 }
             }
         }
         Ok(())
-    }
-
-    fn build_graph(&self) -> Result<(), SolverError> {
-        info!("Building graph...");
-        while !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
-            let (mut flaw, id) = {
-                let mut graph = self.graph.borrow_mut();
-                let id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
-                (graph.take_flaw(id).expect("Flaw should exist in graph"), id)
-            };
-            flaw.expand(self)?;
-            for resolver_id in flaw.resolvers() {
-                let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
-                resolver.apply(self)?;
-                self.graph.borrow_mut().return_resolver(resolver);
-            }
-            self.graph.borrow_mut().return_flaw(flaw);
-            let smt = self.smt.borrow();
-            self.graph.borrow_mut().propagate(&smt, id);
-        }
-        Ok(())
-    }
-
-    fn cancel_until(&self, level: usize) {
-        self.smt.borrow_mut().cancel_until(level);
     }
 
     fn to_json(&self) -> Value {

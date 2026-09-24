@@ -5,7 +5,7 @@ compile_error!("Please enable one of the features 'h_add' or 'h_max'.");
 
 use crate::{SolverError, SolverEvent, SolverState};
 use semitone::{
-    SeMiTONE,
+    Lit, SeMiTONE,
     ast::{BoolExpr, DlVar},
 };
 use serde_json::Value;
@@ -110,8 +110,10 @@ pub struct Graph {
 
     h_flaw: Vec<f64>,
 
+    flaw_status: Vec<Option<bool>>,
     flaw_phi: Vec<BoolExpr>,
     flaw_cost: Vec<DlVar>,
+    resolver_status: Vec<Option<bool>>,
     resolver_rho: Vec<BoolExpr>,
     resolver_cost: Vec<DlVar>,
 
@@ -134,8 +136,10 @@ impl Graph {
 
             h_flaw: Vec::new(),
 
+            flaw_status: Vec::new(),
             flaw_phi: Vec::new(),
             flaw_cost: Vec::new(),
+            resolver_status: Vec::new(),
             resolver_rho: Vec::new(),
             resolver_cost: Vec::new(),
 
@@ -188,6 +192,7 @@ impl Graph {
         let cost = smt.new_dl_var();
 
         self.flaws.push(Some(flaw));
+        self.flaw_status.push(smt.get_bool_val(&phi));
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
@@ -229,15 +234,8 @@ impl Graph {
         }
     }
 
-    pub fn flaw_phi(&self, flaw_id: FlawId) -> BoolExpr {
-        self.flaw_phi[*flaw_id].clone()
-    }
-
-    pub fn flaw_cost(&self, flaw_id: FlawId) -> f64 {
-        self.h_flaw[*flaw_id]
-    }
-
     pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: BoolExpr) -> Result<ResolverId, SolverError> {
+        assert!(smt.get_bool_val(&rho) != Some(false), "Cannot add resolver with a false ρ");
         let r_id = ResolverId(self.resolvers.len());
         trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
         resolver.set_id(r_id);
@@ -266,6 +264,7 @@ impl Graph {
         }
 
         self.resolvers.push(Some(resolver));
+        self.resolver_status.push(smt.get_bool_val(&rho));
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
 
@@ -294,10 +293,6 @@ impl Graph {
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 
-    pub fn resolver_rho(&self, resolver_id: ResolverId) -> BoolExpr {
-        self.resolver_rho[*resolver_id].clone()
-    }
-
     fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
         if smt.get_bool_val(&self.resolver_rho[*resolver_id]) == Some(false) {
             f64::INFINITY
@@ -320,8 +315,104 @@ impl Graph {
         true
     }
 
+    pub(super) fn get_agenda(&self, smt: &SeMiTONE) -> Vec<FlawId> {
+        assert!(self.c_flaw.is_none(), "Cannot get agenda while a flaw is being processed");
+        assert!(self.c_res.is_none(), "Cannot get agenda while a resolver is being processed");
+
+        let mut agenda = Vec::new();
+        for flaw in &self.flaws {
+            if let Some(flaw) = flaw.as_ref() {
+                let f_id = flaw.id();
+                if smt.get_bool_val(&self.flaw_phi[*f_id]) == Some(true) {
+                    let mut is_resolved = false;
+                    for r_id in flaw.resolvers() {
+                        if smt.get_bool_val(&self.resolver_rho[*r_id]) == Some(true) {
+                            is_resolved = true;
+                            break;
+                        }
+                    }
+                    if !is_resolved {
+                        agenda.push(f_id);
+                    }
+                }
+            }
+        }
+        agenda
+    }
+
+    pub(super) fn pick_branching_literal(&self, smt: &mut SeMiTONE) -> Option<Lit> {
+        for &f_id in &self.flaw_q {
+            if smt.get_bool_val(&self.flaw_phi[*f_id]).is_none() {
+                return Some(!smt.track_expr(self.flaw_phi[*f_id].clone()));
+            }
+        }
+
+        let agenda = self.get_agenda(smt);
+
+        if agenda.is_empty() {
+            return None;
+        }
+
+        let best_flaw_id = agenda.into_iter().max_by(|&f1, &f2| self.h_flaw[*f1].partial_cmp(&self.h_flaw[*f2]).unwrap()).unwrap();
+        let mut best_res_id = None;
+        let mut best_res_cost = f64::INFINITY;
+
+        let flaw = self.flaws[*best_flaw_id].as_ref().unwrap();
+        for &r_id in flaw.resolvers().iter() {
+            if smt.get_bool_val(&self.resolver_rho[*r_id]) == Some(false) {
+                continue;
+            }
+
+            let cost = self.compute_resolver_cost(smt, r_id);
+            if cost < best_res_cost {
+                best_res_cost = cost;
+                best_res_id = Some(r_id);
+            }
+        }
+
+        Some(smt.track_expr(self.resolver_rho[*best_res_id.expect("There should be at least one resolver for the flaw")].clone()))
+    }
+
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
         self.flaw_q.pop_front()
+    }
+
+    pub(super) fn sync(&mut self, smt: &SeMiTONE) {
+        let mut affected_flaws = Vec::new();
+
+        for i in 0..self.flaws.len() {
+            let current = smt.get_bool_val(&self.flaw_phi[i]);
+            if current != self.flaw_status[i] {
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: FlawId(i), status: current });
+
+                if current == Some(false) {
+                    affected_flaws.push(FlawId(i));
+                }
+
+                self.flaw_status[i] = current;
+            }
+        }
+
+        for i in 0..self.resolvers.len() {
+            let current = smt.get_bool_val(&self.resolver_rho[i]);
+            if current != self.resolver_status[i] {
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: ResolverId(i), status: current });
+
+                if current == Some(false) {
+                    if let Some(res) = self.resolvers[i].as_ref() {
+                        affected_flaws.push(res.flaw());
+                    }
+                }
+
+                self.resolver_status[i] = current;
+            }
+        }
+
+        if !affected_flaws.is_empty() {
+            self.propagate_costs(smt, affected_flaws.as_slice());
+        }
     }
 
     pub(super) fn push(&mut self) {
@@ -341,12 +432,16 @@ impl Graph {
         self.trail_lim.truncate(level);
     }
 
-    pub(super) fn propagate(&mut self, smt: &SeMiTONE, initial_flaw_id: FlawId) {
-        let mut queue = VecDeque::new();
-        queue.push_back(initial_flaw_id);
+    pub(super) fn propagate_costs(&mut self, smt: &SeMiTONE, initial_flaws: &[FlawId]) {
+        assert!(self.c_flaw.is_none(), "Cannot propagate while a flaw is being processed");
+        assert!(self.c_res.is_none(), "Cannot propagate while a resolver is being processed");
 
+        let mut queue = VecDeque::new();
         let mut in_queue = vec![false; self.flaws.len()];
-        in_queue[*initial_flaw_id] = true;
+        for &f_id in initial_flaws {
+            queue.push_back(f_id);
+            in_queue[*f_id] = true;
+        }
 
         while let Some(f_id) = queue.pop_front() {
             in_queue[*f_id] = false;
