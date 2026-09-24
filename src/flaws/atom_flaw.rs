@@ -4,10 +4,10 @@ use crate::{
 };
 use riddle::{
     core::Core,
-    env::{AtomId, Env},
-    scope::get_predicate_by_path,
+    env::{Atom, AtomId, Env},
+    scope::{Predicate, get_predicate_by_path},
 };
-use semitone::ast::BoolExpr::And;
+use semitone::ast::{self, BoolExpr::And};
 use serde_json::{Value, json};
 use std::{collections::HashSet, rc::Rc};
 use tracing::trace;
@@ -58,6 +58,7 @@ impl Flaw for AtomFlaw {
 
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let sigma = slv.sigma.borrow();
 
         for target in atom.predicate().atoms() {
             if target == self.atom {
@@ -66,7 +67,13 @@ impl Flaw for AtomFlaw {
             if !graph.can_unify(slv.atom_flaw.borrow().get(*target).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", target)))?) {
                 continue;
             }
-            let rho = smt.new_lit();
+            let mut unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found", target)))?, atom.predicate());
+            unif_eqs.push(!sigma.get(*self.atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found in sigma", self.atom)))?.clone());
+            unif_eqs.push(sigma.get(*target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found in sigma", target)))?.clone());
+            let rho = smt.track_expr(And(unif_eqs));
+            if smt.get_lit_val(rho) == Some(false) {
+                continue;
+            }
             self.resolvers.push(graph.add_resolver(&mut smt, Box::new(UnificationResolver::new(self.id, self.atom, target)), rho)?);
         }
 
@@ -208,53 +215,6 @@ impl Resolver for UnificationResolver {
         rug::Rational::from(0)
     }
 
-    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut graph = slv.graph.borrow_mut();
-        let mut smt = slv.smt.borrow_mut();
-
-        let current = slv.get_atom(self.current_atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found", self.current_atom)))?;
-        let target = slv.get_atom(self.target_atom).ok_or(SolverError::RuntimeError(format!("Target atom {} not found", self.target_atom)))?;
-        let sigma = slv.sigma.borrow();
-        let predicate = current.predicate();
-
-        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
-        graph.add_causal_link(&mut smt, self.flaw)?;
-
-        let mut unif = Vec::new();
-        let mut queue = vec![predicate.clone()];
-        let mut visited = HashSet::new();
-
-        unif.push(!sigma.get(*self.current_atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found in sigma", self.current_atom)))?.clone());
-        unif.push(sigma.get(*self.target_atom).ok_or(SolverError::RuntimeError(format!("Target atom {} not found in sigma", self.target_atom)))?.clone());
-
-        while let Some(curr_pred) = queue.pop() {
-            let ptr = Rc::as_ptr(&curr_pred) as usize;
-            if !visited.insert(ptr) {
-                continue;
-            }
-
-            for (_types, arg_name) in curr_pred.args() {
-                if let (Some(slot_a), Some(slot_b)) = (current.get(arg_name), target.get(arg_name)) {
-                    unif.push(eq_to_bool(&slot_a, &slot_b));
-                }
-            }
-
-            for parent_path in curr_pred.parents() {
-                match get_predicate_by_path(curr_pred.as_ref(), parent_path) {
-                    Ok(parent_pred) => {
-                        queue.push(parent_pred);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Unification warning: Failed to resolve parent {:?} - {}", parent_path, e);
-                    }
-                }
-            }
-        }
-
-        let eq = smt.track_expr(And(unif));
-        smt.add_clause(vec![!rho, eq]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add unification clause")))
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "unification",
@@ -262,4 +222,36 @@ impl Resolver for UnificationResolver {
             "target_atom": self.target_atom.to_string()
         })
     }
+}
+
+fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>, predicate: Rc<Predicate>) -> Vec<ast::BoolExpr> {
+    let mut eqs = Vec::new();
+    let mut queue = vec![predicate];
+    let mut visited = HashSet::new();
+
+    while let Some(curr_pred) = queue.pop() {
+        let ptr = Rc::as_ptr(&curr_pred) as usize;
+        if !visited.insert(ptr) {
+            continue;
+        }
+
+        for (_types, arg_name) in curr_pred.args() {
+            if let (Some(slot_a), Some(slot_b)) = (atom_a.get(arg_name), atom_b.get(arg_name)) {
+                eqs.push(eq_to_bool(&slot_a, &slot_b));
+            }
+        }
+
+        for parent_path in curr_pred.parents() {
+            match get_predicate_by_path(curr_pred.as_ref(), parent_path) {
+                Ok(parent_pred) => {
+                    queue.push(parent_pred);
+                }
+                Err(e) => {
+                    tracing::warn!("Unification warning: Failed to resolve parent {:?} - {}", parent_path, e);
+                }
+            }
+        }
+    }
+
+    eqs
 }
