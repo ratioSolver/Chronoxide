@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
+    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -41,6 +41,8 @@ struct SolverState {
     slv: Weak<SolverState>,
     smt: RefCell<SeMiTONE>,
     graph: RefCell<Graph>,
+    sigma: RefCell<Vec<ast::BoolExpr>>,
+    atom_flaw: RefCell<Vec<FlawId>>,
 }
 
 impl SolverState {
@@ -53,6 +55,8 @@ impl SolverState {
             slv: core.clone(),
             smt: RefCell::new(SeMiTONE::new()),
             graph: RefCell::new(Graph::new(tx_event)),
+            sigma: RefCell::new(Vec::new()),
+            atom_flaw: RefCell::new(Vec::new()),
         });
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
@@ -348,7 +352,13 @@ impl Core for SolverState {
         self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
         let atm = self.core.new_atom(predicate, fact, args);
+        self.sigma.borrow_mut().push(smt.new_bool());
+        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+        let flaw = graph.add_flaw(&mut smt, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
+        self.atom_flaw.borrow_mut().push(flaw);
         atm
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {

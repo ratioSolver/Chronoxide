@@ -58,6 +58,9 @@ pub trait Flaw {
     fn required_by(&self) -> Vec<ResolverId> {
         self.causes()
     }
+    fn add_required_by(&mut self, _res_id: ResolverId) {
+        unimplemented!("add_required_by is not implemented for this flaw");
+    }
 
     /// Expands this flaw by adding resolvers to the graph that can potentially solve it.
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError>;
@@ -104,7 +107,7 @@ pub trait Resolver {
 pub struct Graph {
     flaws: Vec<Option<Box<dyn Flaw>>>,
     resolvers: Vec<Option<Box<dyn Resolver>>>,
-    c_flaw: Option<FlawId>,
+    c_flaw: Option<(FlawId, Lit)>,
     c_res: Option<(ResolverId, Lit)>,
     c_preconditions: Vec<FlawId>,
 
@@ -152,14 +155,14 @@ impl Graph {
         }
     }
 
-    pub fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flaw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
-        let f_id = FlawId(self.flaws.len());
-        flaw.set_id(f_id);
+    pub fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+        let flw_id = FlawId(self.flaws.len());
+        flw.set_id(flw_id);
         if self.c_res.is_some() {
-            self.c_preconditions.push(f_id);
+            self.c_preconditions.push(flw_id);
         }
 
-        let causes = flaw.causes();
+        let causes = flw.causes();
         let phi = match causes.len() {
             0 => Lit::TRUE,
             _ => {
@@ -174,54 +177,58 @@ impl Graph {
                 phi
             }
         };
-        trace!("Adding flaw: {} ({})", flaw.id(), phi);
+        trace!("Adding flaw: {} ({})", flw.id(), phi);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
-            flaw_id: f_id,
+            flaw_id: flw_id,
             phi: phi.to_string(),
-            causes: flaw.causes().to_vec(),
-            required_by: flaw.required_by().to_vec(),
+            causes: flw.causes().to_vec(),
+            required_by: flw.required_by().to_vec(),
             status: smt.get_lit_val(phi),
             cost: f64::INFINITY,
-            data: flaw.to_json(),
+            data: flw.to_json(),
         });
 
         let cost = smt.new_dl_var();
 
-        self.flaws.push(Some(flaw));
+        self.flaws.push(Some(flw));
         self.flaw_status.push(smt.get_lit_val(phi));
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
 
-        self.flaw_q.push_back(f_id);
+        self.flaw_q.push_back(flw_id);
 
-        Ok(f_id)
+        Ok(flw_id)
     }
 
-    pub(super) fn take_flaw(&mut self, id: FlawId) -> Option<Box<dyn Flaw>> {
-        self.c_flaw.replace(id);
+    pub(super) fn current_flaw(&self) -> Option<(FlawId, Lit)> {
+        self.c_flaw
+    }
+
+    pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
+        self.c_flaw.replace((flw_id, self.flaw_phi[*flw_id]));
         #[cfg(feature = "server")]
-        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(id)));
-        self.flaws[*id].take()
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
+        self.flaws[*flw_id].take()
     }
 
-    pub(super) fn return_flaw(&mut self, flaw: Box<dyn Flaw>) {
-        let id = flaw.id();
-        self.flaws[*id] = Some(flaw);
+    pub(super) fn return_flaw(&mut self, flw: Box<dyn Flaw>) {
+        let id = flw.id();
+        self.flaws[*id] = Some(flw);
         self.c_flaw.take();
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
     }
 
-    fn compute_flaw_cost(&self, smt: &SeMiTONE, flaw_id: FlawId) -> f64 {
-        if smt.get_lit_val(self.flaw_phi[*flaw_id]) == Some(false) {
+    fn compute_flaw_cost(&self, smt: &SeMiTONE, flw_id: FlawId) -> f64 {
+        if smt.get_lit_val(self.flaw_phi[*flw_id]) == Some(false) {
             f64::INFINITY
         } else {
             let mut min_cost = f64::INFINITY;
 
-            for &resolver_id in self.flaws[*flaw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
+            for &resolver_id in self.flaws[*flw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
                 let resolver_cost = self.compute_resolver_cost(smt, resolver_id);
                 if resolver_cost < min_cost {
                     min_cost = resolver_cost;
@@ -232,33 +239,33 @@ impl Graph {
         }
     }
 
-    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut resolver: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
+    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut res: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
         assert!(smt.get_lit_val(rho) != Some(false), "Cannot add resolver with a false ρ");
         let r_id = ResolverId(self.resolvers.len());
-        trace!("Adding resolver: {} ({}) for flaw {}", resolver.id(), rho, resolver.flaw());
-        resolver.set_id(r_id);
+        trace!("Adding resolver: {} ({}) for flaw {}", res.id(), rho, res.flaw());
+        res.set_id(r_id);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: r_id,
-            flaw_id: resolver.flaw(),
+            flaw_id: res.flaw(),
             rho: rho.to_string(),
             status: smt.get_lit_val(rho),
-            intrinsic_cost: resolver.intrinsic_cost().to_f64(),
-            preconditions: resolver.preconditions().to_vec(),
-            data: resolver.to_json(),
+            intrinsic_cost: res.intrinsic_cost().to_f64(),
+            preconditions: res.preconditions().to_vec(),
+            data: res.to_json(),
         });
 
-        let flaw_id = resolver.flaw();
+        let flaw_id = res.flaw();
         // ρ → ϕ (applying the resolver implies solving the flaw)
         smt.add_clause(vec![!rho, self.flaw_phi[*flaw_id]]).expect("Failed to add clause for resolver implication");
 
         let cost = smt.new_dl_var();
         let parent_cost_var = self.flaw_cost[*flaw_id];
-        let dl_cnstr = smt.track_expr(BoolExpr::DlGe(parent_cost_var, cost, resolver.intrinsic_cost()));
+        let dl_cnstr = smt.track_expr(BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()));
         smt.add_clause(vec![!rho, dl_cnstr]).expect("Failed to add clause for resolver cost implication");
 
-        self.resolvers.push(Some(resolver));
+        self.resolvers.push(Some(res));
         self.resolver_status.push(smt.get_lit_val(rho));
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
@@ -277,27 +284,42 @@ impl Graph {
         self.resolvers[*res_id].take()
     }
 
-    pub(super) fn return_resolver(&mut self, mut resolver: Box<dyn Resolver>) {
+    pub(super) fn return_resolver(&mut self, mut res: Box<dyn Resolver>) {
         for pre in self.c_preconditions.drain(..) {
-            resolver.add_precondition(pre);
+            res.add_precondition(pre);
         }
-        let id = resolver.id();
-        self.resolvers[*id] = Some(resolver);
+        let id = res.id();
+        self.resolvers[*id] = Some(res);
         self.c_res.take();
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 
-    fn compute_resolver_cost(&self, smt: &SeMiTONE, resolver_id: ResolverId) -> f64 {
-        if smt.get_lit_val(self.resolver_rho[*resolver_id]) == Some(false) {
+    pub(super) fn add_causal_link(&mut self, smt: &mut SeMiTONE, flw_id: FlawId) -> Result<(), SolverError> {
+        let phi = self.flaw_phi[*flw_id];
+        let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError("No current resolver to add causal link from".to_string()))?;
+        self.flaws[*flw_id].as_mut().ok_or(SolverError::RuntimeError(format!("Flaw {} not found", flw_id)))?.add_required_by(res_id);
+        self.c_preconditions.push(flw_id);
+
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: flw_id, resolver_id: res_id });
+
+        // ρ → ϕ (applying the resolver implies solving the flaw)
+        smt.add_clause(vec![!rho, phi]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add causal link from resolver {} to flaw {}", res_id, flw_id)))?;
+
+        Ok(())
+    }
+
+    fn compute_resolver_cost(&self, smt: &SeMiTONE, res_id: ResolverId) -> f64 {
+        if smt.get_lit_val(self.resolver_rho[*res_id]) == Some(false) {
             f64::INFINITY
         } else {
             #[cfg(feature = "h_add")]
-            let precondition_cost: f64 = self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
+            let precondition_cost: f64 = self.resolvers[*res_id].as_ref().expect("Resolver should exist").preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
             #[cfg(feature = "h_max")]
-            let precondition_cost: f64 = self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
+            let precondition_cost: f64 = self.resolvers[*res_id].as_ref().expect("Resolver should exist").preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
 
-            self.resolvers[*resolver_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
+            self.resolvers[*res_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
         }
     }
 
@@ -459,5 +481,34 @@ impl Graph {
                 }
             }
         }
+    }
+
+    pub(super) fn can_unify(&self, target: FlawId) -> bool {
+        if self.flaw_q.contains(&target) {
+            return false;
+        }
+
+        let mut queue = vec![target];
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(f_id) = queue.pop() {
+            if !visited.insert(f_id) {
+                continue;
+            }
+
+            if self.flaws[*f_id].is_none() {
+                return false;
+            }
+
+            if let Some(flaw) = self.flaws[*f_id].as_ref() {
+                for r_id in flaw.causes() {
+                    if let Some(resolver) = self.resolvers[*r_id].as_ref() {
+                        queue.push(resolver.flaw());
+                    }
+                }
+            }
+        }
+
+        true
     }
 }
