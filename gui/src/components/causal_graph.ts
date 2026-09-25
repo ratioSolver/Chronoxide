@@ -24,7 +24,7 @@ export function causal_graph(slv: solver.Solver): VNode {
         const is_current = flaw === current_flaw;
         return {
           id: flaw.get_id(),
-          name: flaw.get_phi(),
+          name: flaw.get_id(),
           symbol: 'circle',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
@@ -41,7 +41,7 @@ export function causal_graph(slv: solver.Solver): VNode {
         const is_current = resolver === current_resolver;
         return {
           id: resolver.get_id(),
-          name: resolver.get_rho(),
+          name: resolver.get_id(),
           symbol: 'rect',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
@@ -82,7 +82,9 @@ export function causal_graph(slv: solver.Solver): VNode {
           roam: true,
           label: {
             show: true,
-            position: 'right'
+            position: 'right',
+            fontFamily: 'monospace',
+            fontSize: 14
           },
           force: {
             repulsion: 100,
