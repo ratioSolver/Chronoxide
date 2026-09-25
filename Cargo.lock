@@ -601,9 +601,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "semitone"
-version = "0.0.20"
+version = "0.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb2dd239b3775129cdd9b4a01ca4580b07e522fafeffb82c902eebbbe37b709"
+checksum = "f01cc4570a57a68c63ba8835849e0c470aaf9e6461e66da8c3edb89e5e9eb822"
 dependencies = [
  "rug",
  "rustc-hash",

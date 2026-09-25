@@ -112,12 +112,13 @@ impl Flaw for AtomFlaw {
 struct GoalResolver {
     id: ResolverId,
     flaw: FlawId,
+    preconditions: Vec<FlawId>,
     atom: AtomId,
 }
 
 impl GoalResolver {
     fn new(flaw: FlawId, atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, atom }
+        Self { id: ResolverId::default(), flaw, preconditions: vec![], atom }
     }
 }
 
@@ -141,6 +142,14 @@ impl Resolver for GoalResolver {
         let mut smt = slv.smt.borrow_mut();
         let sigma = smt.track_expr(slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?);
         smt.add_clause(vec![!rho, sigma]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add fact clause for atom {}", self.atom)))
+    }
+
+    fn preconditions(&self) -> Vec<FlawId> {
+        self.preconditions.clone()
+    }
+
+    fn add_precondition(&mut self, flaw_id: FlawId) {
+        self.preconditions.push(flaw_id);
     }
 
     fn to_json(&self) -> Value {
@@ -193,13 +202,14 @@ impl Resolver for FactResolver {
 struct UnificationResolver {
     id: ResolverId,
     flaw: FlawId,
+    preconditions: Vec<FlawId>,
     current_atom: AtomId,
     target_atom: AtomId,
 }
 
 impl UnificationResolver {
     fn new(flaw: FlawId, current_atom: AtomId, target_atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, current_atom, target_atom }
+        Self { id: ResolverId::default(), flaw, preconditions: vec![], current_atom, target_atom }
     }
 }
 
@@ -222,8 +232,16 @@ impl Resolver for UnificationResolver {
         trace!("Applying UnificationResolver for atoms {} and {}", self.current_atom, self.target_atom);
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let target_flaw = slv.atom_flaw.borrow().get(*self.target_atom).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", self.target_atom)))?;
+        graph.add_causal_link(&mut smt, target_flaw)
+    }
 
-        graph.add_causal_link(&mut smt, self.flaw)
+    fn preconditions(&self) -> Vec<FlawId> {
+        self.preconditions.clone()
+    }
+
+    fn add_precondition(&mut self, flaw_id: FlawId) {
+        self.preconditions.push(flaw_id);
     }
 
     fn to_json(&self) -> Value {

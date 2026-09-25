@@ -97,16 +97,17 @@ impl SolverState {
                         graph.return_flaw(flaw);
                         graph.propagate_costs(&self.smt.borrow(), &[id]);
                         continue;
-                    }
-
-                    let mut graph = self.graph.borrow_mut();
-                    let mut smt = self.smt.borrow_mut();
-                    if let Some(decision_var) = graph.pick_branching_literal(&mut smt) {
-                        graph.push();
-                        smt.decide(decision_var);
                     } else {
-                        trace!("No more decisions to make, solution found");
-                        break;
+                        trace!("Picking branching literal...");
+                        let mut graph = self.graph.borrow_mut();
+                        let mut smt = self.smt.borrow_mut();
+                        if let Some(decision_var) = graph.pick_branching_literal(&mut smt) {
+                            graph.push();
+                            smt.decide(decision_var);
+                        } else {
+                            trace!("No more decisions to make, solution found");
+                            break;
+                        }
                     }
                 }
                 Err((bt_level, lemma)) => {
@@ -450,25 +451,14 @@ impl Solver {
 
             while let Some(cmd) = rx_cmd.blocking_recv() {
                 match cmd {
-                    SolverCommand::ReadRiDDle(riddle, responder) => match state.read(&riddle) {
-                        Ok(_) => {
-                            let _ = responder.send(Ok(()));
-                        }
-                        Err(e) => {
-                            let _ = responder.send(Err(e));
-                        }
-                    },
-                    SolverCommand::Solve(responder) => match state.solve() {
-                        Ok(_) => {
-                            let _ = responder.send(Ok(()));
-                        }
-                        Err(e) => {
-                            let _ = responder.send(Err(e));
-                        }
-                    },
+                    SolverCommand::ReadRiDDle(riddle, responder) => {
+                        let _ = responder.send(state.read(&riddle));
+                    }
+                    SolverCommand::Solve(responder) => {
+                        let _ = responder.send(state.solve());
+                    }
                     SolverCommand::ToJson(responder) => {
-                        let json = state.to_json();
-                        let _ = responder.send(Ok(json));
+                        let _ = responder.send(Ok(state.to_json()));
                     }
                 }
             }
@@ -478,20 +468,20 @@ impl Solver {
 
     pub async fn read(&self, riddle: String) -> Result<(), SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::ReadRiDDle(riddle, reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
-        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::ReadRiDDle(riddle, reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send ReadRiDDle command: {:?}", e)))?;
+        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive ReadRiDDle response: {:?}", e)))?
     }
 
     pub async fn solve(&self) -> Result<(), SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::Solve(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
-        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::Solve(reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send Solve command: {:?}", e)))?;
+        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive Solve response: {:?}", e)))?
     }
 
     pub async fn to_json(&self) -> Result<Value, SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|_| SolverError::Inconsistent)?;
-        reply_rx.await.map_err(|_| SolverError::Inconsistent)?
+        self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send ToJson command: {:?}", e)))?;
+        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive ToJson response: {:?}", e)))?
     }
 }
 

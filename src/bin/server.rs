@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast::error::RecvError};
 use tower_http::services::{ServeDir, ServeFile};
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
@@ -49,7 +49,7 @@ async fn main() {
         match slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await {
             Ok(_) => trace!("Read RiDDle script from file: {}", file),
             Err(e) => match e {
-                SolverError::Inconsistent => error!("Failed to read RiDDle script from file {}: Inconsistent problem", file),
+                SolverError::Inconsistent => error!("Inconsistent problem"),
                 SolverError::RuntimeError(msg) => error!("Failed to read RiDDle script from file {}: Runtime error: {}", file, msg),
             },
         }
@@ -57,7 +57,7 @@ async fn main() {
     match slv.solve().await {
         Ok(_) => info!("Solver finished successfully"),
         Err(e) => match e {
-            SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
+            SolverError::Inconsistent => warn!("Inconsistent problem"),
             SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
         },
     }
@@ -201,7 +201,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             }
         }
         Err(e) => match e {
-            SolverError::Inconsistent => error!("Solver failed: Inconsistent problem"),
+            SolverError::Inconsistent => warn!("Inconsistent problem"),
             SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
         },
     }
