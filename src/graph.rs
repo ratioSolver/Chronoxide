@@ -173,7 +173,7 @@ impl Graph {
                     clause.push(!self.resolver_rho[r_id.0]);
                 }
                 clause.push(phi);
-                smt.add_clause(clause).expect("Failed to add clause for flaw causes");
+                smt.add_clause(clause).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for flaw {} implication", flw_id)))?;
                 phi
             }
         };
@@ -201,6 +201,10 @@ impl Graph {
         self.flaw_q.push_back(flw_id);
 
         Ok(flw_id)
+    }
+
+    pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
+        self.flaw_phi[*flw_id]
     }
 
     pub(super) fn current_flaw(&self) -> Option<(FlawId, Lit)> {
@@ -258,12 +262,12 @@ impl Graph {
 
         let flaw_id = res.flaw();
         // ρ → ϕ (applying the resolver implies solving the flaw)
-        smt.add_clause(vec![!rho, self.flaw_phi[*flaw_id]]).expect("Failed to add clause for resolver implication");
+        smt.add_clause(vec![!rho, self.flaw_phi[*flaw_id]]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for resolver {} implication", r_id)))?;
 
         let cost = smt.new_dl_var();
         let parent_cost_var = self.flaw_cost[*flaw_id];
         let dl_cnstr = smt.track_expr(BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()));
-        smt.add_clause(vec![!rho, dl_cnstr]).expect("Failed to add clause for resolver cost implication");
+        smt.add_clause(vec![!rho, dl_cnstr]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for resolver {} cost constraint", r_id)))?;
 
         self.resolvers.push(Some(res));
         self.resolver_status.push(smt.get_lit_val(rho));
@@ -271,6 +275,10 @@ impl Graph {
         self.resolver_cost.push(cost);
 
         Ok(r_id)
+    }
+
+    pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
+        self.resolver_rho[*res_id]
     }
 
     pub(super) fn current_resolver(&self) -> Option<(ResolverId, Lit)> {
@@ -445,6 +453,8 @@ impl Graph {
         while self.trail.len() > target_len {
             let (f, old_cost) = self.trail.pop().unwrap();
             self.h_flaw[*f] = old_cost;
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id: f, cost: old_cost });
         }
         self.trail_lim.truncate(level);
     }

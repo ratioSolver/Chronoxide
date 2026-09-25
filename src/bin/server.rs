@@ -121,7 +121,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 if cost.is_finite() {
                                     msg["cost"] = Value::from(cost);
                                 }
-                                msg.as_object_mut().unwrap().extend(data.as_object().unwrap().clone());
+                                if let Some(data) = data.as_object() {
+                                    msg.as_object_mut().unwrap().extend(data.clone());
+                                }
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
                             SolverEvent::FlawCostUpdate { flaw_id, cost } => {

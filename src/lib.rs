@@ -79,23 +79,29 @@ impl SolverState {
                 Ok(_) => {
                     if !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
                         trace!("Expanding graph...");
-                        let (mut flaw, id) = {
+                        let (mut flaw, flw_id) = {
                             let mut graph = self.graph.borrow_mut();
-                            let id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
-                            (graph.take_flaw(id).expect("Flaw should exist in graph"), id)
+                            let flw_id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
+                            (graph.take_flaw(flw_id).expect("Flaw should exist in graph"), flw_id)
                         };
 
                         flaw.expand(self)?;
+                        let resolvers = flaw.resolvers();
 
-                        for resolver_id in flaw.resolvers() {
-                            let mut resolver = self.graph.borrow_mut().take_resolver(resolver_id).expect("Resolver should exist in graph");
+                        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ) (solving the flaw implies applying at least one of its resolvers)
+                        let mut clause = Vec::with_capacity(resolvers.len() + 1);
+                        clause.push(!self.graph.borrow().phi(flw_id));
+                        for res_id in resolvers {
+                            clause.push(self.graph.borrow().rho(res_id));
+                            let mut resolver = self.graph.borrow_mut().take_resolver(res_id).expect("Resolver should exist in graph");
                             resolver.apply(self)?;
                             self.graph.borrow_mut().return_resolver(resolver);
                         }
+                        self.smt.borrow_mut().add_clause(clause).map_err(|_| SolverError::RuntimeError(format!("Failed to add clause for flaw {} implication", flw_id)))?;
 
                         let mut graph = self.graph.borrow_mut();
                         graph.return_flaw(flaw);
-                        graph.propagate_costs(&self.smt.borrow(), &[id]);
+                        graph.propagate_costs(&self.smt.borrow(), &[flw_id]);
                         continue;
                     } else {
                         trace!("Picking branching literal...");
@@ -119,9 +125,7 @@ impl SolverState {
                     let mut graph = self.graph.borrow_mut();
                     graph.cancel_until(bt_level);
                     graph.sync(&smt);
-                    if smt.add_clause(lemma).is_err() {
-                        return Err(SolverError::Inconsistent);
-                    }
+                    smt.add_clause(lemma).map_err(|_| SolverError::Inconsistent)?;
                 }
             }
         }
@@ -300,9 +304,11 @@ impl Core for SolverState {
         let mut smt = self.smt.borrow_mut();
         let expr = smt.track_expr(expr_to_bool(term.as_ref()));
         if let Some((_c_res, rho)) = self.graph.borrow().current_resolver().as_ref() {
-            smt.add_clause(vec![!*rho, expr]).expect("Failed to add clause for resolver implication");
-        } else {
-            smt.add_clause(vec![expr]).expect("Failed to add clause for assertion");
+            if smt.add_clause(vec![!*rho, expr]).is_err() {
+                return false;
+            }
+        } else if smt.add_clause(vec![expr]).is_err() {
+            return false;
         }
 
         let cnf_expr = to_cnf(term.clone());

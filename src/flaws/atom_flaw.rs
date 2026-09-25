@@ -3,6 +3,7 @@ use crate::{
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
 use riddle::{
+    RiddleError,
     core::Core,
     env::{Atom, AtomId, Env},
     scope::{Predicate, Type, get_predicate_by_path},
@@ -10,7 +11,7 @@ use riddle::{
 use semitone::ast::{self, BoolExpr::And};
 use serde_json::{Value, json};
 use std::{collections::HashSet, rc::Rc};
-use tracing::trace;
+use tracing::{trace, warn};
 
 pub(crate) struct AtomFlaw {
     id: FlawId,
@@ -136,7 +137,16 @@ impl Resolver for GoalResolver {
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying GoalResolver for atom {}", self.atom);
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
-        atom.predicate().call(atom).map_err(|e| SolverError::RuntimeError(format!("Failed to apply GoalResolver for atom {}: {}", self.atom, e)))?;
+        match atom.predicate().call(atom) {
+            Ok(_) => Ok(()),
+            Err(e) => match e {
+                RiddleError::InconsistencyError(msg) => {
+                    warn!("GoalResolver inconsistency for atom {}: {}", self.atom, msg);
+                    Err(SolverError::Inconsistent)
+                }
+                _ => Err(SolverError::RuntimeError(format!("Failed to apply GoalResolver for atom {}: {}", self.atom, e))),
+            },
+        }?;
 
         let (_, rho) = slv.graph.borrow().current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
         let mut smt = slv.smt.borrow_mut();
