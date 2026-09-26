@@ -458,10 +458,20 @@ impl Solver {
             while let Some(cmd) = rx_cmd.blocking_recv() {
                 match cmd {
                     SolverCommand::ReadRiDDle(riddle, responder) => {
-                        let _ = responder.send(state.read(&riddle));
+                        let result = state.read(&riddle);
+                        let is_err = result.is_err();
+                        let _ = responder.send(result);
+                        if is_err {
+                            break;
+                        }
                     }
                     SolverCommand::Solve(responder) => {
-                        let _ = responder.send(state.solve());
+                        let result = state.solve();
+                        let is_err = result.is_err();
+                        let _ = responder.send(result);
+                        if is_err {
+                            break;
+                        }
                     }
                     SolverCommand::ToJson(responder) => {
                         let _ = responder.send(Ok(state.to_json()));
