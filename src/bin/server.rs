@@ -10,7 +10,10 @@ use axum::{
 use chronoxide::{Solver, SolverError, SolverEvent};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use tokio::sync::{Notify, broadcast::error::RecvError};
+use tokio::{
+    net::TcpListener,
+    sync::{Notify, broadcast::error::RecvError},
+};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info, trace, warn};
 use tracing_subscriber::EnvFilter;
@@ -38,9 +41,18 @@ async fn main() {
 
     let app = Router::new().route("/ws", get(ws_handler)).with_state(app_state.clone()).nest_service("/assets", ServeDir::new("gui/app/dist/assets")).fallback_service(ServeDir::new("gui/app/dist").not_found_service(ServeFile::new("gui/app/dist/index.html")));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = match TcpListener::bind("0.0.0.0:3000").await {
+        Ok(listener) => listener,
+        Err(e) => {
+            error!("Failed to bind to 0.0.0.0:3000: {}", e);
+            std::process::exit(1);
+        }
+    };
     let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        match axum::serve(listener, app).await {
+            Ok(_) => info!("Server stopped"),
+            Err(e) => error!("Server error: {}", e),
+        }
     });
 
     app_state.first_client_connected.notified().await;
@@ -48,21 +60,30 @@ async fn main() {
     for file in &files {
         match slv.read(std::fs::read_to_string(file).expect("Failed to read file")).await {
             Ok(_) => trace!("Read RiDDle script from file: {}", file),
-            Err(e) => match e {
-                SolverError::Inconsistent => error!("Inconsistent problem"),
-                SolverError::RuntimeError(msg) => error!("Failed to read RiDDle script from file {}: Runtime error: {}", file, msg),
-            },
+            Err(e) => {
+                match e {
+                    SolverError::Inconsistent => error!("Inconsistent problem"),
+                    SolverError::RuntimeError(msg) => error!("Failed to read RiDDle script from file {}: Runtime error: {}", file, msg),
+                }
+                std::process::exit(1);
+            }
         }
     }
     match slv.solve().await {
         Ok(_) => info!("Solver finished successfully"),
-        Err(e) => match e {
-            SolverError::Inconsistent => warn!("Inconsistent problem"),
-            SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
-        },
+        Err(e) => {
+            match e {
+                SolverError::Inconsistent => warn!("Inconsistent problem"),
+                SolverError::RuntimeError(msg) => error!("Solver failed with runtime error: {}", msg),
+            }
+            std::process::exit(1)
+        }
     }
 
-    server.await.unwrap();
+    match server.await {
+        Ok(_) => info!("Server stopped"),
+        Err(e) => error!("Server error: {}", e),
+    }
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -71,6 +92,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let mut rx = state.slv.tx_event.subscribe();
+    state.first_client_connected.notify_waiters();
 
     match state.slv.to_json().await {
         Ok(mut msg) => {
@@ -79,7 +101,6 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 return;
             }
 
-            state.first_client_connected.notify_waiters();
             loop {
                 tokio::select! {
                     incoming = socket.recv() => {
