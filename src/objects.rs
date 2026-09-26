@@ -18,7 +18,7 @@ impl BoolVar {
 
 impl Var for BoolVar {
     fn var_type(&self) -> Rc<dyn Type> {
-        self.var_type.upgrade().expect("Type has been dropped").clone()
+        self.var_type.upgrade().expect("Type has been dropped")
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -39,7 +39,7 @@ impl ArithVar {
 
 impl Var for ArithVar {
     fn var_type(&self) -> Rc<dyn Type> {
-        self.var_type.upgrade().expect("Type has been dropped").clone()
+        self.var_type.upgrade().expect("Type has been dropped")
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -60,7 +60,7 @@ impl StringVar {
 
 impl Var for StringVar {
     fn var_type(&self) -> Rc<dyn Type> {
-        self.var_type.upgrade().expect("Type has been dropped").clone()
+        self.var_type.upgrade().expect("Type has been dropped")
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -81,7 +81,7 @@ impl EnumVar {
 
 impl Var for EnumVar {
     fn var_type(&self) -> Rc<dyn Type> {
-        self.var_type.upgrade().expect("Type has been dropped").clone()
+        self.var_type.upgrade().expect("Type has been dropped")
     }
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {

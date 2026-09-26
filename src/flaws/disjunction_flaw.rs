@@ -7,7 +7,7 @@ use riddle::{
     language::{Disjunction, Expr, Statement, execute},
     scope::Scope,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{rc::Rc, str::FromStr};
 
 pub(crate) struct DisjunctionFlaw {
@@ -59,7 +59,9 @@ impl Flaw for DisjunctionFlaw {
     }
 
     fn to_json(&self) -> Value {
-        Value::Null
+        json!({
+            "kind": "disjunction",
+        })
     }
 }
 
