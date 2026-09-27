@@ -465,6 +465,14 @@ impl Graph {
                     self.flaw_status[*flw_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
+                    self.agenda.remove(&flw_id);
+                }
+            }
+            if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
+                for &flw_id in flw_ids {
+                    self.flaw_status[*flw_id] = None;
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
                 }
             }
         }
@@ -479,6 +487,14 @@ impl Graph {
                         self.agenda.insert(flaw_id);
                     }
                     affected_flaws.push(flaw_id);
+                }
+            }
+            if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[*res_id] = None;
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
+                    affected_flaws.push(self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
                 }
             }
         }
