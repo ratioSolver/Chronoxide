@@ -473,6 +473,7 @@ impl Graph {
                     self.flaw_status[*flw_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
+                    affected_flaws.push(flw_id);
                 }
             }
         }
