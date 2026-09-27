@@ -458,7 +458,6 @@ impl Graph {
         }
         self.trail_lim.truncate(level);
 
-        let mut affected_flaws = Vec::new();
         for &lit in lits {
             if let Some(flw_ids) = self.lit_to_flaw.get(&lit) {
                 for &flw_id in flw_ids {
@@ -473,7 +472,6 @@ impl Graph {
                     self.flaw_status[*flw_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
-                    affected_flaws.push(flw_id);
                 }
             }
         }
@@ -487,7 +485,6 @@ impl Graph {
                     if self.flaw_status[*flaw_id] == Some(true) {
                         self.agenda.insert(flaw_id);
                     }
-                    affected_flaws.push(flaw_id);
                 }
             }
             if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
@@ -495,12 +492,9 @@ impl Graph {
                     self.resolver_status[*res_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
-                    affected_flaws.push(self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
                 }
             }
         }
-
-        self.propagate_costs(affected_flaws.as_slice());
     }
 
     pub(super) fn propagate_costs(&mut self, initial_flaws: &[FlawId]) {
