@@ -9,7 +9,11 @@ use semitone::{
     ast::{BoolExpr, DlVar},
 };
 use serde_json::Value;
-use std::{collections::VecDeque, fmt, ops::Deref};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt,
+    ops::Deref,
+};
 use tokio::sync::broadcast;
 use tracing::trace;
 
@@ -113,12 +117,16 @@ pub struct Graph {
 
     h_flaw: Vec<f64>,
 
+    lit_to_flaw: HashMap<Lit, Vec<FlawId>>,
     flaw_status: Vec<Option<bool>>,
     flaw_phi: Vec<Lit>,
     flaw_cost: Vec<DlVar>,
+    lit_to_resolver: HashMap<Lit, Vec<ResolverId>>,
     resolver_status: Vec<Option<bool>>,
     resolver_rho: Vec<Lit>,
     resolver_cost: Vec<DlVar>,
+
+    agenda: HashSet<FlawId>,
 
     trail: Vec<(FlawId, f64)>,
     trail_lim: Vec<usize>,
@@ -139,12 +147,16 @@ impl Graph {
 
             h_flaw: Vec::new(),
 
+            lit_to_flaw: HashMap::new(),
             flaw_status: Vec::new(),
             flaw_phi: Vec::new(),
             flaw_cost: Vec::new(),
+            lit_to_resolver: HashMap::new(),
             resolver_status: Vec::new(),
             resolver_rho: Vec::new(),
             resolver_cost: Vec::new(),
+
+            agenda: HashSet::new(),
 
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -178,6 +190,7 @@ impl Graph {
             }
         };
         trace!("Adding flaw: {} ({})", flw.id(), phi);
+        let status = smt.get_lit_val(phi);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
@@ -185,7 +198,7 @@ impl Graph {
             phi: phi.to_string(),
             causes: flw.causes().to_vec(),
             required_by: flw.required_by().to_vec(),
-            status: smt.get_lit_val(phi),
+            status,
             cost: f64::INFINITY,
             data: flw.to_json(),
         });
@@ -193,7 +206,11 @@ impl Graph {
         let cost = smt.new_dl_var();
 
         self.flaws.push(Some(flw));
-        self.flaw_status.push(smt.get_lit_val(phi));
+        self.lit_to_flaw.entry(phi).or_default().push(flw_id);
+        self.flaw_status.push(status);
+        if status == Some(true) {
+            self.agenda.insert(flw_id);
+        }
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
         self.h_flaw.push(f64::INFINITY);
@@ -226,14 +243,14 @@ impl Graph {
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
     }
 
-    fn compute_flaw_cost(&self, smt: &SeMiTONE, flw_id: FlawId) -> f64 {
-        if smt.get_lit_val(self.flaw_phi[*flw_id]) == Some(false) {
+    fn compute_flaw_cost(&self, flw_id: FlawId) -> f64 {
+        if self.flaw_status[*flw_id] == Some(false) {
             f64::INFINITY
         } else {
             let mut min_cost = f64::INFINITY;
 
             for &resolver_id in self.flaws[*flw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
-                let resolver_cost = self.compute_resolver_cost(smt, resolver_id);
+                let resolver_cost = self.compute_resolver_cost(resolver_id);
                 if resolver_cost < min_cost {
                     min_cost = resolver_cost;
                 }
@@ -249,12 +266,14 @@ impl Graph {
         trace!("Adding resolver: {} ({}) for flaw {}", res.id(), rho, res.flaw());
         res.set_id(r_id);
 
+        let status = smt.get_lit_val(rho);
+
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: r_id,
             flaw_id: res.flaw(),
             rho: rho.to_string(),
-            status: smt.get_lit_val(rho),
+            status,
             intrinsic_cost: res.intrinsic_cost().to_f64(),
             preconditions: res.preconditions().to_vec(),
             data: res.to_json(),
@@ -270,7 +289,11 @@ impl Graph {
         smt.add_clause(vec![!rho, dl_cnstr]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for resolver {} cost constraint", r_id)))?;
 
         self.resolvers.push(Some(res));
-        self.resolver_status.push(smt.get_lit_val(rho));
+        self.lit_to_resolver.entry(rho).or_default().push(r_id);
+        self.resolver_status.push(status);
+        if status == Some(true) {
+            self.agenda.remove(&flaw_id);
+        }
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
 
@@ -318,8 +341,8 @@ impl Graph {
         Ok(())
     }
 
-    fn compute_resolver_cost(&self, smt: &SeMiTONE, res_id: ResolverId) -> f64 {
-        if smt.get_lit_val(self.resolver_rho[*res_id]) == Some(false) {
+    fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {
+        if self.resolver_status[*res_id] == Some(false) {
             f64::INFINITY
         } else {
             #[cfg(feature = "h_add")]
@@ -331,64 +354,37 @@ impl Graph {
         }
     }
 
-    pub(super) fn has_estimated_solution(&self, smt: &SeMiTONE) -> bool {
-        for flaw in self.flaws.iter().filter_map(|f| f.as_ref()) {
-            if smt.get_lit_val(self.flaw_phi[*flaw.id()]) == Some(true) && self.h_flaw[*flaw.id()] == f64::INFINITY {
+    pub(super) fn has_estimated_solution(&self) -> bool {
+        for &f_id in &self.agenda {
+            if self.flaw_status[*f_id] == Some(true) && self.h_flaw[*f_id] == f64::INFINITY {
                 return false;
             }
         }
         true
     }
 
-    pub(super) fn get_agenda(&self, smt: &SeMiTONE) -> Vec<FlawId> {
-        assert!(self.c_flaw.is_none(), "Cannot get agenda while a flaw is being processed");
-        assert!(self.c_res.is_none(), "Cannot get agenda while a resolver is being processed");
-
-        let mut agenda = Vec::new();
-        for flaw in &self.flaws {
-            if let Some(flaw) = flaw.as_ref() {
-                let f_id = flaw.id();
-                if smt.get_lit_val(self.flaw_phi[*f_id]) == Some(true) {
-                    let mut is_resolved = false;
-                    for r_id in flaw.resolvers() {
-                        if smt.get_lit_val(self.resolver_rho[*r_id]) == Some(true) {
-                            is_resolved = true;
-                            break;
-                        }
-                    }
-                    if !is_resolved {
-                        agenda.push(f_id);
-                    }
-                }
-            }
-        }
-        agenda
-    }
-
-    pub(super) fn pick_branching_literal(&self, smt: &mut SeMiTONE) -> Option<Lit> {
+    pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
         for &f_id in &self.flaw_q {
-            if smt.get_lit_val(self.flaw_phi[*f_id]).is_none() {
+            if self.flaw_status[*f_id].is_none() {
                 return Some(!self.flaw_phi[*f_id]);
             }
         }
 
-        let agenda = self.get_agenda(smt);
-
-        if agenda.is_empty() {
+        if self.agenda.is_empty() {
             return None;
         }
 
-        let best_flaw_id = agenda.into_iter().max_by(|&f1, &f2| self.h_flaw[*f1].partial_cmp(&self.h_flaw[*f2]).unwrap()).unwrap();
+        let best_flaw_id = self.agenda.iter().max_by(|&f1, &f2| self.h_flaw[**f1].partial_cmp(&self.h_flaw[**f2]).unwrap()).unwrap();
         let mut best_res_id = None;
         let mut best_res_cost = f64::INFINITY;
 
-        let flaw = self.flaws[*best_flaw_id].as_ref().unwrap();
+        let flaw = self.flaws[**best_flaw_id].as_ref().unwrap();
         for &r_id in flaw.resolvers().iter() {
-            if smt.get_lit_val(self.resolver_rho[*r_id]) == Some(false) {
+            if self.resolver_status[*r_id] == Some(false) {
                 continue;
             }
 
-            let cost = self.compute_resolver_cost(smt, r_id);
+            let cost = self.compute_resolver_cost(r_id);
             if cost < best_res_cost {
                 best_res_cost = cost;
                 best_res_id = Some(r_id);
@@ -402,49 +398,53 @@ impl Graph {
         self.flaw_q.pop_front()
     }
 
-    pub(super) fn sync(&mut self, smt: &SeMiTONE) {
-        let mut affected_flaws = Vec::new();
-
-        for i in 0..self.flaws.len() {
-            let current = smt.get_lit_val(self.flaw_phi[i]);
-            if current != self.flaw_status[i] {
-                #[cfg(feature = "server")]
-                let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: FlawId(i), status: current });
-
-                if current == Some(false) {
-                    affected_flaws.push(FlawId(i));
-                }
-
-                self.flaw_status[i] = current;
-            }
-        }
-
-        for i in 0..self.resolvers.len() {
-            let current = smt.get_lit_val(self.resolver_rho[i]);
-            if current != self.resolver_status[i] {
-                #[cfg(feature = "server")]
-                let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: ResolverId(i), status: current });
-
-                if current == Some(false) {
-                    if let Some(res) = self.resolvers[i].as_ref() {
-                        affected_flaws.push(res.flaw());
-                    }
-                }
-
-                self.resolver_status[i] = current;
-            }
-        }
-
-        if !affected_flaws.is_empty() {
-            self.propagate_costs(smt, affected_flaws.as_slice());
-        }
-    }
-
     pub(super) fn push(&mut self) {
         self.trail_lim.push(self.trail.len());
     }
 
-    pub(super) fn cancel_until(&mut self, level: usize) {
+    pub(super) fn propagate(&mut self, lits: &[Lit]) {
+        let mut affected_flaws = Vec::new();
+        for &lit in lits {
+            if let Some(flw_ids) = self.lit_to_flaw.get(&lit) {
+                for &flw_id in flw_ids {
+                    self.flaw_status[*flw_id] = Some(true);
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
+                    self.agenda.insert(flw_id);
+                }
+            }
+            if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
+                for &flw_id in flw_ids {
+                    self.flaw_status[*flw_id] = Some(false);
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(false) });
+                    affected_flaws.push(flw_id);
+                }
+            }
+        }
+        for &lit in lits {
+            if let Some(res_ids) = self.lit_to_resolver.get(&lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[*res_id] = Some(true);
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
+                    self.agenda.remove(&self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
+                }
+            }
+            if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[*res_id] = Some(false);
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(false) });
+                    affected_flaws.push(self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
+                }
+            }
+        }
+
+        self.propagate_costs(affected_flaws.as_slice());
+    }
+
+    pub(super) fn cancel_until(&mut self, level: usize, lits: &[Lit]) {
         if level >= self.trail_lim.len() {
             return;
         }
@@ -457,9 +457,36 @@ impl Graph {
             let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id: f, cost: old_cost });
         }
         self.trail_lim.truncate(level);
+
+        let mut affected_flaws = Vec::new();
+        for &lit in lits {
+            if let Some(flw_ids) = self.lit_to_flaw.get(&lit) {
+                for &flw_id in flw_ids {
+                    self.flaw_status[*flw_id] = None;
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
+                }
+            }
+        }
+        for &lit in lits {
+            if let Some(res_ids) = self.lit_to_resolver.get(&lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[*res_id] = None;
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
+                    let flaw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
+                    if self.flaw_status[*flaw_id] == Some(true) {
+                        self.agenda.insert(flaw_id);
+                    }
+                    affected_flaws.push(flaw_id);
+                }
+            }
+        }
+
+        self.propagate_costs(affected_flaws.as_slice());
     }
 
-    pub(super) fn propagate_costs(&mut self, smt: &SeMiTONE, initial_flaws: &[FlawId]) {
+    pub(super) fn propagate_costs(&mut self, initial_flaws: &[FlawId]) {
         assert!(self.c_flaw.is_none(), "Cannot propagate while a flaw is being processed");
         assert!(self.c_res.is_none(), "Cannot propagate while a resolver is being processed");
 
@@ -474,7 +501,7 @@ impl Graph {
             in_queue[*f_id] = false;
 
             let old_cost = self.h_flaw[*f_id];
-            let c_cost = self.compute_flaw_cost(smt, f_id);
+            let c_cost = self.compute_flaw_cost(f_id);
 
             if c_cost != old_cost {
                 self.trail.push((f_id, old_cost));

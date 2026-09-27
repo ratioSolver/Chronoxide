@@ -16,7 +16,7 @@ use semitone::{
 };
 use serde_json::{Value, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
     str::FromStr,
@@ -43,6 +43,7 @@ struct SolverState {
     graph: RefCell<Graph>,
     sigma: RefCell<Vec<ast::BoolExpr>>,
     atom_flaw: RefCell<Vec<FlawId>>,
+    notified_len: Cell<usize>,
 }
 
 impl SolverState {
@@ -57,6 +58,7 @@ impl SolverState {
             graph: RefCell::new(Graph::new(tx_event)),
             sigma: RefCell::new(Vec::new()),
             atom_flaw: RefCell::new(Vec::new()),
+            notified_len: Cell::new(0),
         });
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
@@ -73,11 +75,13 @@ impl SolverState {
         info!("Solving problem...");
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
-            self.graph.borrow_mut().sync(&self.smt.borrow());
+            let new_literals = &self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
+            self.graph.borrow_mut().propagate(new_literals.as_slice());
+            self.notified_len.set(self.smt.borrow().current_trail_len());
 
             match prop_result {
                 Ok(_) => {
-                    if !self.graph.borrow().has_estimated_solution(&self.smt.borrow()) {
+                    if !self.graph.borrow().has_estimated_solution() {
                         trace!("Expanding graph...");
                         let (mut flaw, flw_id) = {
                             let mut graph = self.graph.borrow_mut();
@@ -101,15 +105,14 @@ impl SolverState {
 
                         let mut graph = self.graph.borrow_mut();
                         graph.return_flaw(flaw);
-                        graph.propagate_costs(&self.smt.borrow(), &[flw_id]);
+                        graph.propagate_costs(&[flw_id]);
                         continue;
                     } else {
                         trace!("Picking branching literal...");
                         let mut graph = self.graph.borrow_mut();
-                        let mut smt = self.smt.borrow_mut();
-                        if let Some(decision_var) = graph.pick_branching_literal(&mut smt) {
+                        if let Some(decision_var) = graph.pick_branching_literal() {
                             graph.push();
-                            smt.decide(decision_var);
+                            self.smt.borrow_mut().decide(decision_var);
                         } else {
                             trace!("No more decisions to make, solution found");
                             break;
@@ -121,10 +124,10 @@ impl SolverState {
                     if smt.decision_level() == 0 {
                         return Err(SolverError::Inconsistent);
                     }
+                    let vars_to_undo = smt.get_trail_slice(smt.get_trail_len_at_level(bt_level), smt.current_trail_len()).to_vec();
                     smt.cancel_until(bt_level);
-                    let mut graph = self.graph.borrow_mut();
-                    graph.cancel_until(bt_level);
-                    graph.sync(&smt);
+                    self.notified_len.set(smt.current_trail_len());
+                    self.graph.borrow_mut().cancel_until(bt_level, vars_to_undo.as_slice());
                     smt.add_clause(lemma).map_err(|_| SolverError::Inconsistent)?;
                 }
             }
