@@ -210,6 +210,7 @@ impl Graph {
         self.flaw_status.push(status);
         if status == Some(true) {
             self.agenda.insert(flw_id);
+            trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
         }
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
@@ -293,6 +294,7 @@ impl Graph {
         self.resolver_status.push(status);
         if status == Some(true) {
             self.agenda.remove(&flaw_id);
+            trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
         }
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
@@ -366,15 +368,23 @@ impl Graph {
     pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
         for &f_id in &self.flaw_q {
             if self.flaw_status[*f_id].is_none() {
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(f_id)));
                 return Some(!self.flaw_phi[*f_id]);
             }
         }
 
         if self.agenda.is_empty() {
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
             return None;
         }
 
         let best_flaw_id = self.agenda.iter().max_by(|&f1, &f2| self.h_flaw[**f1].partial_cmp(&self.h_flaw[**f2]).unwrap()).unwrap();
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(*best_flaw_id)));
         let mut best_res_id = None;
         let mut best_res_cost = f64::INFINITY;
 
@@ -391,6 +401,8 @@ impl Graph {
             }
         }
 
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(best_res_id));
         Some(self.resolver_rho[*best_res_id.expect("There should be at least one resolver for the flaw")])
     }
 
@@ -411,6 +423,7 @@ impl Graph {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
                     self.agenda.insert(flw_id);
+                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
@@ -429,6 +442,7 @@ impl Graph {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
                     self.agenda.remove(&self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
+                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                 }
             }
             if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
@@ -465,6 +479,7 @@ impl Graph {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
                     self.agenda.remove(&flw_id);
+                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
@@ -484,6 +499,7 @@ impl Graph {
                     let flaw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
                     if self.flaw_status[*flaw_id] == Some(true) {
                         self.agenda.insert(flaw_id);
+                        trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                     }
                 }
             }

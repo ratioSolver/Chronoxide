@@ -6,7 +6,6 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 echarts.use([GraphChart, CanvasRenderer]);
 
-const CURRENT_NODE_COLOR = '#f97316';
 const CURRENT_NODE_BORDER_COLOR = '#7c2d12';
 const CURRENT_NODE_SHADOW_COLOR = 'rgba(249, 115, 22, 0.7)';
 
@@ -28,7 +27,7 @@ export function causal_graph(slv: solver.Solver): VNode {
           symbol: 'circle',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
-            color: is_current ? CURRENT_NODE_COLOR : node_color(flaw.get_cost(), flaw.get_status()),
+            color: node_color(flaw.get_cost(), flaw.get_status()),
             borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : 'black',
             borderWidth: is_current ? 3 : 1,
             borderType: node_border(flaw.get_status()),
@@ -45,7 +44,7 @@ export function causal_graph(slv: solver.Solver): VNode {
           symbol: 'rect',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
-            color: is_current ? CURRENT_NODE_COLOR : node_color(resolver.get_cost(), resolver.get_status()),
+            color: node_color(resolver.get_cost(), resolver.get_status()),
             borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : 'black',
             borderWidth: is_current ? 3 : 1,
             borderType: node_border(resolver.get_status()),
