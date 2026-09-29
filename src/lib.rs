@@ -599,5 +599,7 @@ pub enum SolverEvent {
     ResolverStatusUpdate { resolver_id: ResolverId, status: Option<bool> },
     CurrentResolver(Option<ResolverId>),
     NewCausalLink { flaw_id: FlawId, resolver_id: ResolverId },
+    ToSolveFlaw { flaw_id: FlawId },
+    SolvedFlaw { flaw_id: FlawId },
     StateUpdate { json: Value },
 }

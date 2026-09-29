@@ -11,6 +11,7 @@ export namespace solver {
     private readonly resolvers: Map<string, Resolver> = new Map();
     private current_flaw: Flaw | null = null;
     private current_resolver: Resolver | null = null;
+    private readonly agenda: Set<Flaw> = new Set();
     private timelines: Map<string, Timeline> = new Map();
     private readonly connection_listeners: Set<ConnectionListener> = new Set();
     private readonly listeners: Set<SolverListener> = new Set();
@@ -50,56 +51,56 @@ export namespace solver {
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
               this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.preconditions ?? [], resolver_msg.status));
 
-            for (const listener of this.listeners) listener.initialized();
+            this.listeners.forEach(listener => listener.initialized());
             break;
           }
           case 'new-flaw': {
             const flaw = new Flaw(this, msg.id, msg.phi, msg.causes ?? [], msg.required_by ?? [], msg.status, msg.cost);
             this.flaws.set(msg.id, flaw);
-            for (const listener of this.listeners) listener.new_flaw(flaw);
+            this.listeners.forEach(listener => listener.new_flaw(flaw));
             break;
           }
           case 'flaw-status-update': {
             const flaw = this.flaws.get(msg.id)!;
             flaw._set_status(msg.status);
-            for (const listener of this.listeners) listener.flaw_status_update(flaw);
+            this.listeners.forEach(listener => listener.flaw_status_update(flaw));
             break;
           }
           case 'flaw-cost-update': {
             const flaw = this.flaws.get(msg.id)!;
             flaw._set_cost(msg.cost);
-            for (const listener of this.listeners) listener.flaw_cost_update(flaw);
+            this.listeners.forEach(listener => listener.flaw_cost_update(flaw));
             break;
           }
           case 'current-flaw': {
             if (msg.id) {
               this.current_flaw = this.flaws.get(msg.id)!;
-              for (const listener of this.listeners) listener.current_flaw(this.current_flaw);
+              this.listeners.forEach(listener => listener.current_flaw(this.current_flaw));
             } else {
               this.current_flaw = null;
-              for (const listener of this.listeners) listener.current_flaw(null);
+              this.listeners.forEach(listener => listener.current_flaw(null));
             }
             break;
           }
           case 'new-resolver': {
             const resolver = new Resolver(this, msg.id, msg.rho, msg.flaw_id, msg.intrinsic_cost, msg.preconditions ?? [], msg.status);
             this.resolvers.set(msg.id, resolver);
-            for (const listener of this.listeners) listener.new_resolver(resolver);
+            this.listeners.forEach(listener => listener.new_resolver(resolver));
             break;
           }
           case 'resolver-status-update': {
             const resolver = this.resolvers.get(msg.id)!;
             resolver._set_status(msg.status);
-            for (const listener of this.listeners) listener.resolver_status_update(resolver);
+            this.listeners.forEach(listener => listener.resolver_status_update(resolver));
             break;
           }
           case 'current-resolver': {
             if (msg.id) {
               this.current_resolver = this.resolvers.get(msg.id)!;
-              for (const listener of this.listeners) listener.current_resolver(this.current_resolver);
+              this.listeners.forEach(listener => listener.current_resolver(this.current_resolver));
             } else {
               this.current_resolver = null;
-              for (const listener of this.listeners) listener.current_resolver(null);
+              this.listeners.forEach(listener => listener.current_resolver(null));
             }
             break;
           }
@@ -108,13 +109,27 @@ export namespace solver {
             const resolver = this.resolvers.get(msg.resolver_id)!;
             flaw._add_required_by(resolver.get_id());
             resolver._add_precondition(flaw.get_id());
-            for (const listener of this.listeners) listener.new_causal_link(flaw, resolver);
+            this.listeners.forEach(listener => listener.new_causal_link(flaw, resolver));
+            break;
+          }
+          case 'to-solve-flaw': {
+            const flaw = this.flaws.get(msg.flaw_id)!;
+            if (!this.agenda.has(flaw)) {
+              this.agenda.add(flaw);
+              this.listeners.forEach(listener => listener.to_solve_flaw(flaw));
+            }
+            break;
+          }
+          case 'solved-flaw': {
+            const flaw = this.flaws.get(msg.flaw_id)!;
+            if (this.agenda.delete(flaw))
+              this.listeners.forEach(listener => listener.solved_flaw(flaw));
             break;
           }
           case 'state-update': {
             for (const [id, timeline] of Object.entries(msg.timelines))
               this.timelines.set(id, timeline);
-            for (const listener of this.listeners) listener.timelines_update(this.timelines);
+            this.listeners.forEach(listener => listener.timelines_update(this.timelines));
             break;
           }
           default:
@@ -123,15 +138,16 @@ export namespace solver {
       }
     }
 
-    get_flaws(): Flaw[] { return Array.from(this.flaws.values()); }
-    get_flaw(id: string): Flaw | undefined { return this.flaws.get(id); }
-    get_resolvers(): Resolver[] { return Array.from(this.resolvers.values()); }
-    get_resolver(id: string): Resolver | undefined { return this.resolvers.get(id); }
+    get_flaws(): ReadonlyArray<Flaw> { return Array.from(this.flaws.values()); }
+    get_flaw(id: string): Readonly<Flaw> | undefined { return this.flaws.get(id); }
+    get_resolvers(): ReadonlyArray<Resolver> { return Array.from(this.resolvers.values()); }
+    get_resolver(id: string): Readonly<Resolver> | undefined { return this.resolvers.get(id); }
 
-    get_current_flaw(): Flaw | null { return this.current_flaw; }
-    get_current_resolver(): Resolver | null { return this.current_resolver; }
+    get_current_flaw(): Readonly<Flaw> | null { return this.current_flaw; }
+    get_current_resolver(): Readonly<Resolver> | null { return this.current_resolver; }
+    get_agenda(): ReadonlySet<Flaw> { return this.agenda; }
 
-    get_timelines(): Map<string, Timeline> { return this.timelines; }
+    get_timelines(): ReadonlyMap<string, Timeline> { return this.timelines; }
 
     add_connection_listener(listener: ConnectionListener) { this.connection_listeners.add(listener); }
     remove_connection_listener(listener: ConnectionListener) { this.connection_listeners.delete(listener); }
@@ -156,6 +172,8 @@ export namespace solver {
     resolver_status_update(resolver: Resolver): void;
     current_resolver(resolver: Resolver | null): void;
     new_causal_link(flaw: Flaw, resolver: Resolver): void;
+    to_solve_flaw(flaw: Flaw): void;
+    solved_flaw(flaw: Flaw): void;
     timelines_update(timelines: Map<string, Timeline>): void;
   }
 
@@ -252,5 +270,7 @@ export namespace solver {
     | ({ msg_type: 'resolver-status-update' } & { id: string, status: Status })
     | ({ msg_type: 'current-resolver' } & { id: string | undefined })
     | ({ msg_type: 'new-causal-link' } & { flaw_id: string, resolver_id: string })
+    | ({ msg_type: 'to-solve-flaw' } & { flaw_id: string })
+    | ({ msg_type: 'solved-flaw' } & { flaw_id: string })
     | ({ msg_type: 'state-update' } & SolverMessage);
 }

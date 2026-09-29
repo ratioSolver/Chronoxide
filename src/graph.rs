@@ -211,6 +211,8 @@ impl Graph {
         if status == Some(true) {
             self.agenda.insert(flw_id);
             trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
         }
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
@@ -295,6 +297,8 @@ impl Graph {
         if status == Some(true) {
             self.agenda.remove(&flaw_id);
             trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flaw_id });
         }
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
@@ -424,6 +428,8 @@ impl Graph {
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
                     self.agenda.insert(flw_id);
                     trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
@@ -439,10 +445,13 @@ impl Graph {
             if let Some(res_ids) = self.lit_to_resolver.get(&lit) {
                 for &res_id in res_ids {
                     self.resolver_status[*res_id] = Some(true);
+                    let flaw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
-                    self.agenda.remove(&self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
+                    self.agenda.remove(&flaw_id);
                     trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flaw_id });
                 }
             }
             if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
@@ -480,6 +489,8 @@ impl Graph {
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
                     self.agenda.remove(&flw_id);
                     trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flw_id });
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
@@ -496,10 +507,12 @@ impl Graph {
                     self.resolver_status[*res_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
-                    let flaw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
-                    if self.flaw_status[*flaw_id] == Some(true) {
-                        self.agenda.insert(flaw_id);
+                    let flw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
+                    if self.flaw_status[*flw_id] == Some(true) {
+                        self.agenda.insert(flw_id);
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                        #[cfg(feature = "server")]
+                        let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
                     }
                 }
             }

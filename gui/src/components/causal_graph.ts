@@ -9,6 +9,9 @@ echarts.use([GraphChart, CanvasRenderer]);
 const CURRENT_NODE_BORDER_COLOR = '#7c2d12';
 const CURRENT_NODE_SHADOW_COLOR = 'rgba(249, 115, 22, 0.7)';
 
+const FRONTIER_BORDER_COLOR = '#3b82f6';
+const FRONTIER_SHADOW_COLOR = 'rgba(59, 130, 246, 0.4)';
+
 export function causal_graph(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
@@ -17,10 +20,12 @@ export function causal_graph(slv: solver.Solver): VNode {
     const resolvers = slv.get_resolvers();
     const current_flaw = slv.get_current_flaw();
     const current_resolver = slv.get_current_resolver();
+    const agenda = slv.get_agenda();
 
     const data = [
       ...flaws.map((flaw) => {
         const is_current = flaw === current_flaw;
+        const is_frontier = agenda.has(flaw);
         return {
           id: flaw.get_id(),
           name: flaw.get_id(),
@@ -28,11 +33,11 @@ export function causal_graph(slv: solver.Solver): VNode {
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
             color: node_color(flaw.get_cost(), flaw.get_status()),
-            borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : 'black',
-            borderWidth: is_current ? 3 : 1,
+            borderColor: is_current ? CURRENT_NODE_BORDER_COLOR : is_frontier ? FRONTIER_BORDER_COLOR : 'black',
+            borderWidth: is_current ? 3 : is_frontier ? 2 : 1,
             borderType: node_border(flaw.get_status()),
-            shadowBlur: is_current ? 16 : 0,
-            shadowColor: CURRENT_NODE_SHADOW_COLOR
+            shadowBlur: is_current ? 16 : is_frontier ? 8 : 0,
+            shadowColor: is_current ? CURRENT_NODE_SHADOW_COLOR : is_frontier ? FRONTIER_SHADOW_COLOR : 'transparent'
           },
         };
       }),
@@ -49,7 +54,7 @@ export function causal_graph(slv: solver.Solver): VNode {
             borderWidth: is_current ? 3 : 1,
             borderType: node_border(resolver.get_status()),
             shadowBlur: is_current ? 16 : 0,
-            shadowColor: CURRENT_NODE_SHADOW_COLOR
+            shadowColor: is_current ? CURRENT_NODE_SHADOW_COLOR : 'transparent'
           },
         };
       }),
@@ -105,6 +110,8 @@ export function causal_graph(slv: solver.Solver): VNode {
     resolver_status_update: (_resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     current_resolver: (_resolver: solver.Resolver | null) => { if (chart) chart.setOption(get_option()); },
     new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
+    to_solve_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
+    solved_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     timelines_update: (_timelines: Map<string, solver.Timeline>) => { }
   };
 

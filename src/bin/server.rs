@@ -210,6 +210,20 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 });
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
+                            SolverEvent::ToSolveFlaw { flaw_id } => {
+                                let msg = json!({
+                                    "msg_type": "to-solve-flaw",
+                                    "flaw_id": format!("{}", flaw_id),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::SolvedFlaw { flaw_id } => {
+                                let msg = json!({
+                                    "msg_type": "solved-flaw",
+                                    "flaw_id": format!("{}", flaw_id),
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
                             SolverEvent::StateUpdate { json } => {
                                 let mut msg = json.clone();
                                 msg["msg_type"] = "state-update".into();
