@@ -2,6 +2,7 @@ use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{FlawId, Graph, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
+    timelines::Timeline,
 };
 use riddle::{
     RiddleError,
@@ -21,12 +22,14 @@ use std::{
     rc::{Rc, Weak},
     str::FromStr,
 };
+use timelines::state_variable::StateVariable;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
 
 mod flaws;
 mod graph;
 mod objects;
+mod timelines;
 
 type CommandResult<T> = oneshot::Sender<Result<T, SolverError>>;
 
@@ -36,9 +39,10 @@ enum SolverCommand {
     ToJson(CommandResult<Value>),
 }
 
-struct SolverState {
+pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
+    timelines: RefCell<Vec<Rc<dyn Timeline>>>,
     smt: RefCell<SeMiTONE>,
     graph: RefCell<Graph>,
     sigma: RefCell<Vec<ast::BoolExpr>>,
@@ -54,6 +58,7 @@ impl SolverState {
                 CommonCore::new(core)
             },
             slv: core.clone(),
+            timelines: RefCell::new(Vec::new()),
             smt: RefCell::new(SeMiTONE::new()),
             graph: RefCell::new(Graph::new(tx_event)),
             sigma: RefCell::new(Vec::new()),
@@ -63,7 +68,13 @@ impl SolverState {
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
         }
+        slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
         slv
+    }
+
+    pub fn add_timeline(&self, timeline: Rc<dyn Timeline>) {
+        self.core.add_type(timeline.clone());
+        self.timelines.borrow_mut().push(timeline);
     }
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
@@ -149,12 +160,21 @@ impl SolverState {
 
         drop(smt);
 
+        let mut timelines_map = serde_json::Map::new();
+        for timeline in self.timelines.borrow().iter() {
+            let timeline_json = timeline.to_json(self);
+            if let Value::Object(map) = timeline_json {
+                timelines_map.extend(map);
+            }
+        }
+
         json!({
             "env": env,
             "objects": Value::Object(objects_map),
             "atoms": Value::Object(atoms_map),
             "flaws": Vec::<Value>::new(),
             "resolvers": Vec::<Value>::new(),
+            "timelines": Value::Object(timelines_map),
         })
     }
 }
