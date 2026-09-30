@@ -72,26 +72,26 @@ impl Flaw for AtomFlaw {
             let mut unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found", target)))?, atom.predicate());
             unif_eqs.push(!sigma.get(*self.atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found in sigma", self.atom)))?.clone());
             unif_eqs.push(sigma.get(*target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found in sigma", target)))?.clone());
-            let rho = smt.track_expr(And(unif_eqs));
+            let rho = slv.track_expr(&mut smt, &mut graph, And(unif_eqs))?;
             if smt.get_lit_val(rho) == Some(false) {
                 continue;
             }
-            self.resolvers.push(graph.add_resolver(&mut smt, Box::new(UnificationResolver::new(self.id, self.atom, target)), rho)?);
+            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(UnificationResolver::new(self.id, self.atom, target)), rho)?);
         }
 
         if self.resolvers.is_empty() {
             let (_, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError("No current flaw found".to_string()))?;
             if atom.is_fact() {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(FactResolver::new(self.id, self.atom)), phi)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.id, self.atom)), phi)?);
             } else {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(GoalResolver::new(self.id, self.atom)), phi)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.id, self.atom)), phi)?);
             }
         } else {
             let rho = smt.new_lit();
             if atom.is_fact() {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(FactResolver::new(self.id, self.atom)), rho)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.id, self.atom)), rho)?);
             } else {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(GoalResolver::new(self.id, self.atom)), rho)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.id, self.atom)), rho)?);
             }
         }
 
@@ -148,10 +148,11 @@ impl Resolver for GoalResolver {
             },
         }?;
 
-        let (_, rho) = slv.graph.borrow().current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
         let mut smt = slv.smt.borrow_mut();
-        let sigma = smt.track_expr(slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?);
-        smt.add_clause(vec![!rho, sigma]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add fact clause for atom {}", self.atom)))
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
+        let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }
 
     fn preconditions(&self) -> Vec<FlawId> {
@@ -195,10 +196,11 @@ impl Resolver for FactResolver {
 
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying FactResolver for atom {}", self.atom);
-        let (_, rho) = slv.graph.borrow().current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
         let mut smt = slv.smt.borrow_mut();
-        let sigma = smt.track_expr(slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?);
-        smt.add_clause(vec![!rho, sigma]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add fact clause for atom {}", self.atom)))
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
+        let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }
 
     fn to_json(&self) -> Value {
@@ -240,10 +242,10 @@ impl Resolver for UnificationResolver {
 
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying UnificationResolver for atoms {} and {}", self.current_atom, self.target_atom);
-        let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
         let target_flaw = slv.atom_flaw.borrow().get(*self.target_atom).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", self.target_atom)))?;
-        graph.add_causal_link(&mut smt, target_flaw)
+        slv.add_causal_link(&mut smt, &mut graph, target_flaw)
     }
 
     fn preconditions(&self) -> Vec<FlawId> {

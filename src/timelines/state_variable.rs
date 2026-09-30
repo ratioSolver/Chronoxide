@@ -162,13 +162,13 @@ impl Class for StateVariable {
 }
 
 impl Timeline for StateVariable {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<bool, SolverError> {
-        let mut new_flaws = false;
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
+        let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported_overlaps: HashSet<(AtomId, AtomId)> = HashSet::new();
 
-        let mut graph = slv.graph.borrow_mut();
-        let mut smt = slv.smt.borrow_mut();
+        let graph = slv.graph.borrow();
+        let smt = slv.smt.borrow();
         let atom_flaw = slv.atom_flaw.borrow();
 
         for instance_id in self.instances.borrow().iter() {
@@ -212,9 +212,8 @@ impl Timeline for StateVariable {
                                     let mut causes = Vec::with_capacity(2);
                                     graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")).map(|flaw| causes.extend(flaw.causes()));
                                     graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")).map(|flaw| causes.extend(flaw.causes()));
-                                    graph.add_flaw(&mut smt, Box::new(Peak::new(causes.clone(), a, b)))?;
+                                    flaws.push(Box::new(Peak::new(causes, a, b)));
                                     reported_overlaps.insert((a, b));
-                                    new_flaws = true;
                                 }
                             }
                         }
@@ -223,7 +222,7 @@ impl Timeline for StateVariable {
             }
         }
 
-        Ok(new_flaws)
+        Ok(flaws)
     }
 
     fn to_json(&self, slv: &SolverState) -> Value {
@@ -344,19 +343,19 @@ impl Flaw for Peak {
         match (a_tau, b_tau) {
             (Slot::Primitive(a_var), Slot::ObjectRef(b_sv)) => {
                 let a_var = a_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                let disp = smt.track_expr(!a_var.eq(*b_sv as i32));
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(Displace::new(self.id)), disp)?);
+                let disp = slv.track_expr(&mut smt, &mut graph, !a_var.eq(*b_sv as i32))?;
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
             }
             (Slot::ObjectRef(a_sv), Slot::Primitive(b_var)) => {
                 let b_var = b_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                let disp = smt.track_expr(!b_var.eq(*a_sv as i32));
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(Displace::new(self.id)), disp)?);
+                let disp = slv.track_expr(&mut smt, &mut graph, !b_var.eq(*a_sv as i32))?;
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
             }
             (Slot::Primitive(a_var), Slot::Primitive(b_var)) => {
                 let a_var = a_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let b_var = b_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                let disp = smt.track_expr(!a_var.eq(b_var));
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(Displace::new(self.id)), disp)?);
+                let disp = slv.track_expr(&mut smt, &mut graph, !a_var.eq(b_var))?;
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
             }
             _ => {}
         }
@@ -364,13 +363,13 @@ impl Flaw for Peak {
         let (a_start, a_end) = get_atom_vars(slv, self.a);
         let (b_start, b_end) = get_atom_vars(slv, self.b);
 
-        let a_before_b = smt.track_expr(a_end.le(b_start));
+        let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
         if smt.get_lit_val(a_before_b) != Some(false) {
-            self.resolvers.push(graph.add_resolver(&mut smt, Box::new(Order::new(self.id)), a_before_b)?);
+            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), a_before_b)?);
         }
-        let b_before_a = smt.track_expr(b_end.le(a_start));
+        let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
         if smt.get_lit_val(b_before_a) != Some(false) {
-            self.resolvers.push(graph.add_resolver(&mut smt, Box::new(Order::new(self.id)), b_before_a)?);
+            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), b_before_a)?);
         }
 
         Ok(())

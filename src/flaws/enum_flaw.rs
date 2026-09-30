@@ -45,9 +45,9 @@ impl Flaw for EnumFlaw {
         let mut smt = slv.smt.borrow_mut();
 
         for &val in &self.domain {
-            let expr = smt.track_expr(self.expr.eq(val));
+            let expr = slv.track_expr(&mut smt, &mut graph, self.expr.eq(val))?;
             if smt.get_lit_val(expr) != Some(false) {
-                self.resolvers.push(graph.add_resolver(&mut smt, Box::new(EnumResolver::new(self.id)), expr)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id)), expr)?);
             }
         }
 

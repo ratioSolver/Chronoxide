@@ -4,10 +4,7 @@ compile_error!("Features 'h_add' and 'h_max' are mutually exclusive. Please enab
 compile_error!("Please enable one of the features 'h_add' or 'h_max'.");
 
 use crate::{SolverError, SolverEvent, SolverState};
-use semitone::{
-    Lit, SeMiTONE,
-    ast::{BoolExpr, DlVar},
-};
+use semitone::{Lit, ast::DlVar};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -167,30 +164,24 @@ impl Graph {
         }
     }
 
-    pub fn add_flaw(&mut self, smt: &mut SeMiTONE, mut flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+    /// Returns the ρ literals of the given resolvers, used by the caller to build a flaw's causes clause.
+    pub(super) fn resolver_rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
+        res_ids.iter().map(|&r_id| self.resolver_rho[r_id.0]).collect()
+    }
+
+    /// Returns the DL cost variable associated with a flaw.
+    pub(super) fn flaw_cost(&self, flw_id: FlawId) -> DlVar {
+        self.flaw_cost[*flw_id]
+    }
+
+    /// Registers a new flaw in the graph. `phi`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
+    pub fn add_flaw(&mut self, mut flw: Box<dyn Flaw>, phi: Lit, status: Option<bool>, cost: DlVar) -> FlawId {
         let flw_id = FlawId(self.flaws.len());
         flw.set_id(flw_id);
         if self.c_res.is_some() {
             self.c_preconditions.push(flw_id);
         }
-
-        let causes = flw.causes();
-        let phi = match causes.len() {
-            0 => Lit::TRUE,
-            _ => {
-                let phi = smt.new_lit();
-                // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
-                let mut clause = Vec::with_capacity(causes.len() + 1);
-                for &r_id in causes.iter() {
-                    clause.push(!self.resolver_rho[r_id.0]);
-                }
-                clause.push(phi);
-                smt.add_clause(clause).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for flaw {} implication", flw_id)))?;
-                phi
-            }
-        };
         trace!("Adding flaw: {} ({})", flw.id(), phi);
-        let status = smt.get_lit_val(phi);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
@@ -202,8 +193,6 @@ impl Graph {
             cost: f64::INFINITY,
             data: flw.to_json(),
         });
-
-        let cost = smt.new_dl_var();
 
         self.flaws.push(Some(flw));
         self.lit_to_flaw.entry(phi).or_default().push(flw_id);
@@ -220,7 +209,7 @@ impl Graph {
 
         self.flaw_q.push_back(flw_id);
 
-        Ok(flw_id)
+        flw_id
     }
 
     pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
@@ -267,13 +256,11 @@ impl Graph {
         }
     }
 
-    pub fn add_resolver(&mut self, smt: &mut SeMiTONE, mut res: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
-        assert!(smt.get_lit_val(rho) != Some(false), "Cannot add resolver with a false ρ");
+    /// Registers a new resolver in the graph. `rho`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
+    pub fn add_resolver(&mut self, mut res: Box<dyn Resolver>, rho: Lit, status: Option<bool>, cost: DlVar) -> ResolverId {
         let r_id = ResolverId(self.resolvers.len());
         trace!("Adding resolver: {} ({}) for flaw {}", res.id(), rho, res.flaw());
         res.set_id(r_id);
-
-        let status = smt.get_lit_val(rho);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
@@ -287,14 +274,6 @@ impl Graph {
         });
 
         let flaw_id = res.flaw();
-        // ρ → ϕ (applying the resolver implies solving the flaw)
-        smt.add_clause(vec![!rho, self.flaw_phi[*flaw_id]]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for resolver {} implication", r_id)))?;
-
-        let cost = smt.new_dl_var();
-        let parent_cost_var = self.flaw_cost[*flaw_id];
-        let dl_cnstr = smt.track_expr(BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()));
-        smt.add_clause(vec![!rho, dl_cnstr]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add clause for resolver {} cost constraint", r_id)))?;
-
         self.resolvers.push(Some(res));
         self.lit_to_resolver.entry(rho).or_default().push(r_id);
         self.resolver_status.push(status);
@@ -307,7 +286,7 @@ impl Graph {
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
 
-        Ok(r_id)
+        r_id
     }
 
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
@@ -336,7 +315,9 @@ impl Graph {
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 
-    pub(super) fn add_causal_link(&mut self, smt: &mut SeMiTONE, flw_id: FlawId) -> Result<(), SolverError> {
+    /// Registers a causal link from the current resolver to `flw_id`, returning `(rho, phi)` so the
+    /// caller can add the ρ → ϕ implication clause to the SAT/theory solver.
+    pub(super) fn add_causal_link(&mut self, flw_id: FlawId) -> Result<(Lit, Lit), SolverError> {
         let phi = self.flaw_phi[*flw_id];
         let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError("No current resolver to add causal link from".to_string()))?;
         self.flaws[*flw_id].as_mut().ok_or(SolverError::RuntimeError(format!("Flaw {} not found", flw_id)))?.add_required_by(res_id);
@@ -345,10 +326,7 @@ impl Graph {
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: flw_id, resolver_id: res_id });
 
-        // ρ → ϕ (applying the resolver implies solving the flaw)
-        smt.add_clause(vec![!rho, phi]).map_err(|_e| SolverError::RuntimeError(format!("Failed to add causal link from resolver {} to flaw {}", res_id, flw_id)))?;
-
-        Ok(())
+        Ok((rho, phi))
     }
 
     fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {

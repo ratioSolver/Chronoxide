@@ -1,6 +1,6 @@
 use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
-    graph::{FlawId, Graph, ResolverId},
+    graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     timelines::Timeline,
 };
@@ -12,7 +12,7 @@ use riddle::{
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
 use semitone::{
-    SeMiTONE, ast,
+    Lit, SeMiTONE, ast,
     rational::{InfRational, Rational},
 };
 use serde_json::{Value, json};
@@ -48,6 +48,7 @@ pub struct SolverState {
     sigma: RefCell<Vec<ast::BoolExpr>>,
     atom_flaw: RefCell<Vec<FlawId>>,
     notified_len: Cell<usize>,
+    tx_event: broadcast::Sender<SolverEvent>,
 }
 
 impl SolverState {
@@ -60,10 +61,11 @@ impl SolverState {
             slv: core.clone(),
             timelines: RefCell::new(Vec::new()),
             smt: RefCell::new(SeMiTONE::new()),
-            graph: RefCell::new(Graph::new(tx_event)),
+            graph: RefCell::new(Graph::new(tx_event.clone())),
             sigma: RefCell::new(Vec::new()),
             atom_flaw: RefCell::new(Vec::new()),
             notified_len: Cell::new(0),
+            tx_event,
         });
         if slv.read(include_str!("init.rddl")).is_err() {
             panic!("Failed to initialize solver");
@@ -86,12 +88,14 @@ impl SolverState {
         info!("Solving problem...");
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
-            let new_literals = &self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
-            self.graph.borrow_mut().propagate(new_literals.as_slice());
-            self.notified_len.set(self.smt.borrow().current_trail_len());
-
             match prop_result {
                 Ok(_) => {
+                    let new_literals = &self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
+                    self.graph.borrow_mut().propagate(new_literals.as_slice());
+                    self.notified_len.set(self.smt.borrow().current_trail_len());
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
+
                     if !self.graph.borrow().has_estimated_solution() {
                         trace!("Expanding graph...");
                         let (mut flaw, flw_id) = {
@@ -112,7 +116,11 @@ impl SolverState {
                             resolver.apply(self)?;
                             self.graph.borrow_mut().return_resolver(resolver);
                         }
-                        self.smt.borrow_mut().add_clause(clause).map_err(|_| SolverError::RuntimeError(format!("Failed to add clause for flaw {} implication", flw_id)))?;
+                        {
+                            let mut smt = self.smt.borrow_mut();
+                            let mut graph = self.graph.borrow_mut();
+                            self.add_clause(&mut smt, &mut graph, clause)?;
+                        }
 
                         let mut graph = self.graph.borrow_mut();
                         graph.return_flaw(flaw);
@@ -120,11 +128,31 @@ impl SolverState {
                         continue;
                     } else {
                         trace!("Picking branching literal...");
-                        let mut graph = self.graph.borrow_mut();
-                        if let Some(decision_var) = graph.pick_branching_literal() {
-                            graph.push();
+                        let decision = self.graph.borrow().pick_branching_literal();
+                        if let Some(decision_var) = decision {
+                            self.graph.borrow_mut().push();
                             self.smt.borrow_mut().decide(decision_var);
                         } else {
+                            trace!("No more decisions to make, checking timelines for new flaws...");
+                            let mut extracted_flaws = Vec::new();
+                            for timeline in self.timelines.borrow().iter() {
+                                extracted_flaws.extend(timeline.extract_flaws(self)?);
+                            }
+                            if !extracted_flaws.is_empty() {
+                                trace!("Extracted {} new flaws from timelines", extracted_flaws.len());
+                                let mut graph = self.graph.borrow_mut();
+                                let mut smt = self.smt.borrow_mut();
+                                for flaw in extracted_flaws {
+                                    self.add_flaw(&mut smt, &mut graph, flaw)?;
+                                }
+                                if self.notified_len.get() > smt.current_trail_len() {
+                                    let new_literals = &smt.get_trail_delta(self.notified_len.get()).to_vec();
+                                    graph.propagate(new_literals.as_slice());
+                                    self.notified_len.set(smt.current_trail_len());
+                                }
+                                continue;
+                            }
+
                             trace!("No more decisions to make, solution found");
                             break;
                         }
@@ -132,18 +160,94 @@ impl SolverState {
                 }
                 Err((bt_level, lemma)) => {
                     let mut smt = self.smt.borrow_mut();
-                    if smt.decision_level() == 0 {
+                    let mut graph = self.graph.borrow_mut();
+                    if !self.backtrack_and_learn(&mut smt, &mut graph, bt_level, lemma) {
                         return Err(SolverError::Inconsistent);
                     }
-                    let vars_to_undo = smt.get_trail_slice(smt.get_trail_len_at_level(bt_level), smt.current_trail_len()).to_vec();
-                    smt.cancel_until(bt_level);
-                    self.notified_len.set(smt.current_trail_len());
-                    self.graph.borrow_mut().cancel_until(bt_level, vars_to_undo.as_slice());
-                    smt.add_clause(lemma).map_err(|_| SolverError::Inconsistent)?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Backtracks `smt` and `graph` to `bt_level` and learns `lemma`.
+    /// Returns `false` if the conflict is at the root level and cannot be recovered from.
+    fn backtrack_and_learn(&self, smt: &mut SeMiTONE, graph: &mut Graph, bt_level: usize, lemma: Vec<Lit>) -> bool {
+        if smt.decision_level() == 0 {
+            return false;
+        }
+        let vars_to_undo = smt.cancel_until(bt_level);
+        self.notified_len.set(smt.current_trail_len());
+        graph.cancel_until(bt_level, vars_to_undo.as_slice());
+        smt.add_clause(lemma).is_ok()
+    }
+
+    /// Tracks `expr` as a SAT literal. On theory conflict, backtracks and learns the conflict clause,
+    /// then reports the assertion as inconsistent.
+    pub fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: impl AsRef<ast::BoolExpr>) -> Result<Lit, SolverError> {
+        match smt.track_expr(expr) {
+            Ok(lit) => Ok(lit),
+            Err((bt_level, lemma)) => {
+                self.backtrack_and_learn(smt, graph, bt_level, lemma);
+                Err(SolverError::Inconsistent)
+            }
+        }
+    }
+
+    /// Adds `clause` to the SAT core. On conflict, backtracks and learns the conflict clause,
+    /// then reports the assertion as inconsistent.
+    pub fn add_clause(&self, smt: &mut SeMiTONE, graph: &mut Graph, clause: impl IntoIterator<Item = Lit>) -> Result<(), SolverError> {
+        match smt.add_clause(clause) {
+            Ok(()) => Ok(()),
+            Err((bt_level, lemma)) => {
+                self.backtrack_and_learn(smt, graph, bt_level, lemma);
+                Err(SolverError::Inconsistent)
+            }
+        }
+    }
+
+    /// Registers a new flaw: allocates its ϕ literal (and the causes → ϕ clause) in `smt`, then
+    /// delegates bookkeeping to `graph`. This is the only place where a flaw's SAT encoding is created.
+    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+        let causes = flw.causes();
+        let phi = if causes.is_empty() {
+            Lit::TRUE
+        } else {
+            let phi = smt.new_lit();
+            // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
+            let mut clause: Vec<Lit> = graph.resolver_rhos(&causes).into_iter().map(|r| !r).collect();
+            clause.push(phi);
+            self.add_clause(smt, graph, clause)?;
+            phi
+        };
+        let status = smt.get_lit_val(phi);
+        let cost = smt.new_dl_var();
+        Ok(graph.add_flaw(flw, phi, status, cost))
+    }
+
+    /// Registers a new resolver: adds its ρ → ϕ implication and DL cost constraint to `smt`, then
+    /// delegates bookkeeping to `graph`.
+    pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, res: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
+        assert!(smt.get_lit_val(rho) != Some(false), "Cannot add resolver with a false ρ");
+
+        let flaw_id = res.flaw();
+        let phi = graph.phi(flaw_id);
+        // ρ → ϕ (applying the resolver implies solving the flaw)
+        self.add_clause(smt, graph, vec![!rho, phi])?;
+
+        let cost = smt.new_dl_var();
+        let parent_cost_var = graph.flaw_cost(flaw_id);
+        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()))?;
+        self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
+
+        let status = smt.get_lit_val(rho);
+        Ok(graph.add_resolver(res, rho, status, cost))
+    }
+
+    /// Adds a causal link from the current resolver to `flw_id`, wiring the ρ → ϕ clause into `smt`.
+    pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw_id: FlawId) -> Result<(), SolverError> {
+        let (rho, phi) = graph.add_causal_link(flw_id)?;
+        self.add_clause(smt, graph, vec![!rho, phi])
     }
 
     fn to_json(&self) -> Value {
@@ -231,7 +335,7 @@ impl Core for SolverState {
         let mut graph = self.graph.borrow_mut();
         let var = smt.new_bool();
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        graph.add_flaw(&mut smt, Box::new(BoolFlaw::new(cause, var.clone()))).expect("Failed to add BoolFlaw to graph");
+        self.add_flaw(&mut smt, &mut graph, Box::new(BoolFlaw::new(cause, var.clone()))).expect("Failed to add BoolFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -325,12 +429,18 @@ impl Core for SolverState {
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
         let mut smt = self.smt.borrow_mut();
-        let expr = smt.track_expr(expr_to_bool(term.as_ref()));
-        if let Some((_c_res, rho)) = self.graph.borrow().current_resolver().as_ref() {
-            if smt.add_clause(vec![!*rho, expr]).is_err() {
+        let mut graph = self.graph.borrow_mut();
+
+        let expr = match self.track_expr(&mut smt, &mut graph, expr_to_bool(term.as_ref())) {
+            Ok(lit) => lit,
+            Err(_) => return false,
+        };
+
+        if let Some((_c_res, rho)) = graph.current_resolver() {
+            if self.add_clause(&mut smt, &mut graph, vec![!rho, expr]).is_err() {
                 return false;
             }
-        } else if smt.add_clause(vec![expr]).is_err() {
+        } else if self.add_clause(&mut smt, &mut graph, vec![expr]).is_err() {
             return false;
         }
 
@@ -341,18 +451,16 @@ impl Core for SolverState {
                     if let BoolExpr::Or { terms, .. } = clause.as_ref()
                         && terms.len() > 1
                     {
-                        let mut graph = self.graph.borrow_mut();
                         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
                         let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                        graph.add_flaw(&mut smt, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                        self.add_flaw(&mut smt, &mut graph, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
                     }
                 }
             }
             BoolExpr::Or { terms, .. } if terms.len() > 1 => {
-                let mut graph = self.graph.borrow_mut();
                 let cause = graph.current_resolver().map(|(res_id, _)| res_id);
                 let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                graph.add_flaw(&mut smt, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                self.add_flaw(&mut smt, &mut graph, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
             }
             _ => {}
         }
@@ -365,14 +473,14 @@ impl Core for SolverState {
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
         let var = smt.new_enum(domain.clone());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        graph.add_flaw(&mut smt, Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
+        self.add_flaw(&mut smt, &mut graph, Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
         Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        graph.add_flaw(&mut smt, Box::new(DisjunctionFlaw::new(cause, disjunction))).expect("Failed to add DisjunctionFlaw to graph");
+        self.add_flaw(&mut smt, &mut graph, Box::new(DisjunctionFlaw::new(cause, disjunction))).expect("Failed to add DisjunctionFlaw to graph");
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
@@ -388,7 +496,7 @@ impl Core for SolverState {
         trace!("Created new atom {} with predicate {}", atm, predicate.full_name());
         self.sigma.borrow_mut().push(smt.new_bool());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        let flaw = graph.add_flaw(&mut smt, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
+        let flaw = self.add_flaw(&mut smt, &mut graph, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
         self.atom_flaw.borrow_mut().push(flaw);
         atm
     }
