@@ -182,26 +182,55 @@ impl SolverState {
         smt.add_clause(lemma).is_ok()
     }
 
-    /// Tracks `expr` as a SAT literal. On theory conflict, backtracks and learns the conflict clause,
-    /// then reports the assertion as inconsistent.
+    /// Notifies `graph` of any SAT literals assigned since the last sync (e.g. forced by a clause
+    /// just added), keeping its flaw/resolver status and agenda consistent with `smt`'s trail.
+    /// A no-op while a flaw/resolver is checked out (`graph.is_busy()`): the sync is deferred to the
+    /// next safe point, i.e. the top of the solve loop.
+    fn sync_graph(&self, smt: &SeMiTONE, graph: &mut Graph) {
+        if graph.is_busy() {
+            return;
+        }
+        let current_len = smt.current_trail_len();
+        if current_len > self.notified_len.get() {
+            let new_literals = smt.get_trail_delta(self.notified_len.get()).to_vec();
+            graph.propagate(new_literals.as_slice());
+        }
+        self.notified_len.set(current_len);
+    }
+
+    /// Tracks `expr` as a SAT literal. Each time the encoding conflicts, backtracks, learns the
+    /// conflict clause and retries: after backtracking to `bt_level`, re-encoding always succeeds
+    /// unless the conflict is at the root level, in which case the problem is truly inconsistent.
     pub fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: impl AsRef<ast::BoolExpr>) -> Result<Lit, SolverError> {
-        match smt.track_expr(expr) {
-            Ok(lit) => Ok(lit),
-            Err((bt_level, lemma)) => {
-                self.backtrack_and_learn(smt, graph, bt_level, lemma);
-                Err(SolverError::Inconsistent)
+        loop {
+            match smt.track_expr(expr.as_ref()) {
+                Ok(lit) => {
+                    self.sync_graph(smt, graph);
+                    return Ok(lit);
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(smt, graph, bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
             }
         }
     }
 
-    /// Adds `clause` to the SAT core. On conflict, backtracks and learns the conflict clause,
-    /// then reports the assertion as inconsistent.
+    /// Adds `clause` to the SAT core, retrying after backtrack-and-learn on conflict (see `track_expr`).
     pub fn add_clause(&self, smt: &mut SeMiTONE, graph: &mut Graph, clause: impl IntoIterator<Item = Lit>) -> Result<(), SolverError> {
-        match smt.add_clause(clause) {
-            Ok(()) => Ok(()),
-            Err((bt_level, lemma)) => {
-                self.backtrack_and_learn(smt, graph, bt_level, lemma);
-                Err(SolverError::Inconsistent)
+        let clause: Vec<Lit> = clause.into_iter().collect();
+        loop {
+            match smt.add_clause(clause.clone()) {
+                Ok(()) => {
+                    self.sync_graph(smt, graph);
+                    return Ok(());
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(smt, graph, bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
             }
         }
     }

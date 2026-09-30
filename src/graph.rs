@@ -297,6 +297,12 @@ impl Graph {
         self.c_res
     }
 
+    /// Whether a flaw or resolver is currently checked out (between `take_*` and `return_*`).
+    /// `propagate`/`propagate_costs` must not run while this is true.
+    pub(super) fn is_busy(&self) -> bool {
+        self.c_flaw.is_some() || self.c_res.is_some()
+    }
+
     pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
         self.c_res.replace((res_id, self.resolver_rho[*res_id]));
         #[cfg(feature = "server")]
