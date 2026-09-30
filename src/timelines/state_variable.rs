@@ -210,8 +210,12 @@ impl Timeline for StateVariable {
                                 let pair = if a < b { (a, b) } else { (b, a) };
                                 if reported_overlaps.insert(pair) {
                                     let mut causes = Vec::with_capacity(2);
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) { causes.extend(flaw.causes()) }
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) { causes.extend(flaw.causes()) }
+                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) {
+                                        causes.extend(flaw.causes())
+                                    }
+                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) {
+                                        causes.extend(flaw.causes())
+                                    }
                                     flaws.push(Box::new(Peak::new(causes, a, b)));
                                     reported_overlaps.insert((a, b));
                                 }

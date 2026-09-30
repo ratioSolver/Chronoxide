@@ -220,8 +220,8 @@ impl Graph {
         self.c_flaw
     }
 
-    pub(super) fn flaw(&self, flw_id: FlawId) -> Option<&Box<dyn Flaw>> {
-        self.flaws[*flw_id].as_ref()
+    pub(super) fn flaw(&self, flw_id: FlawId) -> Option<&dyn Flaw> {
+        self.flaws[*flw_id].as_deref()
     }
 
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
