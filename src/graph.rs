@@ -281,7 +281,7 @@ impl Graph {
             self.agenda.remove(&flaw_id);
             trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
             #[cfg(feature = "server")]
-            let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flaw_id });
+            let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id });
         }
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
@@ -439,7 +439,7 @@ impl Graph {
                     self.agenda.remove(&flaw_id);
                     trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                     #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flaw_id });
+                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id });
                 }
             }
             if let Some(res_ids) = self.lit_to_resolver.get(&!lit) {
