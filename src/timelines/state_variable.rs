@@ -330,8 +330,8 @@ impl Flaw for Peak {
     fn set_id(&mut self, id: FlawId) {
         self.id = id;
     }
-    fn causes(&self) -> Vec<ResolverId> {
-        self.causes.clone()
+    fn causes(&self) -> &Vec<ResolverId> {
+        &self.causes
     }
 
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {

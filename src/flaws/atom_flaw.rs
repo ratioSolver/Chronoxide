@@ -42,12 +42,12 @@ impl Flaw for AtomFlaw {
     fn set_id(&mut self, id: FlawId) {
         self.id = id;
     }
-    fn causes(&self) -> Vec<ResolverId> {
-        self.causes.clone()
+    fn causes(&self) -> &Vec<ResolverId> {
+        &self.causes
     }
 
-    fn required_by(&self) -> Vec<ResolverId> {
-        self.required_by.clone()
+    fn required_by(&self) -> &Vec<ResolverId> {
+        &self.required_by
     }
     fn add_required_by(&mut self, res_id: ResolverId) {
         self.required_by.push(res_id);

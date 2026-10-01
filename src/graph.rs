@@ -54,9 +54,9 @@ pub trait Flaw {
     /// Sets the unique identifier of this flaw in the graph.
     fn set_id(&mut self, id: FlawId);
     /// Causes for this flaw to exist in the graph.
-    fn causes(&self) -> Vec<ResolverId>;
+    fn causes(&self) -> &Vec<ResolverId>;
 
-    fn required_by(&self) -> Vec<ResolverId> {
+    fn required_by(&self) -> &Vec<ResolverId> {
         self.causes()
     }
     fn add_required_by(&mut self, _res_id: ResolverId) {
@@ -399,7 +399,66 @@ impl Graph {
     }
 
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
-        self.flaw_q.pop_front()
+        if self.flaw_q.is_empty() {
+            return None;
+        }
+
+        let mut best_idx = 0;
+        let mut best_priority = -1;
+
+        for (idx, &f_id) in self.flaw_q.iter().enumerate() {
+            let priority = if self.flaw_status[*f_id] == Some(true) {
+                2
+            } else if self.has_finite_cost_ancestor(f_id) {
+                0
+            } else {
+                1
+            };
+
+            if priority > best_priority {
+                best_priority = priority;
+                best_idx = idx;
+
+                if best_priority == 2 {
+                    break;
+                }
+            }
+        }
+
+        self.flaw_q.remove(best_idx)
+    }
+
+    fn has_finite_cost_ancestor(&self, target: FlawId) -> bool {
+        let mut queue = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+
+        if let Some(flw) = self.flaws[*target].as_ref() {
+            for &res_id in flw.causes().iter() {
+                if let Some(res) = self.resolvers[*res_id].as_ref() {
+                    queue.push(res.flaw());
+                }
+            }
+        }
+
+        while let Some(f_id) = queue.pop() {
+            if !visited.insert(f_id) {
+                continue;
+            }
+
+            if self.h_flaw[*f_id] < f64::INFINITY {
+                return true;
+            }
+
+            if let Some(flw) = self.flaws[*f_id].as_ref() {
+                for res_id in flw.causes() {
+                    if let Some(res) = self.resolvers[**res_id].as_ref() {
+                        queue.push(res.flaw());
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     pub(super) fn push(&mut self) {
