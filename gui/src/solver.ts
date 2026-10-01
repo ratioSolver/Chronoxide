@@ -7,6 +7,8 @@ export namespace solver {
 
     private readonly options: SolverOptions;
     private socket: WebSocket | null = null;
+    private readonly items: Map<string, Item> = new Map();
+    private readonly atoms: Map<string, Atom> = new Map();
     private readonly flaws: Map<string, Flaw> = new Map();
     private readonly resolvers: Map<string, Resolver> = new Map();
     private current_flaw: Flaw | null = null;
@@ -45,13 +47,18 @@ export namespace solver {
         console.trace('Solver message received:', event.data);
         const msg: ServerMessage = JSON.parse(event.data);
         switch (msg.msg_type) {
-          case 'status': {
+          case 'state-update': {
+            for (const [id, item_msg] of Object.entries(msg.objects))
+              this.items.set(id, new Item(id, item_msg.class, item_msg.env));
+            for (const [id, atom_msg] of Object.entries(msg.atoms))
+              this.atoms.set(id, new Atom(id, atom_msg.fact, atom_msg.predicate, atom_msg.env));
             for (const [id, flaw_msg] of Object.entries(msg.flaws))
               this.flaws.set(id, new Flaw(this, id, flaw_msg.phi, flaw_msg.causes ?? [], flaw_msg.required_by ?? [], flaw_msg.status, flaw_msg.cost));
             for (const [id, resolver_msg] of Object.entries(msg.resolvers))
               this.resolvers.set(id, new Resolver(this, id, resolver_msg.rho, resolver_msg.flaw_id, resolver_msg.intrinsic_cost, resolver_msg.preconditions ?? [], resolver_msg.status));
-
-            this.listeners.forEach(listener => listener.initialized());
+            for (const [id, timeline] of Object.entries(msg.timelines))
+              this.timelines.set(id, timeline);
+            this.listeners.forEach(listener => listener.state_update());
             break;
           }
           case 'new-flaw': {
@@ -126,18 +133,16 @@ export namespace solver {
               this.listeners.forEach(listener => listener.solved_flaw(flaw));
             break;
           }
-          case 'state-update': {
-            for (const [id, timeline] of Object.entries(msg.timelines))
-              this.timelines.set(id, timeline);
-            this.listeners.forEach(listener => listener.timelines_update(this.timelines));
-            break;
-          }
           default:
             console.warn('Received unknown message type from solver:', msg);
         }
       }
     }
 
+    get_items(): ReadonlyArray<Item> { return Array.from(this.items.values()); }
+    get_item(id: string): Readonly<Item> | undefined { return this.items.get(id); }
+    get_atoms(): ReadonlyArray<Atom> { return Array.from(this.atoms.values()); }
+    get_atom(id: string): Readonly<Atom> | undefined { return this.atoms.get(id); }
     get_flaws(): ReadonlyArray<Flaw> { return Array.from(this.flaws.values()); }
     get_flaw(id: string): Readonly<Flaw> | undefined { return this.flaws.get(id); }
     get_resolvers(): ReadonlyArray<Resolver> { return Array.from(this.resolvers.values()); }
@@ -163,7 +168,6 @@ export namespace solver {
   }
 
   export interface SolverListener {
-    initialized(): void;
     new_flaw(flaw: Flaw): void;
     flaw_status_update(flaw: Flaw): void;
     flaw_cost_update(flaw: Flaw): void;
@@ -174,7 +178,42 @@ export namespace solver {
     new_causal_link(flaw: Flaw, resolver: Resolver): void;
     to_solve_flaw(flaw: Flaw): void;
     solved_flaw(flaw: Flaw): void;
-    timelines_update(timelines: Map<string, Timeline>): void;
+    state_update(): void;
+  }
+
+  export class Item {
+    private readonly id: string;
+    private readonly cls: string;
+    private readonly env: Record<string, Value>;
+
+    constructor(id: string, cls: string, env: Record<string, Value>) {
+      this.id = id;
+      this.cls = cls;
+      this.env = env;
+    }
+
+    get_id(): string { return this.id; }
+    get_class(): string { return this.cls; }
+    get_env(): Record<string, Value> { return this.env; }
+  }
+
+  export class Atom {
+    private readonly id: string;
+    private readonly fact: boolean;
+    private readonly predicate: string;
+    private readonly env: Record<string, Value>;
+
+    constructor(id: string, fact: boolean, predicate: string, env: Record<string, Value>) {
+      this.id = id;
+      this.fact = fact;
+      this.predicate = predicate;
+      this.env = env;
+    }
+
+    get_id(): string { return this.id; }
+    is_fact(): boolean { return this.fact; }
+    get_predicate(): string { return this.predicate; }
+    get_env(): Record<string, Value> { return this.env; }
   }
 
   export class Flaw {
@@ -251,7 +290,10 @@ export namespace solver {
   export type ReusableResourceInterval = { start: InfRational; end: InfRational; amount: InfRational; };
   export type ReusableResourceTimeline = { type: 'ReusableResource'; capacity: InfRational; intervals: ReusableResourceInterval[]; };
   export type Timeline = StateVariableTimeline | ReusableResourceTimeline;
-  type SolverMessage = { flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage>, timelines: Record<string, Timeline> };
+  export type Value = InfRational | string | boolean | { type: 'object_ref' | 'atom_ref'; id: string; };
+  type ItemMessage = { class: string; env: Record<string, Value>; };
+  type AtomMessage = { predicate: string; fact: boolean, env: Record<string, Value>; };
+  type SolverMessage = { objects: Record<string, ItemMessage>, atoms: Record<string, AtomMessage>, flaws: Record<string, PartialFlawMessage>, resolvers: Record<string, PartialResolverMessage>, timelines: Record<string, Timeline> };
   type PartialFlawMessage = { phi: string, causes?: string[], required_by?: string[], cost?: number, status: Status };
   type FlawMessage = ({ id: string } & PartialFlawMessage);
   type PartialResolverMessage = { rho: string, flaw_id: string, preconditions?: string[], intrinsic_cost: number, status: Status };
@@ -261,7 +303,7 @@ export namespace solver {
   export type Status = true | false | null;
 
   type ServerMessage =
-    | ({ msg_type: 'status' } & SolverMessage)
+    | ({ msg_type: 'state-update' } & SolverMessage)
     | ({ msg_type: 'new-flaw' } & FlawMessage)
     | ({ msg_type: 'flaw-status-update' } & { id: string, status: Status })
     | ({ msg_type: 'flaw-cost-update' } & { id: string, cost?: number })

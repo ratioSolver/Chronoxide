@@ -96,7 +96,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 
     match state.slv.to_json().await {
         Ok(mut msg) => {
-            msg["msg_type"] = "status".into();
+            msg["msg_type"] = "state-update".into();
             if socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
                 return;
             }

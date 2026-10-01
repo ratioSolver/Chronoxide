@@ -25,7 +25,7 @@ export function timelines(slv: solver.Solver): VNode {
             const end = interval.end.num / interval.end.den;
 
             data.push({
-              name: `Atoms: ${interval.atoms.join(', ')}`,
+              name: interval.atoms.map(atm => atom(slv.get_atom(atm)!)).join(', '),
               value: [
                 yIndex,
                 start,
@@ -33,7 +33,7 @@ export function timelines(slv: solver.Solver): VNode {
                 interval.atoms
               ],
               itemStyle: {
-                color: '#5b8ff9',
+                color: interval.atoms.length == 0 ? '#9ca3af' : interval.atoms.length == 1 ? '#3b82f6' : '#ef4444',
                 borderWidth: 1,
                 borderColor: '#1e3a8a'
               }
@@ -154,7 +154,6 @@ export function timelines(slv: solver.Solver): VNode {
   };
 
   const solver_listener: solver.SolverListener = {
-    initialized: () => { updateChart(); },
     new_flaw: (_flaw: solver.Flaw) => { },
     flaw_status_update: (_flaw: solver.Flaw) => { },
     flaw_cost_update: (_flaw: solver.Flaw | null) => { },
@@ -165,7 +164,7 @@ export function timelines(slv: solver.Solver): VNode {
     new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { },
     to_solve_flaw: (_flaw: solver.Flaw) => { updateChart(); },
     solved_flaw: (_flaw: solver.Flaw) => { updateChart(); },
-    timelines_update: (_timelines: Map<string, solver.Timeline>) => { updateChart(); }
+    state_update: () => { updateChart(); }
   };
 
   let resize_handler: () => void;
@@ -173,11 +172,16 @@ export function timelines(slv: solver.Solver): VNode {
   return h('div#timelines-wrapper.flex-grow-1', {
     style: {
       height: '100%',
+      width: '100%',
       overflowY: 'auto',
       minHeight: '0'
     }
   }, [
     h('div', {
+      style: {
+        width: '100%',
+        height: '200px'
+      },
       hook: {
         insert: (vnode) => {
           chart = echarts.init(vnode.elm as HTMLDivElement);
@@ -200,4 +204,32 @@ export function timelines(slv: solver.Solver): VNode {
       }
     })
   ]);
+}
+
+function atom(atm: Readonly<solver.Atom>): string {
+  return atm.get_predicate() + '(' + Object.entries(atm.get_env()).filter(([k, _v]) => k !== 'tau').map(([k, v]) => `${k}: ${value(v)}`).join(', ') + ')';
+}
+
+function value(value: solver.Value): string {
+  if (typeof value === 'object' && value !== null) {
+    if ('type' in value && 'id' in value) {
+      return value.id;
+    } else if ('num' in value && 'den' in value) {
+      const numVal = value.num / value.den;
+      if (value.inf) {
+        const infVal = value.inf.num / value.inf.den;
+        if (infVal > 0) {
+          return `${numVal} +${infVal}ϵ`;
+        } else {
+          return `${numVal} -${-infVal}ϵ`;
+        }
+      }
+      return String(numVal);
+    }
+  } else if (typeof value === 'string') {
+    return '"' + value + '"';
+  } else if (typeof value === 'boolean') {
+    return String(value);
+  }
+  throw new Error('Unknown value type');
 }

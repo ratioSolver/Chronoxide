@@ -284,11 +284,24 @@ impl SolverState {
         let env = to_json(&smt, self);
         let mut objects_map = serde_json::Map::new();
         for object in &self.core.get_objects() {
-            objects_map.insert(object.id().to_string(), to_json(&smt, object.as_ref()));
+            objects_map.insert(
+                object.id().to_string(),
+                json!({
+                    "class": object.class().full_name(),
+                    "env": to_json(&smt, object.as_ref()),
+                }),
+            );
         }
         let mut atoms_map = serde_json::Map::new();
         for atom in &self.core.get_atoms() {
-            atoms_map.insert(atom.id().to_string(), to_json(&smt, atom.as_ref()));
+            atoms_map.insert(
+                atom.id().to_string(),
+                json!({
+                    "predicate": atom.predicate().full_name(),
+                    "fact": atom.is_fact(),
+                    "env": to_json(&smt, atom.as_ref()),
+                }),
+            );
         }
 
         drop(smt);

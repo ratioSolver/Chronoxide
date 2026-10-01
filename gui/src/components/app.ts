@@ -5,7 +5,6 @@ import { causal_graph } from "./causal_graph";
 import { timelines } from "./timelines";
 
 const app_listener: solver.SolverListener = {
-  initialized: () => flick.redraw(),
   new_flaw: (_flaw: solver.Flaw) => { },
   flaw_status_update: (_flaw: solver.Flaw) => { },
   flaw_cost_update: (_flaw: solver.Flaw) => { },
@@ -16,7 +15,7 @@ const app_listener: solver.SolverListener = {
   new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { },
   to_solve_flaw: (_flaw: solver.Flaw) => { },
   solved_flaw: (_flaw: solver.Flaw) => { },
-  timelines_update: (_timelines: Map<string, solver.Timeline>) => { }
+  state_update: () => flick.redraw()
 };
 
 const landing_page = () => h('div.container.mt-5', [

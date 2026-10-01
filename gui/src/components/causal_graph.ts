@@ -101,7 +101,6 @@ export function causal_graph(slv: solver.Solver): VNode {
   };
 
   const solver_listener: solver.SolverListener = {
-    initialized: () => { if (chart) chart.setOption(get_option()); },
     new_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     flaw_status_update: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     flaw_cost_update: (_flaw: solver.Flaw | null) => { if (chart) chart.setOption(get_option()); },
@@ -112,7 +111,7 @@ export function causal_graph(slv: solver.Solver): VNode {
     new_causal_link: (_flaw: solver.Flaw, _resolver: solver.Resolver) => { if (chart) chart.setOption(get_option()); },
     to_solve_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
     solved_flaw: (_flaw: solver.Flaw) => { if (chart) chart.setOption(get_option()); },
-    timelines_update: (_timelines: Map<string, solver.Timeline>) => { }
+    state_update: () => { if (chart) chart.setOption(get_option()); }
   };
 
   let resize_handler: () => void;
