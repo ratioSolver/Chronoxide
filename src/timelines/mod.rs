@@ -1,3 +1,4 @@
+pub(super) mod reusable_resource;
 pub(super) mod state_variable;
 
 use crate::{SolverError, SolverState, graph::Flaw};

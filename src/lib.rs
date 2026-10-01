@@ -2,7 +2,7 @@ use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
-    timelines::Timeline,
+    timelines::{Timeline, reusable_resource::ReusableResource},
 };
 use riddle::{
     RiddleError,
@@ -71,6 +71,7 @@ impl SolverState {
             panic!("Failed to initialize solver");
         }
         slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
+        slv.add_timeline(ReusableResource::new(Rc::downgrade(&slv) as _));
         slv
     }
 
@@ -192,8 +193,7 @@ impl SolverState {
         }
         let current_len = smt.current_trail_len();
         if current_len > self.notified_len.get() {
-            let new_literals = smt.get_trail_delta(self.notified_len.get()).to_vec();
-            graph.propagate(new_literals.as_slice());
+            graph.propagate(smt.get_trail_delta(self.notified_len.get()));
         }
         self.notified_len.set(current_len);
     }
