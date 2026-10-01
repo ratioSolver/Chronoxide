@@ -548,12 +548,19 @@ impl Graph {
         }
     }
 
-    pub(super) fn can_unify(&self, target: FlawId) -> bool {
-        if self.flaw_q.contains(&target) {
-            return false;
-        }
+    pub(super) fn is_expanded(&self, flw_id: FlawId) -> bool {
+        !self.flaw_q.contains(&flw_id)
+    }
 
-        let mut queue = vec![target];
+    pub(super) fn can_unify(&self, causes: &[ResolverId], target: FlawId) -> bool {
+        let mut queue = Vec::new();
+        for &res_id in causes {
+            let flw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
+            if flw_id == target {
+                return false;
+            }
+            queue.push(flw_id);
+        }
         let mut visited = std::collections::HashSet::new();
 
         while let Some(f_id) = queue.pop() {
@@ -561,16 +568,12 @@ impl Graph {
                 continue;
             }
 
-            if self.flaws[*f_id].is_none() {
-                return false;
-            }
-
-            if let Some(flaw) = self.flaws[*f_id].as_ref() {
-                for r_id in flaw.causes() {
-                    if let Some(resolver) = self.resolvers[*r_id].as_ref() {
-                        queue.push(resolver.flaw());
-                    }
+            for &r_id in self.flaws[*f_id].as_ref().expect("Flaw should exist").causes().iter() {
+                let flw_id = self.resolvers[*r_id].as_ref().expect("Resolver should exist").flaw();
+                if flw_id == target {
+                    return false;
                 }
+                queue.push(flw_id);
             }
         }
 
