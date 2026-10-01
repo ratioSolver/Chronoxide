@@ -50,3 +50,9 @@ test_chronoxide!(test_core_07, ok, ["tests/examples/core/example_07.rddl"]);
 test_chronoxide!(test_core_08, ok, ["tests/examples/core/example_08.rddl"]);
 test_chronoxide!(test_core_09, ok, ["tests/examples/core/example_09.rddl"]);
 test_chronoxide!(test_core_10, ok, ["tests/examples/core/example_10.rddl"]);
+test_chronoxide!(test_core_13, ok, ["tests/examples/core/example_13.rddl"]);
+
+test_chronoxide!(test_sv_00, ok, ["tests/examples/types/sv/sv_0.rddl"]);
+test_chronoxide!(test_sv_01, ok, ["tests/examples/types/sv/sv_1.rddl"]);
+test_chronoxide!(test_sv_02, ok, ["tests/examples/types/sv/sv_2.rddl"]);
+test_chronoxide!(test_sv_03, ok, ["tests/examples/types/sv/sv_3.rddl"]);
