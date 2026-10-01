@@ -244,7 +244,7 @@ impl SolverState {
         } else {
             let phi = smt.new_lit();
             // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
-            let mut clause: Vec<Lit> = graph.resolver_rhos(&causes).into_iter().map(|r| !r).collect();
+            let mut clause: Vec<Lit> = graph.resolver_rhos(causes).into_iter().map(|r| !r).collect();
             clause.push(phi);
             self.add_clause(smt, graph, clause)?;
             phi
