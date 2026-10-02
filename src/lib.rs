@@ -726,7 +726,7 @@ pub fn inf_rat_to_json(val: &InfRational) -> Value {
     if !val.infinitesimal_part().is_zero() {
         let inf = val.infinitesimal_part();
         json.as_object_mut().unwrap().insert(
-            "inf".to_string(),
+            String::from("inf"),
             json!({
                 "num": inf.numer().to_string(),
                 "den": inf.denom().to_string()

@@ -8,7 +8,7 @@ use crate::{
 use riddle::{
     core::Core,
     env::{AtomId, Env, ObjectId, Slot},
-    language::ConstructorDef,
+    language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
 use semitone::{ast::ArithExpr, rational::InfRational};
@@ -29,11 +29,47 @@ pub(crate) struct ReusableResource {
 impl ReusableResource {
     pub(crate) fn new(core: Weak<dyn Core>) -> Rc<Self> {
         let rr = Rc::new(Self {
-            scope: Rc::new(CommonScope::new(core.clone(), Some(core))),
+            scope: CommonScope::from_class(
+                core.clone(),
+                ClassDef {
+                    name: String::new(),
+                    parents: Vec::new(),
+                    fields: vec![(vec![String::from("real")], vec![(String::from("capacity"), None)])],
+                    constructors: Vec::new(),
+                    functions: Vec::new(),
+                    predicates: vec![PredicateDef {
+                        name: String::from("Use"),
+                        args: vec![(vec![String::from("real")], String::from("amount"))],
+                        parents: vec![vec![String::from("Interval")]],
+                        statements: vec![
+                            Statement::Expr(Expr::Eq {
+                                left: Box::new(Expr::Sum {
+                                    terms: vec![Expr::QualifiedId { ids: vec![String::from("end")] }, Expr::Opposite { term: Box::new(Expr::QualifiedId { ids: vec![String::from("start")] }) }],
+                                }),
+                                right: Box::new(Expr::QualifiedId { ids: vec![String::from("duration")] }),
+                            }),
+                            Statement::Expr(Expr::Gt {
+                                left: Box::new(Expr::QualifiedId { ids: vec![String::from("amount")] }),
+                                right: Box::new(Expr::Real(String::from("0"), String::from("1"))),
+                            }),
+                        ],
+                    }],
+                    classes: Vec::new(),
+                },
+            ),
             constructors: RefCell::new(Vec::new()),
             instances: RefCell::new(Vec::new()),
         });
-        rr.constructors.borrow_mut().push(Rc::new(Constructor::new(Rc::downgrade(&rr) as _, ConstructorDef { args: Vec::new(), init: Vec::new(), statements: Vec::new() })));
+
+        rr.constructors.borrow_mut().push(Rc::new(Constructor::new(
+            Rc::downgrade(&rr) as _,
+            ConstructorDef {
+                args: vec![(vec![String::from("real")], String::from("capacity"))],
+                init: vec![(vec![String::from("capacity")], vec![Expr::QualifiedId { ids: vec![String::from("capacity")] }])],
+                statements: Vec::new(),
+            },
+        )));
+
         rr
     }
 
@@ -142,7 +178,7 @@ impl Class for ReusableResource {
     }
 
     fn constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
-        if args.is_empty() { Some(self.constructors.borrow()[0].clone()) } else { None }
+        if args.len() == 1 && args[0].name() == "real" { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 
     fn predicates(&self) -> Vec<Rc<Predicate>> {
@@ -257,6 +293,12 @@ impl Timeline for ReusableResource {
         let mut json = json!({});
 
         for instance_id in self.instances.borrow().iter() {
+            let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
+                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
+                _ => unreachable!("Instance should have a 'capacity' field"),
+            };
+            let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
+
             if let Some(atoms) = atoms_by_instance.get(instance_id) {
                 let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
                 let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
@@ -317,11 +359,13 @@ impl Timeline for ReusableResource {
 
                 json[instance_id.to_string()] = json!({
                     "type": "ReusableResource",
+                    "capacity": inf_rat_to_json(&capacity),
                     "intervals": intervals,
                 });
             } else {
                 json[instance_id.to_string()] = json!({
                     "type": "ReusableResource",
+                    "capacity": inf_rat_to_json(&capacity),
                     "intervals": [],
                 });
             }

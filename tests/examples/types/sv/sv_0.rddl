@@ -19,7 +19,6 @@ TestSV test = new TestSV();
 
 // we create a fact on the `test` state variable
 fact f0 = new test.P0(start:origin);
-f0.end - f0.start == f0.duration;
 f0.duration >= 10.0;
 
 // we create a goal on the `test` state variable

@@ -325,7 +325,7 @@ impl Graph {
     /// caller can add the ρ → ϕ implication clause to the SAT/theory solver.
     pub(super) fn add_causal_link(&mut self, flw_id: FlawId) -> Result<(Lit, Lit), SolverError> {
         let phi = self.flaw_phi[*flw_id];
-        let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError("No current resolver to add causal link from".to_string()))?;
+        let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError(String::from("No current resolver to add causal link from")))?;
         self.flaws[*flw_id].as_mut().ok_or(SolverError::RuntimeError(format!("Flaw {} not found", flw_id)))?.add_required_by(res_id);
         self.c_preconditions.push(flw_id);
 

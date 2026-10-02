@@ -89,7 +89,7 @@ impl Flaw for AtomFlaw {
         }
 
         if self.resolvers.is_empty() {
-            let (_, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError("No current flaw found".to_string()))?;
+            let (_, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
             if atom.is_fact() {
                 trace!("Fact {} cannot unify", self.atom);
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.id, self.atom)), phi)?);
@@ -161,7 +161,7 @@ impl Resolver for GoalResolver {
 
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
         let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
         slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }
@@ -207,9 +207,25 @@ impl Resolver for FactResolver {
 
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying FactResolver for atom {}", self.atom);
+        let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
+        let predicate = atom.predicate();
+        for parent in predicate.parents() {
+            let parent_predicate = get_predicate_by_path(predicate.as_ref(), parent).map_err(|e| SolverError::RuntimeError(format!("Failed to resolve parent predicate {:?} for atom {}: {}", parent, self.atom, e)))?;
+            match parent_predicate.call(atom.clone()) {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    RiddleError::InconsistencyError(msg) => {
+                        warn!("FactResolver inconsistency for atom {}: {}", self.atom, msg);
+                        Err(SolverError::Inconsistent)
+                    }
+                    _ => Err(SolverError::RuntimeError(format!("Failed to apply FactResolver for atom {}: {}", self.atom, e))),
+                },
+            }?;
+        }
+
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError("No current resolver found".to_string()))?;
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
         let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
         slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }

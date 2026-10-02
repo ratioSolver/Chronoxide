@@ -10,6 +10,6 @@ predicate Impulse(real at) {
 predicate Interval(real start, real end, real duration) {
     start >= origin;
     end <= horizon;
-    duration >= 0.0;
+    duration > 0.0;
     end - start == duration;
 }
