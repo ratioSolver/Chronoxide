@@ -510,6 +510,10 @@ impl Core for SolverState {
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
+        if instances.is_empty() {
+            return Err(RiddleError::InconsistencyError(format!("Cannot create a new variable of type {} with no instances", tp.full_name())));
+        }
+
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();

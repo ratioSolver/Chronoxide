@@ -8,10 +8,13 @@ use riddle::{
     env::{Atom, AtomId, Env},
     scope::{Predicate, Type, get_predicate_by_path},
 };
-use semitone::ast::{self, BoolExpr::And};
+use semitone::{
+    Lit,
+    ast::{self, BoolExpr::And},
+};
 use serde_json::{Value, json};
 use std::{collections::HashSet, rc::Rc};
-use tracing::{trace, warn};
+use tracing::trace;
 
 pub(crate) struct AtomFlaw {
     id: FlawId,
@@ -152,8 +155,8 @@ impl Resolver for GoalResolver {
             Ok(_) => Ok(()),
             Err(e) => match e {
                 RiddleError::InconsistencyError(msg) => {
-                    warn!("GoalResolver inconsistency for atom {}: {}", self.atom, msg);
-                    Err(SolverError::Inconsistent)
+                    trace!("GoalResolver inconsistency for atom {}: {}", self.atom, msg);
+                    slv.add_clause(&mut slv.smt.borrow_mut(), &mut slv.graph.borrow_mut(), vec![Lit::FALSE])
                 }
                 _ => Err(SolverError::RuntimeError(format!("Failed to apply GoalResolver for atom {}: {}", self.atom, e))),
             },
@@ -215,8 +218,8 @@ impl Resolver for FactResolver {
                 Ok(_) => Ok(()),
                 Err(e) => match e {
                     RiddleError::InconsistencyError(msg) => {
-                        warn!("FactResolver inconsistency for atom {}: {}", self.atom, msg);
-                        Err(SolverError::Inconsistent)
+                        trace!("FactResolver inconsistency for atom {}: {}", self.atom, msg);
+                        slv.add_clause(&mut slv.smt.borrow_mut(), &mut slv.graph.borrow_mut(), vec![Lit::FALSE])
                     }
                     _ => Err(SolverError::RuntimeError(format!("Failed to apply FactResolver for atom {}: {}", self.atom, e))),
                 },
