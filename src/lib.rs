@@ -8,7 +8,7 @@ use riddle::{
     RiddleError,
     core::{CommonCore, Core},
     env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
-    language::Disjunction,
+    language::{AtomKind, Disjunction, ResolutionConstraint},
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
 use semitone::{
@@ -298,7 +298,10 @@ impl SolverState {
                 atom.id().to_string(),
                 json!({
                     "predicate": atom.predicate().full_name(),
-                    "fact": atom.is_fact(),
+                    "fact": match atom.kind() {
+                        AtomKind::Fact => true,
+                        AtomKind::Goal => false,
+                    },
                     "env": to_json(&smt, atom.as_ref()),
                 }),
             );
@@ -535,16 +538,16 @@ impl Core for SolverState {
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
         self.core.get_object(id)
     }
-    fn new_atom(&self, predicate: Rc<Predicate>, fact: bool, args: HashMap<String, Slot>) -> AtomId {
+    fn new_atom(&self, predicate: Rc<Predicate>, kind: AtomKind, args: HashMap<String, Slot>, resolution_constraint: ResolutionConstraint) -> Result<AtomId, RiddleError> {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
-        let atm = self.core.new_atom(predicate.clone(), fact, args);
+        let atm = self.core.new_atom(predicate.clone(), kind, args, resolution_constraint)?;
         trace!("Created new atom {} with predicate {}", atm, predicate.full_name());
         self.sigma.borrow_mut().push(smt.new_bool());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
         let flaw = self.add_flaw(&mut smt, &mut graph, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
         self.atom_flaw.borrow_mut().push(flaw);
-        atm
+        Ok(atm)
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)

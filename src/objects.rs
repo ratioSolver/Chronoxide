@@ -1,7 +1,12 @@
-use riddle::{env::Var, scope::Type};
+use riddle::{
+    env::{Env, Slot, Var},
+    scope::Type,
+};
 use semitone::ast::{ArithExpr, BoolExpr, EnumExpr};
 use std::{
     any::Any,
+    cell::RefCell,
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 
@@ -70,12 +75,13 @@ impl Var for StringVar {
 
 pub struct EnumVar {
     var_type: Weak<dyn Type>,
+    variables: RefCell<HashMap<String, Slot>>,
     pub(crate) var: EnumExpr,
 }
 
 impl EnumVar {
     pub(crate) fn new(var_type: Rc<dyn Type>, var: EnumExpr) -> Self {
-        Self { var_type: Rc::downgrade(&var_type), var }
+        Self { var_type: Rc::downgrade(&var_type), variables: RefCell::new(HashMap::new()), var }
     }
 }
 
@@ -86,5 +92,27 @@ impl Var for EnumVar {
 
     fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
         self
+    }
+
+    fn as_env(self: Rc<Self>) -> Option<Rc<dyn Env>> {
+        Some(self)
+    }
+}
+
+impl Env for EnumVar {
+    fn parent(&self) -> Option<Rc<dyn Env>> {
+        None
+    }
+
+    fn get_slots(&self) -> HashMap<String, Slot> {
+        self.variables.borrow().clone()
+    }
+
+    fn get(&self, name: &str) -> Option<Slot> {
+        self.variables.borrow().get(name).cloned()
+    }
+
+    fn set(&self, name: String, value: Slot) {
+        self.variables.borrow_mut().insert(name, value);
     }
 }
