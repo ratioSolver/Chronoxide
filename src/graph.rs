@@ -259,7 +259,7 @@ impl Graph {
     /// Registers a new resolver in the graph. `rho`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
     pub fn add_resolver(&mut self, mut res: Box<dyn Resolver>, rho: Lit, status: Option<bool>, cost: DlVar) -> ResolverId {
         let r_id = ResolverId(self.resolvers.len());
-        trace!("Adding resolver: {} ({}) for flaw {}", res.id(), rho, res.flaw());
+        trace!("Adding resolver: {} ({}) for flaw {}", r_id, rho, res.flaw());
         res.set_id(r_id);
 
         #[cfg(feature = "server")]
