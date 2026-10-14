@@ -28,7 +28,7 @@ export function causal_graph(slv: solver.Solver): VNode {
         const is_frontier = agenda.has(flaw);
         return {
           id: flaw.get_id(),
-          name: flaw.get_id(),
+          name: flaw_name(slv, flaw),
           symbol: 'circle',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
@@ -187,4 +187,12 @@ function edge_style(status: solver.Status) {
         type: 'dotted'
       };
   }
+}
+
+function flaw_name(slv: solver.Solver, flaw: solver.Flaw): string {
+  const data = flaw.get_data();
+  if (data.kind === 'atom' && typeof data.atom === 'string') {
+    return slv.get_atom(data.atom)!.to_string();
+  }
+  return flaw.get_id();
 }

@@ -61,7 +61,8 @@ impl Flaw for AtomFlaw {
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
         let predicate = atom.predicate();
         trace!(
-            "Expanding AtomFlaw for {} {} with predicate {}",
+            "Expanding AtomFlaw {} for {} {} with predicate {}",
+            self.id,
             match atom.kind() {
                 AtomKind::Fact => "fact",
                 AtomKind::Goal => "goal",

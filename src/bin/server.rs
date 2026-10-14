@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use chronoxide::{Solver, SolverError, SolverEvent};
+use riddle::language::{AtomKind, ResolutionConstraint};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::{
@@ -126,6 +127,33 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         };
 
                         let send_result = match event {
+                            SolverEvent::NewObject { obj_id, class } => {
+                                let msg = json!({
+                                    "msg_type": "new-object",
+                                    "id": format!("{}", obj_id),
+                                    "class": class,
+                                    "env": {}
+                                });
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
+                            SolverEvent::NewAtom { atom_id, predicate, kind, args, resolution_constraint } => {
+                                let mut msg = json!({
+                                    "msg_type": "new-atom",
+                                    "id": format!("{}", atom_id),
+                                    "predicate": predicate,
+                                    "fact": match kind {
+                                       AtomKind::Fact => true,
+                                       AtomKind::Goal => false
+                                    },
+                                    "env": args
+                                });
+                                match resolution_constraint {
+                                    ResolutionConstraint::None => {}
+                                    ResolutionConstraint::  MustUnify => { msg["resolution_constraint"] = "must_unify".into(); }
+                                    ResolutionConstraint::CannotUnify => { msg["resolution_constraint"] = "cannot_unify".into(); }
+                                }
+                                socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
+                            }
                             SolverEvent::NewFlaw{ flaw_id, phi, causes, required_by, status, cost, data } => {
                                 let mut msg = json!({
                                     "msg_type": "new-flaw",

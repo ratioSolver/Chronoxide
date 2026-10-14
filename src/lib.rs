@@ -533,7 +533,11 @@ impl Core for SolverState {
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
-        self.core.new_object(class)
+        let obj = self.core.new_object(class.clone());
+        trace!("Created new object {} of class {}", obj, class.full_name());
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewObject { obj_id: obj, class: class.full_name() });
+        obj
     }
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
         self.core.get_object(id)
@@ -543,6 +547,14 @@ impl Core for SolverState {
         let mut graph = self.graph.borrow_mut();
         let atm = self.core.new_atom(predicate.clone(), kind, args, resolution_constraint)?;
         trace!("Created new atom {} with predicate {}", atm, predicate.full_name());
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewAtom {
+            atom_id: atm,
+            predicate: predicate.full_name(),
+            kind,
+            args: to_json(&smt, self.core.get_atom(atm).expect("Atom should exist in core").as_ref()),
+            resolution_constraint,
+        });
         self.sigma.borrow_mut().push(smt.new_bool());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
         let flaw = self.add_flaw(&mut smt, &mut graph, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
@@ -710,6 +722,14 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
                     env_json.insert(name, inf_rat_to_json(&value));
                 } else if let Some(string_var) = p.clone().as_any().downcast_ref::<StringVar>() {
                     env_json.insert(name, json!(string_var.value));
+                } else if let Some(enum_var) = p.clone().as_any().downcast_ref::<EnumVar>() {
+                    if let Some(val) = smt.get_enum_val(&enum_var.var) {
+                        env_json.insert(name, json!(val));
+                    } else {
+                        env_json.insert(name, json!(enum_var.var.to_string()));
+                    }
+                } else {
+                    unreachable!("Unexpected primitive type in slot {}", name);
                 }
             }
             Slot::ObjectRef(obj_id) => {
@@ -775,6 +795,8 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
+    NewObject { obj_id: ObjectId, class: String },
+    NewAtom { atom_id: AtomId, predicate: String, kind: AtomKind, args: Value, resolution_constraint: ResolutionConstraint },
     NewFlaw { flaw_id: FlawId, phi: String, causes: Vec<ResolverId>, required_by: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
     FlawCostUpdate { flaw_id: FlawId, cost: f64 },
     FlawStatusUpdate { flaw_id: FlawId, status: Option<bool> },

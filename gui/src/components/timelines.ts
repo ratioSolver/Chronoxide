@@ -207,29 +207,5 @@ export function timelines(slv: solver.Solver): VNode {
 }
 
 function atom(atm: Readonly<solver.Atom>): string {
-  return atm.get_predicate() + '(' + Object.entries(atm.get_env()).filter(([k, _v]) => k !== 'tau').map(([k, v]) => `${k}: ${value(v)}`).join(', ') + ')';
-}
-
-function value(value: solver.Value): string {
-  if (typeof value === 'object' && value !== null) {
-    if ('type' in value && 'id' in value) {
-      return value.id;
-    } else if ('num' in value && 'den' in value) {
-      const numVal = value.num / value.den;
-      if (value.inf) {
-        const infVal = value.inf.num / value.inf.den;
-        if (infVal > 0) {
-          return `${numVal} +${infVal}ϵ`;
-        } else {
-          return `${numVal} -${-infVal}ϵ`;
-        }
-      }
-      return String(numVal);
-    }
-  } else if (typeof value === 'string') {
-    return '"' + value + '"';
-  } else if (typeof value === 'boolean') {
-    return String(value);
-  }
-  throw new Error('Unknown value type');
+  return atm.get_predicate() + '(' + Object.entries(atm.get_env()).filter(([k, _v]) => k !== 'tau').map(([k, v]) => `${k}: ${solver.value_to_string(v)}`).join(', ') + ')';
 }
