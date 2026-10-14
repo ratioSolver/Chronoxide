@@ -45,7 +45,7 @@ export function causal_graph(slv: solver.Solver): VNode {
         const is_current = resolver === current_resolver;
         return {
           id: resolver.get_id(),
-          name: resolver.get_id(),
+          name: resolver_name(slv, resolver),
           symbol: 'rect',
           symbolSize: is_current ? 24 : 16,
           itemStyle: {
@@ -191,8 +191,18 @@ function edge_style(status: solver.Status) {
 
 function flaw_name(slv: solver.Solver, flaw: solver.Flaw): string {
   const data = flaw.get_data();
-  if (data.kind === 'atom' && typeof data.atom === 'string') {
-    return slv.get_atom(data.atom)!.to_string();
-  }
+  if (data.kind === 'atom' && typeof data.atom === 'string')
+    return `${flaw.get_id()} ${slv.get_atom(data.atom)!.to_string()}`;
+  if (data.kind === 'enum' && typeof data.var === 'string')
+    return `${flaw.get_id()} ${data.var}`;
   return flaw.get_id();
+}
+
+function resolver_name(_slv: solver.Solver, resolver: solver.Resolver): string {
+  const data = resolver.get_data();
+  if (typeof data.val === 'number')
+    return `${resolver.get_id()} obj-${data.val}`;
+  if (data.kind === 'unification')
+    return `${resolver.get_id()} unify`;
+  return resolver.get_id();
 }

@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
@@ -18,6 +20,8 @@ pub(crate) struct EnumFlaw {
 
 impl EnumFlaw {
     pub(crate) fn new(cause: Option<ResolverId>, expr: EnumExpr, domain: Vec<i32>) -> Self {
+        assert_matches!(expr, EnumExpr::Var(_), "EnumFlaw can only be created for EnumExpr::Var");
+        assert!(!domain.is_empty(), "EnumFlaw domain cannot be empty");
         Self {
             id: FlawId::default(),
             causes: cause.into_iter().collect(),
@@ -47,7 +51,7 @@ impl Flaw for EnumFlaw {
         for &val in &self.domain {
             let expr = slv.track_expr(&mut smt, &mut graph, self.expr.eq(val))?;
             if smt.get_lit_val(expr) != Some(false) {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id)), expr)?);
+                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id, val)), expr)?);
             }
         }
 
@@ -60,7 +64,8 @@ impl Flaw for EnumFlaw {
 
     fn to_json(&self) -> Value {
         json!({
-            "kind": "enum"
+            "kind": "enum",
+            "var": self.expr.to_string(),
         })
     }
 }
@@ -68,11 +73,12 @@ impl Flaw for EnumFlaw {
 struct EnumResolver {
     id: ResolverId,
     flaw: FlawId,
+    val: i32,
 }
 
 impl EnumResolver {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
+    fn new(flaw: FlawId, val: i32) -> Self {
+        Self { id: ResolverId::default(), flaw, val }
     }
 }
 
@@ -85,5 +91,11 @@ impl Resolver for EnumResolver {
     }
     fn flaw(&self) -> FlawId {
         self.flaw
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "val": self.val,
+        })
     }
 }
