@@ -325,7 +325,12 @@ fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>, predicate: Rc
 
         for (_types, arg_name) in curr_pred.args() {
             if let (Some(slot_a), Some(slot_b)) = (atom_a.get(arg_name), atom_b.get(arg_name)) {
-                eqs.push(eq_to_bool(&slot_a, &slot_b));
+                let expr = eq_to_bool(&slot_a, &slot_b);
+                if expr == ast::BoolExpr::False {
+                    return vec![ast::BoolExpr::False];
+                } else {
+                    eqs.push(expr);
+                }
             }
         }
 

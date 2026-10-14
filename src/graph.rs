@@ -473,10 +473,12 @@ impl Graph {
                     self.flaw_status[*flw_id] = Some(true);
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
-                    self.agenda.insert(flw_id);
-                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
-                    #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
+                    if !self.flaws[*flw_id].as_ref().is_some_and(|f| f.resolvers().iter().any(|r| self.resolver_status[**r] == Some(true))) {
+                        self.agenda.insert(flw_id);
+                        trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                        #[cfg(feature = "server")]
+                        let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
+                    }
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaw.get(&!lit) {
@@ -555,7 +557,7 @@ impl Graph {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
                     let flw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
-                    if self.flaw_status[*flw_id] == Some(true) {
+                    if self.flaw_status[*flw_id] == Some(true) && !self.flaws[*flw_id].as_ref().is_some_and(|f| f.resolvers().iter().any(|r| self.resolver_status[**r] == Some(true))) {
                         self.agenda.insert(flw_id);
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                         #[cfg(feature = "server")]

@@ -614,9 +614,7 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
                 return right.var.eq(**left as i32);
             }
         }
-        _ => {
-            unreachable!("Expected compatible types in equality");
-        }
+        _ => return ast::BoolExpr::False,
     }
     unreachable!("Expected compatible types in equality");
 }
