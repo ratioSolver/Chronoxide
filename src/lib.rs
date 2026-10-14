@@ -523,7 +523,7 @@ impl Core for SolverState {
         let var = smt.new_enum(domain.clone());
         let cause = graph.current_resolver().map(|(res_id, _)| res_id);
         self.add_flaw(&mut smt, &mut graph, Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
-        Ok(Slot::Primitive(Rc::new(EnumVar::new(tp, var))))
+        Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
         let mut smt = self.smt.borrow_mut();
@@ -587,11 +587,17 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
     }
 }
 
+/// Extracts the SAT expression of a boolean value, either a plain `BoolVar` or a riddle `BoolExpr` wrapping one.
+pub(crate) fn bool_expr(p: &Rc<dyn Var>) -> Option<ast::BoolExpr> {
+    let any = p.clone().as_any();
+    if let Some(var) = any.downcast_ref::<BoolVar>() { Some(var.lit.clone()) } else { any.downcast_ref::<BoolExpr>().map(expr_to_bool) }
+}
+
 fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
     match (left, right) {
         (Slot::Primitive(left), Slot::Primitive(right)) => {
-            if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<BoolVar>(), right.clone().as_any().downcast_ref::<BoolVar>()) {
-                return left.lit.eq(&right.lit);
+            if let (Some(left), Some(right)) = (bool_expr(left), bool_expr(right)) {
+                return left.eq(&right);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
                 return left.lin.eq(&right.lin);
             } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {

@@ -565,9 +565,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "riddle-lang"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a81e70a3db9dc30e0a1a3b4c8791f12d3bc4763b7a5856c0d7e6651fd0844c9"
+checksum = "9b79a48fa0794ec345ae2f58d4627e89a91a2e26131cdf8a05c6f3b558421208"
 
 [[package]]
 name = "rug"
@@ -601,9 +601,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "semitone"
-version = "0.0.26"
+version = "0.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf20d2759e89da59980672389d0981eb776e24d3a1e368b8500ff6a9ddb27acd"
+checksum = "a7f6b4a4d7d5eb4fd9e2f41f9cd3541dc18db328cb1b1f2e2316532e37c93e86"
 dependencies = [
  "rug",
  "rustc-hash",
@@ -642,9 +642,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -787,9 +787,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
