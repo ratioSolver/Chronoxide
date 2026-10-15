@@ -319,17 +319,24 @@ export namespace solver {
 
   export function value_to_string(val: Value): string {
     if (typeof val === 'object' && val !== null) {
-      if ('type' in val && 'id' in val)
-        return val.id;
+      if ('type' in val)
+        switch (val.type) {
+          case 'bool_var':
+            return val.lit;
+          case 'enum_var':
+            return val.var;
+          case 'object_ref':
+          case 'atom_ref':
+            return val.id;
+        }
       else if ('num' in val && 'den' in val) {
         const numVal = val.num / val.den;
         if (val.inf) {
           const infVal = val.inf.num / val.inf.den;
-          if (infVal > 0) {
+          if (infVal > 0)
             return `${numVal} +${infVal}ϵ`;
-          } else if (infVal < 0) {
+          else if (infVal < 0)
             return `${numVal} -${-infVal}ϵ`;
-          }
         }
         return String(numVal);
       }
@@ -345,7 +352,7 @@ export namespace solver {
   export type ReusableResourceInterval = { start: InfRational; end: InfRational; amount: InfRational; };
   export type ReusableResourceTimeline = { type: 'ReusableResource'; capacity: InfRational; intervals: ReusableResourceInterval[]; };
   export type Timeline = StateVariableTimeline | ReusableResourceTimeline;
-  export type Value = InfRational | string | boolean | { type: 'object_ref' | 'atom_ref'; id: string; };
+  export type Value = InfRational | string | boolean | { type: 'bool_var'; lit: string } | { type: 'enum_var'; var: string } | { type: 'object_ref' | 'atom_ref'; id: string; };
   type ObjectMessage = { class: string; env: Record<string, Value>; };
   type AtomMessage = { predicate: string; fact: boolean, env: Record<string, Value>; };
   type SolverMessage = { objects: Record<string, ObjectMessage>, atoms: Record<string, AtomMessage>, flaws: Record<string, FlawMessage>, resolvers: Record<string, ResolverMessage>, timelines: Record<string, Timeline> };

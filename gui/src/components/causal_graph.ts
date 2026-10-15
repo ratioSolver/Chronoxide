@@ -88,12 +88,17 @@ export function causal_graph(slv: solver.Solver): VNode {
             show: true,
             position: 'right',
             fontFamily: 'monospace',
-            fontSize: 14
+            fontSize: 12
+          },
+          labelLayout: {
+            hideOverlap: true,
+            moveOverlap: 'shiftY'
           },
           force: {
-            repulsion: 100,
-            edgeLength: 50,
-            gravity: 0.1
+            repulsion: 450,
+            edgeLength: [80, 160],
+            gravity: 0.05,
+            friction: 0.6
           }
         }
       ]

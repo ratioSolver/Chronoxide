@@ -705,8 +705,8 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
     for (name, slot) in env.get_slots() {
         match slot {
             Slot::Primitive(p) => {
-                if let Some(bool_var) = p.clone().as_any().downcast_ref::<BoolVar>() {
-                    match smt.get_bool_val(&bool_var.lit) {
+                if let Some(bool_expr) = bool_expr(&p) {
+                    match smt.get_bool_val(&bool_expr) {
                         Some(true) => {
                             env_json.insert(name, json!(true));
                         }
@@ -714,7 +714,13 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
                             env_json.insert(name, json!(false));
                         }
                         None => {
-                            env_json.insert(name, serde_json::Value::Null);
+                            env_json.insert(
+                                name,
+                                json!({
+                                    "type": "bool_var",
+                                    "lit": bool_expr.to_string()
+                                }),
+                            );
                         }
                     }
                 } else if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
@@ -724,9 +730,21 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
                     env_json.insert(name, json!(string_var.value));
                 } else if let Some(enum_var) = p.clone().as_any().downcast_ref::<EnumVar>() {
                     if let Some(val) = smt.get_enum_val(&enum_var.var) {
-                        env_json.insert(name, json!(val));
+                        env_json.insert(
+                            name,
+                            json!({
+                                "type": "object_ref",
+                                "id": format!("obj-{}", val)
+                            }),
+                        );
                     } else {
-                        env_json.insert(name, json!(enum_var.var.to_string()));
+                        env_json.insert(
+                            name,
+                            json!({
+                                "type": "enum_var",
+                                "var": enum_var.var.to_string()
+                            }),
+                        );
                     }
                 } else {
                     unreachable!("Unexpected primitive type in slot {}", name);
