@@ -257,7 +257,7 @@ impl SolverState {
     /// Registers a new resolver: adds its ρ → ϕ implication and DL cost constraint to `smt`, then
     /// delegates bookkeeping to `graph`.
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, res: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
-        assert!(smt.get_lit_val(rho) != Some(false), "Cannot add resolver with a false ρ");
+        assert!(smt.get_lit_val_and_level(rho) != Some((false, 0)), "Cannot add resolver with a false ρ");
 
         let flaw_id = res.flaw();
         let phi = graph.phi(flaw_id);

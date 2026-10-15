@@ -48,11 +48,21 @@ impl Flaw for EnumFlaw {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
 
+        let mut candidates = Vec::with_capacity(self.domain.len());
         for &val in &self.domain {
             let expr = slv.track_expr(&mut smt, &mut graph, self.expr.eq(val))?;
-            if smt.get_lit_val(expr) != Some(false) {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id, val)), expr)?);
+            match smt.get_lit_val_and_level(expr) {
+                Some((true, 0)) => {
+                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id, val)), expr)?);
+                    return Ok(());
+                }
+                Some((false, 0)) => continue,
+                _ => candidates.push((val, expr)),
             }
+        }
+
+        for (val, expr) in candidates {
+            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(EnumResolver::new(self.id, val)), expr)?);
         }
 
         Ok(())

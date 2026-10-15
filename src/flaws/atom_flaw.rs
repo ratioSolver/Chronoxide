@@ -94,7 +94,7 @@ impl Flaw for AtomFlaw {
                 unif_eqs.push(!sigma.get(*self.atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found in sigma", self.atom)))?.clone());
                 unif_eqs.push(sigma.get(*target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found in sigma", target)))?.clone());
                 let rho = slv.track_expr(&mut smt, &mut graph, And(unif_eqs))?;
-                if smt.get_lit_val(rho) == Some(false) {
+                if smt.get_lit_val_and_level(rho) == Some((false, 0)) {
                     trace!("Skipping unification with {} for atom {} due to unsatisfiable unification equations", target, self.atom);
                     continue;
                 }

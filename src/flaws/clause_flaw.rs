@@ -40,7 +40,7 @@ impl Flaw for ClauseFlaw {
         let mut smt = slv.smt.borrow_mut();
         for literal in &self.literals {
             let expr = slv.track_expr(&mut smt, &mut graph, literal)?;
-            if smt.get_lit_val(expr) != Some(false) {
+            if smt.get_lit_val_and_level(expr) != Some((false, 0)) {
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(ClauseResolver::new(self.id)), expr)?);
             }
         }

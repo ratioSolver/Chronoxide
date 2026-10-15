@@ -42,14 +42,14 @@ impl Flaw for BoolFlaw {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         let expr = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
-        match smt.get_lit_val(expr) {
-            Some(true) => {
+        match smt.get_lit_val_and_level(expr) {
+            Some((true, 0)) => {
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), expr)?);
             }
-            Some(false) => {
+            Some((false, 0)) => {
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), !expr)?);
             }
-            None => {
+            _ => {
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), expr)?);
                 self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), !expr)?);
             }
