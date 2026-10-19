@@ -2,6 +2,8 @@ export interface SolverOptions {
   url?: string;
 }
 
+const num = (r: solver.InfRational): number => r.num / r.den;
+
 export namespace solver {
   export class Solver {
 
@@ -346,9 +348,6 @@ export namespace solver {
       return String(val);
     throw new Error('Unknown value type');
   }
-
-
-  export const num = (r: solver.InfRational): number => r.num / r.den;
 
   export type StateVariableInterval = { start: InfRational; end: InfRational; atoms: string[]; };
   export type StateVariableTimeline = { type: 'StateVariable'; intervals: StateVariableInterval[]; };
