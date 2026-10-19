@@ -7,62 +7,105 @@ import { GridComponent, TooltipComponent, DataZoomComponent, TitleComponent } fr
 
 echarts.use([CustomChart, CanvasRenderer, GridComponent, TooltipComponent, DataZoomComponent, TitleComponent]);
 
+const esc = echarts.format.encodeHTML;
+
+type IntervalRef =
+  | { type: 'StateVariable'; objId: string; timeline: solver.StateVariableTimeline; interval: solver.StateVariableInterval }
+  | { type: 'ReusableResource'; objId: string; timeline: solver.ReusableResourceTimeline; interval: solver.ReusableResourceInterval }
+  | { type: 'ConsumableResource'; objId: string; timeline: solver.ConsumableResourceTimeline; interval: solver.ConsumableResourceInterval };
+
+type IntervalDatum = {
+  value: [number, number, number]; // [yIndex, start, end]
+  itemStyle: { color: string; borderWidth: number; borderColor: string };
+};
+
 export function timelines(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
+  let refs: IntervalRef[] = [];
+
+  const atom_label = (id: string): string => {
+    const atm = slv.get_atom(id);
+    return atm ? atom(atm) : id;
+  };
+
+  const format_tooltip = (params: any): string => {
+    const ref = refs[params.dataIndex];
+    if (!ref) return '';
+
+    const start = solver.num(ref.interval.start);
+    const end = solver.num(ref.interval.end);
+    const head = `<strong>${esc(ref.objId)}</strong> &middot; `;
+    const common = `Start: ${start}<br/>End: ${end}<br/>Duration: ${end - start}`;
+
+    switch (ref.type) {
+      case 'StateVariable': {
+        const n = ref.interval.atoms.length;
+        const title = n === 0 ? 'Idle' : n === 1 ? 'Atom' : `Conflict (${n} atoms)`;
+        const atoms = ref.interval.atoms.map(id => `&nbsp;&nbsp;${esc(atom_label(id))}`).join('<br/>');
+        return `${head}${title}<br/>${common}${atoms ? `<br/>Atoms:<br/>${atoms}` : ''}`;
+      }
+      case 'ReusableResource': {
+        const amount = solver.num(ref.interval.amount);
+        const capacity = solver.num(ref.timeline.capacity);
+        const usage = capacity > 0 ? ` (${((amount / capacity) * 100).toFixed(1)}%)` : '';
+        const overload = amount > capacity ? '<br/><strong style="color:#ef4444">Over capacity</strong>' : '';
+        return `${head}Reusable resource<br/>${common}<br/>Amount: ${amount} / ${capacity}${usage}${overload}`;
+      }
+      case 'ConsumableResource': {
+        const from = solver.num(ref.interval.initial_amount);
+        const to = solver.num(ref.interval.final_amount);
+        const capacity = solver.num(ref.timeline.capacity);
+        const delta = to - from;
+        const violated = Math.min(from, to) < 0 || Math.max(from, to) > capacity;
+        const warn = violated ? '<br/><strong style="color:#ef4444">Out of bounds</strong>' : '';
+        return `${head}Consumable resource<br/>${common}<br/>Amount: ${from} &rarr; ${to} (${delta >= 0 ? '+' : ''}${delta})<br/>Capacity: ${capacity}${warn}`;
+      }
+    }
+  };
+
   const get_option = (): echarts.EChartsCoreOption => {
     const categories: string[] = [];
-    const data: any[] = [];
+    const data: IntervalDatum[] = [];
+    const new_refs: IntervalRef[] = [];
+
+    const add = (ref: IntervalRef, yIndex: number, color: string, borderColor: string) => {
+      new_refs.push(ref);
+      data.push({
+        value: [yIndex, solver.num(ref.interval.start), solver.num(ref.interval.end)],
+        itemStyle: { color, borderWidth: 1, borderColor }
+      });
+    };
 
     let yIndex = 0;
-    for (const [objId, timeline] of slv.get_timelines()) {
-      categories.push(`${objId}`);
+    for (const [id, timeline] of slv.get_timelines()) {
+      const objId = `${id}`;
+      categories.push(objId);
 
       switch (timeline.type) {
         case 'StateVariable':
           for (const interval of timeline.intervals) {
-            const start = interval.start.num / interval.start.den;
-            const end = interval.end.num / interval.end.den;
-
-            data.push({
-              name: interval.atoms.map(atm => atom(slv.get_atom(atm)!)).join(', '),
-              value: [
-                yIndex,
-                start,
-                end,
-                interval.atoms
-              ],
-              itemStyle: {
-                color: interval.atoms.length == 0 ? '#9ca3af' : interval.atoms.length == 1 ? '#3b82f6' : '#ef4444',
-                borderWidth: 1,
-                borderColor: '#1e3a8a'
-              }
-            });
+            const n = interval.atoms.length;
+            add({ type: 'StateVariable', objId, timeline, interval }, yIndex,
+              n == 0 ? '#9ca3af' : n == 1 ? '#3b82f6' : '#ef4444', '#1e3a8a');
           }
           break;
         case 'ReusableResource': {
-          const capacity = timeline.capacity.num / timeline.capacity.den;
+          const capacity = solver.num(timeline.capacity);
           for (const interval of timeline.intervals) {
-            const start = interval.start.num / interval.start.den;
-            const end = interval.end.num / interval.end.den;
-            const amount = interval.amount.num / interval.amount.den;
-
-            const fillRatio = amount / capacity;
-
-            data.push({
-              name: `Amount: ${amount}`,
-              value: [
-                yIndex,
-                start,
-                end,
-                fillRatio
-              ],
-              itemStyle: {
-                color: amount > capacity ? '#ef4444' : '#10b981',
-                borderWidth: 1,
-                borderColor: '#047857'
-              }
-            });
+            add({ type: 'ReusableResource', objId, timeline, interval }, yIndex,
+              solver.num(interval.amount) > capacity ? '#ef4444' : '#10b981', '#047857');
+          }
+          break;
+        }
+        case 'ConsumableResource': {
+          const capacity = solver.num(timeline.capacity);
+          for (const interval of timeline.intervals) {
+            const from = solver.num(interval.initial_amount);
+            const to = solver.num(interval.final_amount);
+            const violated = Math.min(from, to) < 0 || Math.max(from, to) > capacity;
+            add({ type: 'ConsumableResource', objId, timeline, interval }, yIndex,
+              violated ? '#ef4444' : '#f59e0b', '#b45309');
           }
           break;
         }
@@ -71,39 +114,23 @@ export function timelines(slv: solver.Solver): VNode {
       yIndex++;
     }
 
+    refs = new_refs;
+
     return {
-      tooltip: {
-        formatter: function (params: any) {
-          const start = params.value[1];
-          const end = params.value[2];
-          const atoms = params.value[3].join(', ');
-          return `<strong>${params.name}</strong><br/>Start: ${start}<br/>End: ${end}<br/>Atoms: ${atoms}`;
-        }
-      },
+      tooltip: { formatter: format_tooltip },
       dataZoom: [
         { type: 'slider', filterMode: 'weakFilter', showDataShadow: false, bottom: 20 },
         { type: 'inside', filterMode: 'weakFilter' }
       ],
-      grid: {
-        top: 30, right: 30, bottom: 70, left: 100
-      },
-      xAxis: {
-        type: 'value',
-        scale: true
-      },
-      yAxis: {
-        type: 'category',
-        data: categories
-      },
+      grid: { top: 30, right: 30, bottom: 70, left: 100 },
+      xAxis: { type: 'value', scale: true },
+      yAxis: { type: 'category', data: categories },
       series: [
         {
           type: 'custom',
           renderItem: renderGanttItem,
-          encode: {
-            x: [1, 2],
-            y: 0
-          },
-          data: data
+          encode: { x: [1, 2], y: 0 },
+          data
         }
       ]
     };
@@ -132,11 +159,7 @@ export function timelines(slv: solver.Solver): VNode {
       type: 'rect',
       transition: ['shape'],
       shape: rectShape,
-      style: {
-        fill: api.visual('color'),
-        stroke: '#1e3a8a',
-        lineWidth: 1
-      }
+      style: api.style()
     };
   };
 

@@ -330,9 +330,9 @@ export namespace solver {
             return val.id;
         }
       else if ('num' in val && 'den' in val) {
-        const numVal = val.num / val.den;
+        const numVal = num(val);
         if (val.inf) {
-          const infVal = val.inf.num / val.inf.den;
+          const infVal = num(val.inf);
           if (infVal > 0)
             return `${numVal} +${infVal}ϵ`;
           else if (infVal < 0)
@@ -347,11 +347,16 @@ export namespace solver {
     throw new Error('Unknown value type');
   }
 
+
+  export const num = (r: solver.InfRational): number => r.num / r.den;
+
   export type StateVariableInterval = { start: InfRational; end: InfRational; atoms: string[]; };
   export type StateVariableTimeline = { type: 'StateVariable'; intervals: StateVariableInterval[]; };
   export type ReusableResourceInterval = { start: InfRational; end: InfRational; amount: InfRational; };
   export type ReusableResourceTimeline = { type: 'ReusableResource'; capacity: InfRational; intervals: ReusableResourceInterval[]; };
-  export type Timeline = StateVariableTimeline | ReusableResourceTimeline;
+  export type ConsumableResourceTimeline = { type: 'ConsumableResource'; capacity: InfRational; initial_amount: InfRational; intervals: ConsumableResourceInterval[]; };
+  export type ConsumableResourceInterval = { start: InfRational; end: InfRational; initial_amount: InfRational; final_amount: InfRational; };
+  export type Timeline = StateVariableTimeline | ReusableResourceTimeline | ConsumableResourceTimeline;
   export type Value = InfRational | string | boolean | { type: 'bool_var'; lit: string } | { type: 'enum_var'; var: string } | { type: 'object_ref' | 'atom_ref'; id: string; };
   type ObjectMessage = { class: string; env: Record<string, Value>; };
   type AtomMessage = { predicate: string; fact: boolean, env: Record<string, Value>; };
