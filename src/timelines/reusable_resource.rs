@@ -102,7 +102,7 @@ impl ReusableResource {
                             atoms_by_instance.entry(sv).or_default().push(atom.id());
                         }
                         Some(Slot::Primitive(var)) => {
-                            if let Some(enum_var) = var.as_any().downcast_ref::<EnumVar>()
+                            if let Some(enum_var) = var.downcast::<EnumVar>()
                                 && let Some(sv) = smt.get_enum_val(&enum_var.var)
                             {
                                 atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
@@ -123,7 +123,7 @@ impl Type for ReusableResource {
         "ReusableResource"
     }
 
-    fn as_class(self: Rc<Self>) -> Option<Rc<dyn Class>> {
+    fn into_class(self: Rc<Self>) -> Option<Rc<dyn Class>> {
         Some(self)
     }
 
@@ -217,7 +217,7 @@ impl Timeline for ReusableResource {
                 continue;
             };
             let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
-                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
+                Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
                 _ => unreachable!("Instance should have a 'capacity' field"),
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
@@ -282,7 +282,7 @@ impl Timeline for ReusableResource {
 
         for instance_id in self.instances.borrow().iter() {
             let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
-                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
+                Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
                 _ => unreachable!("Instance should have a 'capacity' field"),
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
@@ -371,7 +371,7 @@ fn minimal_conflicts(active: &BTreeSet<AtomId>, amounts: &HashMap<AtomId, InfRat
 fn get_atom_amount(slv: &SolverState, atom_id: AtomId) -> ArithExpr {
     let atom = slv.get_atom(atom_id).expect("Atom should exist");
     match atom.get("amount") {
-        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
+        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
         _ => unreachable!("Atom should have an 'amount' field"),
     }
 }
@@ -379,11 +379,11 @@ fn get_atom_amount(slv: &SolverState, atom_id: AtomId) -> ArithExpr {
 fn get_atom_vars(slv: &SolverState, atom_id: AtomId) -> (ArithExpr, ArithExpr) {
     let atom = slv.get_atom(atom_id).expect("Atom should exist");
     let start = match atom.get("start") {
-        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
+        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
         _ => unreachable!("Atom should have a 'start' field"),
     };
     let end = match atom.get("end") {
-        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
+        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
         _ => unreachable!("Atom should have an 'end' field"),
     };
     (start, end)
@@ -434,18 +434,18 @@ impl Flaw for Peak {
                 };
                 match (a_tau, b_tau) {
                     (Slot::Primitive(a_var), Slot::ObjectRef(b_sv)) => {
-                        let a_var = a_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
+                        let a_var = a_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                         let disp = slv.track_expr(&mut smt, &mut graph, !a_var.eq(*b_sv as i32))?;
                         self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
                     }
                     (Slot::ObjectRef(a_sv), Slot::Primitive(b_var)) => {
-                        let b_var = b_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
+                        let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                         let disp = slv.track_expr(&mut smt, &mut graph, !b_var.eq(*a_sv as i32))?;
                         self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
                     }
                     (Slot::Primitive(a_var), Slot::Primitive(b_var)) => {
-                        let a_var = a_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                        let b_var = b_var.as_any().downcast_ref::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
+                        let a_var = a_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
+                        let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                         let disp = slv.track_expr(&mut smt, &mut graph, !a_var.eq(b_var))?;
                         self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), disp)?);
                     }
@@ -472,7 +472,7 @@ impl Flaw for Peak {
                 .map(|&atom_id| {
                     let atom = slv.get_atom(atom_id).expect("Atom should exist");
                     match atom.get("amount") {
-                        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
+                        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
                         _ => unreachable!("Atom should have an 'amount' field"),
                     }
                 })

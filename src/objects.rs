@@ -9,7 +9,6 @@ use semitone::{
     ast::{ArithExpr, BoolExpr, EnumExpr},
 };
 use std::{
-    any::Any,
     cell::RefCell,
     collections::HashMap,
     rc::{Rc, Weak},
@@ -30,10 +29,6 @@ impl Var for BoolVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped")
     }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
-    }
 }
 
 pub struct ArithVar {
@@ -51,10 +46,6 @@ impl Var for ArithVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped")
     }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
-    }
 }
 
 pub struct StringVar {
@@ -71,10 +62,6 @@ impl StringVar {
 impl Var for StringVar {
     fn var_type(&self) -> Rc<dyn Type> {
         self.var_type.upgrade().expect("Type has been dropped")
-    }
-
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
     }
 }
 
@@ -108,11 +95,7 @@ impl Var for EnumVar {
         self.var_type.upgrade().expect("Type has been dropped")
     }
 
-    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
-        self
-    }
-
-    fn as_env(self: Rc<Self>) -> Option<Rc<dyn Env>> {
+    fn into_env(self: Rc<Self>) -> Option<Rc<dyn Env>> {
         Some(self)
     }
 }
@@ -165,7 +148,7 @@ impl Env for EnumVar {
                     &c_class,
                     name,
                     |s| match s {
-                        Slot::Primitive(p) => p.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()),
+                        Slot::Primitive(p) => p.downcast::<ArithVar>().map(|v| v.lin.clone()),
                         _ => None,
                     },
                     |a| r.eq(a),
@@ -183,7 +166,7 @@ impl Env for EnumVar {
                 let r = smt.new_enum(domain);
                 let value = |s: Slot| match s {
                     Slot::ObjectRef(id) => Some(EnumExpr::Const(*id as i32)),
-                    Slot::Primitive(p) => p.as_any().downcast_ref::<EnumVar>().map(|v| v.var.clone()),
+                    Slot::Primitive(p) => p.downcast::<EnumVar>().map(|v| v.var.clone()),
                     Slot::AtomRef(_) => None,
                 };
                 self.link(&slv, &mut smt, &mut graph, &c_class, name, value, |e| r.eq(e))?;

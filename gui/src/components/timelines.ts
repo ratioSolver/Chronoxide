@@ -13,7 +13,7 @@ const num = (r: solver.InfRational): number => r.num / r.den;
 
 const LEFT = 60, RIGHT = 30, TOP = 10, BOTTOM = 70, HEADER = 20, GAP = 16;
 const BODY: Record<solver.Timeline['type'], number> = {
-  StateVariable: 36,
+  StateVariable: 50,
   ReusableResource: 110,
   ConsumableResource: 110
 };

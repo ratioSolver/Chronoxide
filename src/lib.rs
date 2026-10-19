@@ -424,7 +424,7 @@ impl Core for SolverState {
             .iter()
             .map(|s| match s {
                 Slot::Primitive(p) => {
-                    if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+                    if let Some(arith_var) = p.downcast::<ArithVar>() {
                         Ok(arith_var.lin.clone())
                     } else {
                         Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
@@ -437,9 +437,9 @@ impl Core for SolverState {
     }
     fn opposite(&self, term: Slot) -> Result<Slot, RiddleError> {
         if let Slot::Primitive(p) = &term {
-            if let Some(bool_var) = p.clone().as_any().downcast_ref::<BoolVar>() {
+            if let Some(bool_var) = p.downcast::<BoolVar>() {
                 Ok(Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), ast::BoolExpr::Not(Box::new(bool_var.lit.clone()))))))
-            } else if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+            } else if let Some(arith_var) = p.downcast::<ArithVar>() {
                 Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_var.var_type().clone(), ast::ArithExpr::Neg(Box::new(arith_var.lin.clone()))))))
             } else {
                 Err(RiddleError::TypeError(format!("Expected a boolean variable, got {}", term)))
@@ -454,7 +454,7 @@ impl Core for SolverState {
             .iter()
             .map(|s| match s {
                 Slot::Primitive(p) => {
-                    if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+                    if let Some(arith_var) = p.downcast::<ArithVar>() {
                         Ok(arith_var.lin.clone())
                     } else {
                         Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
@@ -468,7 +468,7 @@ impl Core for SolverState {
     fn div(&self, left: Slot, right: Slot) -> Result<Slot, RiddleError> {
         let tp = arith_type(self, &[left.clone(), right.clone()])?;
         let left_lin = if let Slot::Primitive(p) = &left {
-            if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+            if let Some(arith_var) = p.downcast::<ArithVar>() {
                 arith_var.lin.clone()
             } else {
                 return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", left)));
@@ -477,7 +477,7 @@ impl Core for SolverState {
             return Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", left)));
         };
         let right_lin = if let Slot::Primitive(p) = &right {
-            if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+            if let Some(arith_var) = p.downcast::<ArithVar>() {
                 arith_var.lin.clone()
             } else {
                 return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", right)));
@@ -586,7 +586,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
     match expr {
         BoolExpr::Term { term, .. } => {
             if let Slot::Primitive(var) = term
-                && let Some(var) = var.clone().as_any().downcast_ref::<BoolVar>()
+                && let Some(var) = var.downcast::<BoolVar>()
             {
                 return var.lit.clone();
             }
@@ -595,7 +595,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
         BoolExpr::Eq { left, right, .. } => eq_to_bool(left, right),
         BoolExpr::Lt { left, right, .. } => {
             if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
-                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+                && let (Some(left), Some(right)) = (left.downcast::<ArithVar>(), right.downcast::<ArithVar>())
             {
                 return left.lin.lt(&right.lin);
             }
@@ -603,7 +603,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
         }
         BoolExpr::Leq { left, right, .. } => {
             if let (Slot::Primitive(left), Slot::Primitive(right)) = (left, right)
-                && let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>())
+                && let (Some(left), Some(right)) = (left.downcast::<ArithVar>(), right.downcast::<ArithVar>())
             {
                 return left.lin.le(&right.lin);
             }
@@ -617,8 +617,7 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
 
 /// Extracts the SAT expression of a boolean value, either a plain `BoolVar` or a riddle `BoolExpr` wrapping one.
 pub(crate) fn bool_expr(p: &Rc<dyn Var>) -> Option<ast::BoolExpr> {
-    let any = p.clone().as_any();
-    if let Some(var) = any.downcast_ref::<BoolVar>() { Some(var.lit.clone()) } else { any.downcast_ref::<BoolExpr>().map(expr_to_bool) }
+    if let Some(var) = p.downcast::<BoolVar>() { Some(var.lit.clone()) } else { p.downcast::<BoolExpr>().map(|expr| expr_to_bool(&expr)) }
 }
 
 fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
@@ -626,19 +625,19 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         (Slot::Primitive(left), Slot::Primitive(right)) => {
             if let (Some(left), Some(right)) = (bool_expr(left), bool_expr(right)) {
                 return left.eq(&right);
-            } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<ArithVar>(), right.clone().as_any().downcast_ref::<ArithVar>()) {
+            } else if let (Some(left), Some(right)) = (left.downcast::<ArithVar>(), right.downcast::<ArithVar>()) {
                 return left.lin.eq(&right.lin);
-            } else if let (Some(left), Some(right)) = (left.clone().as_any().downcast_ref::<EnumVar>(), right.clone().as_any().downcast_ref::<EnumVar>()) {
+            } else if let (Some(left), Some(right)) = (left.downcast::<EnumVar>(), right.downcast::<EnumVar>()) {
                 return left.var.eq(&right.var);
             }
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
-            if let Some(left) = left.clone().as_any().downcast_ref::<EnumVar>() {
+            if let Some(left) = left.downcast::<EnumVar>() {
                 return left.var.eq(**right as i32);
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
-            if let Some(right) = right.clone().as_any().downcast_ref::<EnumVar>() {
+            if let Some(right) = right.downcast::<EnumVar>() {
                 return right.var.eq(**left as i32);
             }
         }
@@ -739,12 +738,12 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
                             );
                         }
                     }
-                } else if let Some(arith_var) = p.clone().as_any().downcast_ref::<ArithVar>() {
+                } else if let Some(arith_var) = p.downcast::<ArithVar>() {
                     let value = smt.get_arith_val(&arith_var.lin).expect("Expected an arithmetic variable to have a value");
                     env_json.insert(name, inf_rat_to_json(&value));
-                } else if let Some(string_var) = p.clone().as_any().downcast_ref::<StringVar>() {
+                } else if let Some(string_var) = p.downcast::<StringVar>() {
                     env_json.insert(name, json!(string_var.value));
-                } else if let Some(enum_var) = p.clone().as_any().downcast_ref::<EnumVar>() {
+                } else if let Some(enum_var) = p.downcast::<EnumVar>() {
                     if let Some(val) = smt.get_enum_val(&enum_var.var) {
                         env_json.insert(
                             name,
