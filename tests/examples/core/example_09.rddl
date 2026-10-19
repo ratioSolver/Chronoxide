@@ -7,7 +7,7 @@ class Navigator : StateVariable {
 
     predicate At(real l) : Interval {
         duration >= 1;
-        goal going = new GoingTo(end:start, to:l);
+        goal going = new GoingTo(end:start, to:l)!;
     }
 
     predicate GoingTo(real from, real to) : Interval {

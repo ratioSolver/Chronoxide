@@ -147,20 +147,32 @@ impl Scope for ReusableResource {
         Some(self)
     }
 
-    fn get_fields(&self) -> Vec<Rc<Field>> {
-        self.scope.get_fields()
+    fn fields(&self) -> Vec<Rc<Field>> {
+        self.scope.fields()
     }
 
     fn get_field(&self, name: &str) -> Option<Rc<Field>> {
         self.scope.get_field(name)
     }
 
+    fn functions(&self) -> Vec<Rc<Function>> {
+        self.scope.functions()
+    }
+
     fn get_function(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Function>> {
         self.scope.get_function(name, types)
     }
 
+    fn types(&self) -> Vec<Rc<dyn Type>> {
+        self.scope.types()
+    }
+
     fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
         self.scope.get_type(name)
+    }
+
+    fn predicates(&self) -> Vec<Rc<Predicate>> {
+        self.scope.predicates()
     }
 
     fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
@@ -179,14 +191,6 @@ impl Class for ReusableResource {
 
     fn constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
         if args.len() == 1 && args[0].name() == "real" { Some(self.constructors.borrow()[0].clone()) } else { None }
-    }
-
-    fn predicates(&self) -> Vec<Rc<Predicate>> {
-        Vec::new()
-    }
-
-    fn classes(&self) -> Vec<Rc<dyn Class>> {
-        Vec::new()
     }
 
     fn instances(&self) -> Vec<ObjectId> {

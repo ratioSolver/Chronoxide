@@ -336,18 +336,34 @@ impl Scope for SolverState {
         None
     }
 
-    fn get_fields(&self) -> Vec<Rc<Field>> {
-        self.core.get_fields()
+    fn fields(&self) -> Vec<Rc<Field>> {
+        self.core.fields()
     }
+
     fn get_field(&self, name: &str) -> Option<Rc<Field>> {
         self.core.get_field(name)
     }
+
+    fn functions(&self) -> Vec<Rc<Function>> {
+        self.core.functions()
+    }
+
     fn get_function(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Function>> {
         self.core.get_function(name, types)
     }
+
+    fn types(&self) -> Vec<Rc<dyn Type>> {
+        self.core.types()
+    }
+
     fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
         self.core.get_type(name)
     }
+
+    fn predicates(&self) -> Vec<Rc<Predicate>> {
+        self.core.predicates()
+    }
+
     fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
         self.core.get_predicate(name)
     }
