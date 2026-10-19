@@ -169,63 +169,58 @@ impl Timeline for StateVariable {
     fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
         let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
-        let mut reported_overlaps: HashSet<(AtomId, AtomId)> = HashSet::new();
+        let mut reported: HashSet<(AtomId, AtomId)> = HashSet::new();
 
         let graph = slv.graph.borrow();
         let smt = slv.smt.borrow();
         let atom_flaw = slv.atom_flaw.borrow();
 
         for instance_id in self.instances.borrow().iter() {
-            if let Some(atoms) = atoms_by_instance.get(instance_id) {
-                let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let Some(atoms) = atoms_by_instance.get(instance_id) else {
+                continue;
+            };
 
-                for &atom_id in atoms {
-                    let (start, end) = get_atom_vars(slv, atom_id);
-                    let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
-                    starting_atoms.entry(start.clone()).or_default().push(atom_id);
-                    ending_atoms.entry(end.clone()).or_default().push(atom_id);
-                    pulses.insert(start);
-                    pulses.insert(end);
+            let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+
+            for &atom_id in atoms {
+                let (start, end) = get_atom_vars(slv, atom_id);
+                let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
+                starting_atoms.entry(start.clone()).or_default().push(atom_id);
+                ending_atoms.entry(end.clone()).or_default().push(atom_id);
+                pulses.insert(start);
+                pulses.insert(end);
+            }
+
+            let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
+
+            for pulse in pulses {
+                if let Some(ending) = ending_atoms.get(&pulse) {
+                    for atom_id in ending {
+                        active_atoms.remove(atom_id);
+                    }
+                }
+                if let Some(starting) = starting_atoms.get(&pulse) {
+                    for atom_id in starting {
+                        active_atoms.insert(*atom_id);
+                    }
                 }
 
-                let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
-
-                for pulse in pulses {
-                    if let Some(ending) = ending_atoms.get(&pulse) {
-                        for atom_id in ending {
-                            active_atoms.remove(atom_id);
-                        }
+                let active_atoms_vec: Vec<AtomId> = active_atoms.iter().copied().collect();
+                for pair in active_atoms_vec.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    if !reported.insert((a, b)) {
+                        continue;
                     }
-
-                    if let Some(starting) = starting_atoms.get(&pulse) {
-                        for atom_id in starting {
-                            active_atoms.insert(*atom_id);
-                        }
+                    let mut causes = Vec::with_capacity(2);
+                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) {
+                        causes.extend(flaw.causes())
                     }
-
-                    if active_atoms.len() > 1 {
-                        let active_atoms_vec: Vec<AtomId> = active_atoms.iter().cloned().collect();
-                        for i in 0..active_atoms_vec.len() {
-                            for j in (i + 1)..active_atoms_vec.len() {
-                                let a = active_atoms_vec[i];
-                                let b = active_atoms_vec[j];
-                                let pair = if a < b { (a, b) } else { (b, a) };
-                                if reported_overlaps.insert(pair) {
-                                    let mut causes = Vec::with_capacity(2);
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) {
-                                        causes.extend(flaw.causes())
-                                    }
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) {
-                                        causes.extend(flaw.causes())
-                                    }
-                                    flaws.push(Box::new(Peak::new(causes, a, b)));
-                                    reported_overlaps.insert((a, b));
-                                }
-                            }
-                        }
+                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) {
+                        causes.extend(flaw.causes())
                     }
+                    flaws.push(Box::new(Peak::new(causes, a, b)));
                 }
             }
         }
@@ -235,63 +230,56 @@ impl Timeline for StateVariable {
 
     fn to_json(&self, slv: &SolverState) -> Value {
         let atoms_by_instance = self.atoms_by_instance(slv);
-
         let smt = slv.smt.borrow();
         let mut json = json!({});
 
         for instance_id in self.instances.borrow().iter() {
-            if let Some(atoms) = atoms_by_instance.get(instance_id) {
-                let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let atoms = atoms_by_instance.get(instance_id).map(Vec::as_slice).unwrap_or(&[]);
 
-                for &atom_id in atoms {
-                    let (start, end) = get_atom_vars(slv, atom_id);
-                    let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
-                    starting_atoms.entry(start.clone()).or_default().push(atom_id);
-                    ending_atoms.entry(end.clone()).or_default().push(atom_id);
-                    pulses.insert(start);
-                    pulses.insert(end);
-                }
+            let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
 
-                let mut intervals = Vec::new();
-                let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
-                let mut last_pulse: Option<InfRational> = None;
-
-                for pulse in pulses {
-                    if let Some(prev_pulse) = last_pulse {
-                        intervals.push(json!({
-                            "start": inf_rat_to_json(&prev_pulse),
-                            "end": inf_rat_to_json(&pulse),
-                            "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
-                        }));
-                    }
-
-                    if let Some(ending) = ending_atoms.get(&pulse) {
-                        for atom_id in ending {
-                            active_atoms.remove(atom_id);
-                        }
-                    }
-
-                    if let Some(starting) = starting_atoms.get(&pulse) {
-                        for atom_id in starting {
-                            active_atoms.insert(*atom_id);
-                        }
-                    }
-
-                    last_pulse = Some(pulse);
-                }
-
-                json[instance_id.to_string()] = json!({
-                    "type": "StateVariable",
-                    "intervals": intervals,
-                });
-            } else {
-                json[instance_id.to_string()] = json!({
-                    "type": "StateVariable",
-                    "intervals": [],
-                });
+            for &atom_id in atoms {
+                let (start, end) = get_atom_vars(slv, atom_id);
+                let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
+                starting_atoms.entry(start.clone()).or_default().push(atom_id);
+                ending_atoms.entry(end.clone()).or_default().push(atom_id);
+                pulses.insert(start);
+                pulses.insert(end);
             }
+
+            let mut intervals = Vec::new();
+            let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
+            let mut last_pulse: Option<InfRational> = None;
+
+            for pulse in pulses {
+                if let Some(prev_pulse) = &last_pulse {
+                    intervals.push(json!({
+                        "start": inf_rat_to_json(prev_pulse),
+                        "end": inf_rat_to_json(&pulse),
+                        "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                    }));
+                }
+
+                if let Some(ending) = ending_atoms.get(&pulse) {
+                    for atom_id in ending {
+                        active_atoms.remove(atom_id);
+                    }
+                }
+                if let Some(starting) = starting_atoms.get(&pulse) {
+                    for atom_id in starting {
+                        active_atoms.insert(*atom_id);
+                    }
+                }
+
+                last_pulse = Some(pulse);
+            }
+
+            json[instance_id.to_string()] = json!({
+                "type": "StateVariable",
+                "intervals": intervals,
+            });
         }
 
         json
@@ -372,11 +360,11 @@ impl Flaw for Peak {
         let (b_start, b_end) = get_atom_vars(slv, self.b);
 
         let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
-        if smt.get_lit_val(a_before_b) != Some(false) {
+        if smt.get_lit_val_and_level(a_before_b) != Some((false, 0)) {
             self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), a_before_b)?);
         }
         let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
-        if smt.get_lit_val(b_before_a) != Some(false) {
+        if smt.get_lit_val_and_level(b_before_a) != Some((false, 0)) {
             self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), b_before_a)?);
         }
 

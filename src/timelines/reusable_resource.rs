@@ -15,7 +15,7 @@ use semitone::{ast::ArithExpr, rational::InfRational};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     rc::{Rc, Weak},
 };
 use tracing::trace;
@@ -206,82 +206,67 @@ impl Timeline for ReusableResource {
     fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
         let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
-        let mut reported_overlaps: HashSet<(AtomId, AtomId)> = HashSet::new();
+        let mut reported: HashSet<BTreeSet<AtomId>> = HashSet::new();
 
         let graph = slv.graph.borrow();
         let smt = slv.smt.borrow();
         let atom_flaw = slv.atom_flaw.borrow();
 
         for instance_id in self.instances.borrow().iter() {
-            if let Some(atoms) = atoms_by_instance.get(instance_id) {
-                let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
-                    Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
-                    _ => unreachable!("Instance should have a 'capacity' field"),
-                };
-                let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
-                let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let Some(atoms) = atoms_by_instance.get(instance_id) else {
+                continue;
+            };
+            let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
+                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
+                _ => unreachable!("Instance should have a 'capacity' field"),
+            };
+            let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
 
-                for &atom_id in atoms {
-                    let (start, end) = get_atom_vars(slv, atom_id);
-                    let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
-                    starting_atoms.entry(start.clone()).or_default().push(atom_id);
-                    ending_atoms.entry(end.clone()).or_default().push(atom_id);
-                    pulses.insert(start);
-                    pulses.insert(end);
+            let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
+
+            for &atom_id in atoms {
+                let (start, end) = get_atom_vars(slv, atom_id);
+                let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
+                let amount = smt.get_arith_val(&get_atom_amount(slv, atom_id)).expect("Amount should have a value");
+                amounts.insert(atom_id, amount);
+                starting_atoms.entry(start.clone()).or_default().push(atom_id);
+                ending_atoms.entry(end.clone()).or_default().push(atom_id);
+                pulses.insert(start);
+                pulses.insert(end);
+            }
+
+            let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
+            let mut amount = InfRational::zero();
+
+            for pulse in pulses {
+                if let Some(ending) = ending_atoms.get(&pulse) {
+                    for atom_id in ending {
+                        amount -= amounts[atom_id].clone();
+                        active_atoms.remove(atom_id);
+                    }
+                }
+                if let Some(starting) = starting_atoms.get(&pulse) {
+                    for atom_id in starting {
+                        amount += amounts[atom_id].clone();
+                        active_atoms.insert(*atom_id);
+                    }
                 }
 
-                let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
-                let mut amount = InfRational::zero();
-
-                for pulse in pulses {
-                    if let Some(ending) = ending_atoms.get(&pulse) {
-                        for atom_id in ending {
-                            let atom = slv.get_atom(*atom_id).expect("Atom should exist");
-                            let amount_var = match atom.get("amount") {
-                                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
-                                _ => unreachable!("Atom should have an 'amount' field"),
-                            };
-                            let atom_amount = smt.get_arith_val(&amount_var).expect("Amount should have a value");
-                            amount -= atom_amount;
-                            active_atoms.remove(atom_id);
+                if amount > capacity {
+                    for conflict in minimal_conflicts(&active_atoms, &amounts, &capacity) {
+                        if !reported.insert(conflict.clone()) {
+                            continue;
                         }
-                    }
-
-                    if let Some(starting) = starting_atoms.get(&pulse) {
-                        for atom_id in starting {
-                            let atom = slv.get_atom(*atom_id).expect("Atom should exist");
-                            let amount_var = match atom.get("amount") {
-                                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
-                                _ => unreachable!("Atom should have an 'amount' field"),
-                            };
-                            let atom_amount = smt.get_arith_val(&amount_var).expect("Amount should have a value");
-                            amount += atom_amount;
-                            active_atoms.insert(*atom_id);
-                        }
-                    }
-
-                    if amount > capacity {
-                        let active_atoms_vec: Vec<AtomId> = active_atoms.iter().cloned().collect();
-                        for i in 0..active_atoms_vec.len() {
-                            for j in (i + 1)..active_atoms_vec.len() {
-                                let a = active_atoms_vec[i];
-                                let b = active_atoms_vec[j];
-                                let pair = if a < b { (a, b) } else { (b, a) };
-                                if reported_overlaps.insert(pair) {
-                                    let mut causes = Vec::with_capacity(2);
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) {
-                                        causes.extend(flaw.causes())
-                                    }
-                                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) {
-                                        causes.extend(flaw.causes())
-                                    }
-                                    flaws.push(Box::new(Peak::new(causes, capacity_var.clone(), active_atoms.clone())));
-                                    reported_overlaps.insert((a, b));
-                                }
+                        let mut causes = Vec::new();
+                        for &atom_id in &conflict {
+                            if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
+                                causes.extend(flaw.causes());
                             }
                         }
+                        flaws.push(Box::new(Peak::new(causes, capacity_var.clone(), conflict)));
                     }
                 }
             }
@@ -292,7 +277,6 @@ impl Timeline for ReusableResource {
 
     fn to_json(&self, slv: &SolverState) -> Value {
         let atoms_by_instance = self.atoms_by_instance(slv);
-
         let smt = slv.smt.borrow();
         let mut json = json!({});
 
@@ -303,79 +287,92 @@ impl Timeline for ReusableResource {
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
 
-            if let Some(atoms) = atoms_by_instance.get(instance_id) {
-                let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-                let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let atoms = atoms_by_instance.get(instance_id).map(Vec::as_slice).unwrap_or(&[]);
 
-                for &atom_id in atoms {
-                    let (start, end) = get_atom_vars(slv, atom_id);
-                    let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
-                    starting_atoms.entry(start.clone()).or_default().push(atom_id);
-                    ending_atoms.entry(end.clone()).or_default().push(atom_id);
-                    pulses.insert(start);
-                    pulses.insert(end);
-                }
+            let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
+            let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
 
-                let mut intervals = Vec::new();
-                let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
-                let mut last_pulse: Option<InfRational> = None;
-                let mut amount = InfRational::zero();
-
-                for pulse in pulses {
-                    if let Some(prev_pulse) = last_pulse {
-                        intervals.push(json!({
-                            "start": inf_rat_to_json(&prev_pulse),
-                            "end": inf_rat_to_json(&pulse),
-                            "amount": inf_rat_to_json(&amount),
-                            "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
-                        }));
-                    }
-
-                    if let Some(ending) = ending_atoms.get(&pulse) {
-                        for atom_id in ending {
-                            let atom = slv.get_atom(*atom_id).expect("Atom should exist");
-                            let amount_var = match atom.get("amount") {
-                                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
-                                _ => unreachable!("Atom should have an 'amount' field"),
-                            };
-                            let atom_amount = smt.get_arith_val(&amount_var).expect("Amount should have a value");
-                            amount -= atom_amount;
-                            active_atoms.remove(atom_id);
-                        }
-                    }
-
-                    if let Some(starting) = starting_atoms.get(&pulse) {
-                        for atom_id in starting {
-                            let atom = slv.get_atom(*atom_id).expect("Atom should exist");
-                            let amount_var = match atom.get("amount") {
-                                Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
-                                _ => unreachable!("Atom should have an 'amount' field"),
-                            };
-                            let atom_amount = smt.get_arith_val(&amount_var).expect("Amount should have a value");
-                            amount += atom_amount;
-                            active_atoms.insert(*atom_id);
-                        }
-                    }
-
-                    last_pulse = Some(pulse);
-                }
-
-                json[instance_id.to_string()] = json!({
-                    "type": "ReusableResource",
-                    "capacity": inf_rat_to_json(&capacity),
-                    "intervals": intervals,
-                });
-            } else {
-                json[instance_id.to_string()] = json!({
-                    "type": "ReusableResource",
-                    "capacity": inf_rat_to_json(&capacity),
-                    "intervals": [],
-                });
+            for &atom_id in atoms {
+                let (start, end) = get_atom_vars(slv, atom_id);
+                let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
+                amounts.insert(atom_id, smt.get_arith_val(&get_atom_amount(slv, atom_id)).expect("Amount should have a value"));
+                starting_atoms.entry(start.clone()).or_default().push(atom_id);
+                ending_atoms.entry(end.clone()).or_default().push(atom_id);
+                pulses.insert(start);
+                pulses.insert(end);
             }
+
+            let mut intervals = Vec::new();
+            let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
+            let mut last_pulse: Option<InfRational> = None;
+            let mut amount = InfRational::zero();
+
+            for pulse in pulses {
+                if let Some(prev_pulse) = &last_pulse {
+                    intervals.push(json!({
+                        "start": inf_rat_to_json(prev_pulse),
+                        "end": inf_rat_to_json(&pulse),
+                        "amount": inf_rat_to_json(&amount),
+                        "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                    }));
+                }
+
+                if let Some(ending) = ending_atoms.get(&pulse) {
+                    for atom_id in ending {
+                        amount -= amounts[atom_id].clone();
+                        active_atoms.remove(atom_id);
+                    }
+                }
+                if let Some(starting) = starting_atoms.get(&pulse) {
+                    for atom_id in starting {
+                        amount += amounts[atom_id].clone();
+                        active_atoms.insert(*atom_id);
+                    }
+                }
+
+                last_pulse = Some(pulse);
+            }
+
+            json[instance_id.to_string()] = json!({
+                "type": "ReusableResource",
+                "capacity": inf_rat_to_json(&capacity),
+                "intervals": intervals,
+            });
         }
 
         json
+    }
+}
+
+fn minimal_conflicts(active: &BTreeSet<AtomId>, amounts: &HashMap<AtomId, InfRational>, capacity: &InfRational) -> Vec<BTreeSet<AtomId>> {
+    let mut sorted: Vec<AtomId> = active.iter().copied().collect();
+    sorted.sort_by(|a, b| amounts[b].cmp(&amounts[a]).then(a.cmp(b)));
+
+    let mut conflicts = Vec::new();
+    let mut window: VecDeque<AtomId> = VecDeque::new();
+    let mut sum = InfRational::zero();
+
+    for atom_id in sorted {
+        sum += amounts[&atom_id].clone();
+        window.push_back(atom_id);
+
+        if sum > *capacity {
+            conflicts.push(window.iter().copied().collect());
+            let largest = window.pop_front().expect("Window should not be empty");
+            sum -= amounts[&largest].clone();
+        }
+    }
+
+    conflicts
+}
+
+fn get_atom_amount(slv: &SolverState, atom_id: AtomId) -> ArithExpr {
+    let atom = slv.get_atom(atom_id).expect("Atom should exist");
+    match atom.get("amount") {
+        Some(Slot::Primitive(var)) => var.as_any().downcast_ref::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
+        _ => unreachable!("Atom should have an 'amount' field"),
     }
 }
 
@@ -459,11 +456,11 @@ impl Flaw for Peak {
                 let (b_start, b_end) = get_atom_vars(slv, b);
 
                 let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
-                if smt.get_lit_val(a_before_b) != Some(false) {
+                if smt.get_lit_val_and_level(a_before_b) != Some((false, 0)) {
                     self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), a_before_b)?);
                 }
                 let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
-                if smt.get_lit_val(b_before_a) != Some(false) {
+                if smt.get_lit_val_and_level(b_before_a) != Some((false, 0)) {
                     self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), b_before_a)?);
                 }
             }
@@ -482,7 +479,9 @@ impl Flaw for Peak {
                 .collect::<Vec<_>>(),
         );
         let over_capacity = slv.track_expr(&mut smt, &mut graph, amount.le(self.capacity.clone()))?;
-        self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Compress::new(self.id)), over_capacity)?);
+        if smt.get_lit_val_and_level(over_capacity) != Some((false, 0)) {
+            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Compress::new(self.id)), over_capacity)?);
+        }
 
         Ok(())
     }
