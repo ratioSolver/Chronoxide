@@ -91,9 +91,7 @@ impl Type for StateVariable {
     }
 
     fn new_instance(self: Rc<Self>) -> Slot {
-        let instance = self.core().new_object(self.clone());
-        self.instances.borrow_mut().push(instance);
-        Slot::ObjectRef(instance)
+        Slot::ObjectRef(self.core().new_object(self.clone()))
     }
 }
 
