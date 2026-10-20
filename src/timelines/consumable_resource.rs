@@ -4,7 +4,10 @@ use riddle::{
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::{ast::ArithExpr, rational::InfRational};
+use semitone::{
+    ast::ArithExpr,
+    rational::{InfRational, Rational},
+};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -38,23 +41,42 @@ impl ConsumableResource {
                     fields: vec![(vec![String::from("real")], vec![(String::from("capacity"), None)])],
                     constructors: Vec::new(),
                     functions: Vec::new(),
-                    predicates: vec![PredicateDef {
-                        name: String::from("Use"),
-                        args: vec![(vec![String::from("real")], String::from("amount"))],
-                        parents: vec![vec![String::from("Interval")]],
-                        statements: vec![
-                            Statement::Expr(Expr::Eq {
-                                left: Box::new(Expr::Sum {
-                                    terms: vec![Expr::QualifiedId { ids: vec![String::from("end")] }, Expr::Opposite { term: Box::new(Expr::QualifiedId { ids: vec![String::from("start")] }) }],
+                    predicates: vec![
+                        PredicateDef {
+                            name: String::from("Produce"),
+                            args: vec![(vec![String::from("real")], String::from("amount"))],
+                            parents: vec![vec![String::from("Interval")]],
+                            statements: vec![
+                                Statement::Expr(Expr::Eq {
+                                    left: Box::new(Expr::Sum {
+                                        terms: vec![Expr::QualifiedId { ids: vec![String::from("end")] }, Expr::Opposite { term: Box::new(Expr::QualifiedId { ids: vec![String::from("start")] }) }],
+                                    }),
+                                    right: Box::new(Expr::QualifiedId { ids: vec![String::from("duration")] }),
                                 }),
-                                right: Box::new(Expr::QualifiedId { ids: vec![String::from("duration")] }),
-                            }),
-                            Statement::Expr(Expr::Gt {
-                                left: Box::new(Expr::QualifiedId { ids: vec![String::from("amount")] }),
-                                right: Box::new(Expr::Real(String::from("0"), String::from("1"))),
-                            }),
-                        ],
-                    }],
+                                Statement::Expr(Expr::Gt {
+                                    left: Box::new(Expr::QualifiedId { ids: vec![String::from("amount")] }),
+                                    right: Box::new(Expr::Real(String::from("0"), String::from("1"))),
+                                }),
+                            ],
+                        },
+                        PredicateDef {
+                            name: String::from("Consume"),
+                            args: vec![(vec![String::from("real")], String::from("amount"))],
+                            parents: vec![vec![String::from("Interval")]],
+                            statements: vec![
+                                Statement::Expr(Expr::Eq {
+                                    left: Box::new(Expr::Sum {
+                                        terms: vec![Expr::QualifiedId { ids: vec![String::from("end")] }, Expr::Opposite { term: Box::new(Expr::QualifiedId { ids: vec![String::from("start")] }) }],
+                                    }),
+                                    right: Box::new(Expr::QualifiedId { ids: vec![String::from("duration")] }),
+                                }),
+                                Statement::Expr(Expr::Gt {
+                                    left: Box::new(Expr::QualifiedId { ids: vec![String::from("amount")] }),
+                                    right: Box::new(Expr::Real(String::from("0"), String::from("1"))),
+                                }),
+                            ],
+                        },
+                    ],
                     classes: Vec::new(),
                 },
             ),
@@ -65,8 +87,8 @@ impl ConsumableResource {
         cr.constructors.borrow_mut().push(Rc::new(Constructor::new(
             Rc::downgrade(&cr) as _,
             ConstructorDef {
-                args: vec![(vec![String::from("real")], String::from("capacity"))],
-                init: vec![(vec![String::from("capacity")], vec![Expr::QualifiedId { ids: vec![String::from("capacity")] }])],
+                args: vec![(vec![String::from("real")], String::from("capacity")), (vec![String::from("real")], String::from("initial_amount"))],
+                init: vec![(vec![String::from("capacity")], vec![Expr::QualifiedId { ids: vec![String::from("capacity")] }]), (vec![String::from("initial_amount")], vec![Expr::QualifiedId { ids: vec![String::from("initial_amount")] }])],
                 statements: Vec::new(),
             },
         )));
@@ -74,8 +96,9 @@ impl ConsumableResource {
         cr
     }
 
-    fn atoms_by_instance(&self, slv: &SolverState) -> HashMap<ObjectId, Vec<AtomId>> {
+    fn atoms_by_instance(&self, slv: &SolverState) -> (HashMap<ObjectId, Vec<AtomId>>, HashSet<AtomId>) {
         let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
+        let mut producers: HashSet<AtomId> = HashSet::new();
         let mut processed_classes = HashSet::new();
 
         let smt = slv.smt.borrow();
@@ -88,6 +111,7 @@ impl ConsumableResource {
                 continue;
             }
             for pred in instance.class().predicates().iter() {
+                let is_producer = pred.name() == "Produce";
                 for atom_id in pred.atoms().iter() {
                     let Some(sigma) = sigma.get(**atom_id) else {
                         continue;
@@ -98,6 +122,9 @@ impl ConsumableResource {
                     let Some(atom) = slv.get_atom(*atom_id) else {
                         continue;
                     };
+                    if is_producer {
+                        producers.insert(atom.id());
+                    }
                     match atom.get("tau") {
                         Some(Slot::ObjectRef(sv)) => {
                             atoms_by_instance.entry(sv).or_default().push(atom.id());
@@ -115,7 +142,7 @@ impl ConsumableResource {
             }
         }
 
-        atoms_by_instance
+        (atoms_by_instance, producers)
     }
 }
 
@@ -189,7 +216,7 @@ impl Class for ConsumableResource {
     }
 
     fn constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
-        if args.len() == 1 && args[0].name() == "real" { Some(self.constructors.borrow()[0].clone()) } else { None }
+        if args.len() == 2 && args.iter().all(|a| a.name() == "real") { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 
     fn instances(&self) -> Vec<ObjectId> {
@@ -204,7 +231,7 @@ impl Class for ConsumableResource {
 impl Timeline for ConsumableResource {
     fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
         let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
-        let atoms_by_instance = self.atoms_by_instance(slv);
+        let (atoms_by_instance, _producers) = self.atoms_by_instance(slv);
         let mut reported: HashSet<BTreeSet<AtomId>> = HashSet::new();
 
         let graph = slv.graph.borrow();
@@ -275,7 +302,7 @@ impl Timeline for ConsumableResource {
     }
 
     fn to_json(&self, slv: &SolverState) -> Value {
-        let atoms_by_instance = self.atoms_by_instance(slv);
+        let (atoms_by_instance, producers) = self.atoms_by_instance(slv);
         let smt = slv.smt.borrow();
         let mut json = json!({});
 
@@ -285,6 +312,11 @@ impl Timeline for ConsumableResource {
                 _ => unreachable!("Instance should have a 'capacity' field"),
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
+            let initial_amount_var = match slv.get_object(*instance_id).expect("Instance should exist").get("initial_amount") {
+                Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have an 'initial_amount' field"),
+                _ => unreachable!("Instance should have an 'initial_amount' field"),
+            };
+            let initial_amount = smt.get_arith_val(&initial_amount_var).expect("Initial amount should have a value");
 
             let atoms = atoms_by_instance.get(instance_id).map(Vec::as_slice).unwrap_or(&[]);
 
@@ -292,11 +324,13 @@ impl Timeline for ConsumableResource {
             let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
             let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
             let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
+            let mut durations: HashMap<AtomId, InfRational> = HashMap::new();
 
             for &atom_id in atoms {
                 let (start, end) = get_atom_vars(slv, atom_id);
                 let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
                 amounts.insert(atom_id, smt.get_arith_val(&get_atom_amount(slv, atom_id)).expect("Amount should have a value"));
+                durations.insert(atom_id, end.clone() - start.clone());
                 starting_atoms.entry(start.clone()).or_default().push(atom_id);
                 ending_atoms.entry(end.clone()).or_default().push(atom_id);
                 pulses.insert(start);
@@ -306,28 +340,46 @@ impl Timeline for ConsumableResource {
             let mut intervals = Vec::new();
             let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
             let mut last_pulse: Option<InfRational> = None;
-            let mut amount = InfRational::zero();
+            let mut level = initial_amount.clone();
 
             for pulse in pulses {
                 if let Some(prev_pulse) = &last_pulse {
+                    let span = pulse.clone() - prev_pulse.clone();
+                    let mut final_amount = level.clone();
+                    for atom_id in &active_atoms {
+                        let delta = flow_delta(&amounts[atom_id], &span, &durations[atom_id]);
+                        if producers.contains(atom_id) {
+                            final_amount += delta;
+                        } else {
+                            final_amount -= delta;
+                        }
+                    }
                     intervals.push(json!({
                         "start": inf_rat_to_json(prev_pulse),
                         "end": inf_rat_to_json(&pulse),
-                        "amount": inf_rat_to_json(&amount),
+                        "initial_amount": inf_rat_to_json(&level),
+                        "final_amount": inf_rat_to_json(&final_amount),
                         "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
                     }));
+                    level = final_amount;
                 }
 
                 if let Some(ending) = ending_atoms.get(&pulse) {
                     for atom_id in ending {
-                        amount -= amounts[atom_id].clone();
                         active_atoms.remove(atom_id);
                     }
                 }
                 if let Some(starting) = starting_atoms.get(&pulse) {
                     for atom_id in starting {
-                        amount += amounts[atom_id].clone();
-                        active_atoms.insert(*atom_id);
+                        if durations[atom_id].rational_part().is_zero() {
+                            if producers.contains(atom_id) {
+                                level += amounts[atom_id].clone();
+                            } else {
+                                level -= amounts[atom_id].clone();
+                            }
+                        } else {
+                            active_atoms.insert(*atom_id);
+                        }
                     }
                 }
 
@@ -335,8 +387,9 @@ impl Timeline for ConsumableResource {
             }
 
             json[instance_id.to_string()] = json!({
-                "type": "ReusableResource",
+                "type": "ConsumableResource",
                 "capacity": inf_rat_to_json(&capacity),
+                "initial_amount": inf_rat_to_json(&initial_amount),
                 "intervals": intervals,
             });
         }
@@ -386,6 +439,14 @@ fn get_atom_vars(slv: &SolverState, atom_id: AtomId) -> (ArithExpr, ArithExpr) {
         _ => unreachable!("Atom should have an 'end' field"),
     };
     (start, end)
+}
+
+fn flow_delta(amount: &InfRational, span: &InfRational, duration: &InfRational) -> InfRational {
+    let ratio = match span.rational_part() / duration.rational_part() {
+        Rational::Finite(r) => r,
+        other => panic!("flow ratio must be finite, got {other}"),
+    };
+    amount * &ratio
 }
 
 struct Peak {
