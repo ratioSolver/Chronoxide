@@ -2,7 +2,7 @@ use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
-    timelines::{Timeline, reusable_resource::ReusableResource},
+    timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource},
 };
 use riddle::{
     RiddleError,
@@ -72,6 +72,7 @@ impl SolverState {
         }
         slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
         slv.add_timeline(ReusableResource::new(Rc::downgrade(&slv) as _));
+        slv.add_timeline(ConsumableResource::new(Rc::downgrade(&slv) as _));
         slv
     }
 
