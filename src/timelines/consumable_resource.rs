@@ -21,7 +21,7 @@ use crate::{
     graph::{Flaw, FlawId, Resolver, ResolverId},
     inf_rat_to_json,
     objects::{ArithVar, EnumVar},
-    timelines::Timeline,
+    timelines::{Timeline, get_atom_amount, get_atom_vars},
 };
 
 pub(crate) struct ConsumableResource {
@@ -38,7 +38,7 @@ impl ConsumableResource {
                 ClassDef {
                     name: String::new(),
                     parents: Vec::new(),
-                    fields: vec![(vec![String::from("real")], vec![(String::from("capacity"), None)])],
+                    fields: vec![(vec![String::from("real")], vec![(String::from("capacity"), None), (String::from("initial_amount"), None)])],
                     constructors: Vec::new(),
                     functions: Vec::new(),
                     predicates: vec![
@@ -232,7 +232,7 @@ impl Timeline for ConsumableResource {
     fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
         let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
         let (atoms_by_instance, producers) = self.atoms_by_instance(slv);
-        let mut reported: HashSet<(Kind, BTreeSet<AtomId>, InfRational)> = HashSet::new();
+        let mut reported: HashSet<(Kind, BTreeSet<AtomId>)> = HashSet::new();
 
         let graph = slv.graph.borrow();
         let smt = slv.smt.borrow();
@@ -242,12 +242,13 @@ impl Timeline for ConsumableResource {
             let Some(atoms) = atoms_by_instance.get(instance_id) else {
                 continue;
             };
-            let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
+            let obj = slv.get_object(*instance_id).expect("Instance should exist");
+            let capacity_var = match obj.get("capacity") {
                 Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
                 _ => unreachable!("Instance should have a 'capacity' field"),
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
-            let initial_amount_var = match slv.get_object(*instance_id).expect("Instance should exist").get("initial_amount") {
+            let initial_amount_var = match obj.get("initial_amount") {
                 Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have an 'initial_amount' field"),
                 _ => unreachable!("Instance should have an 'initial_amount' field"),
             };
@@ -273,15 +274,13 @@ impl Timeline for ConsumableResource {
                 pulses.entry(end).or_insert(end_expr);
             }
 
-            let mut checkpoints: Vec<(InfRational, ArithExpr, InfRational, BTreeSet<AtomId>)> = Vec::new();
             let mut started: BTreeSet<AtomId> = BTreeSet::new();
             let mut active: BTreeSet<AtomId> = BTreeSet::new();
-            let mut level = initial_amount.clone();
+            let mut level = initial_amount;
             let mut last_pulse: Option<&InfRational> = None;
 
             for (pulse, pulse_expr) in &pulses {
                 if let Some(prev) = last_pulse {
-                    // limite sinistro: livello a fine intervallo
                     let span = pulse.clone() - prev.clone();
                     for atom_id in &active {
                         let delta = flow_delta(&amounts[atom_id], &span, &durations[atom_id]);
@@ -291,7 +290,29 @@ impl Timeline for ConsumableResource {
                             level -= delta;
                         }
                     }
-                    checkpoints.push((pulse.clone(), pulse_expr.clone(), level.clone(), started.clone()));
+
+                    let kind = if level > capacity {
+                        Some(Kind::Overflow)
+                    } else if level < InfRational::zero() {
+                        Some(Kind::Underflow)
+                    } else {
+                        None
+                    };
+
+                    if let Some(kind) = kind {
+                        let culprit_is_producer = kind == Kind::Overflow;
+                        let past: BTreeSet<AtomId> = started.iter().copied().filter(|a| producers.contains(a) == culprit_is_producer).collect();
+                        if !past.is_empty() && reported.insert((kind, past.clone())) {
+                            let future: Vec<AtomId> = atoms.iter().copied().filter(|a| producers.contains(a) != culprit_is_producer && ends[a] > *pulse).collect();
+                            let mut causes = Vec::new();
+                            for &atom_id in &past {
+                                if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
+                                    causes.extend(flaw.causes());
+                                }
+                            }
+                            flaws.push(Box::new(LevelFlaw::new(kind, causes, *instance_id, pulse_expr.clone(), past, future)));
+                        }
+                    }
                 }
 
                 if let Some(ending) = ending_atoms.get(pulse) {
@@ -299,56 +320,12 @@ impl Timeline for ConsumableResource {
                         active.remove(atom_id);
                     }
                 }
-                let mut jumped = false;
                 if let Some(starting) = starting_atoms.get(pulse) {
-                    for atom_id in starting {
-                        started.insert(*atom_id);
-                        if durations[atom_id].rational_part().is_zero() {
-                            // effetto istantaneo
-                            if producers.contains(atom_id) {
-                                level += amounts[atom_id].clone();
-                            } else {
-                                level -= amounts[atom_id].clone();
-                            }
-                            jumped = true;
-                        } else {
-                            active.insert(*atom_id);
-                        }
-                    }
-                }
-                if jumped {
-                    // limite destro dopo gli effetti istantanei
-                    checkpoints.push((pulse.clone(), pulse_expr.clone(), level.clone(), started.clone()));
+                    started.extend(starting.iter().copied());
+                    active.extend(starting.iter().copied());
                 }
 
                 last_pulse = Some(pulse);
-            }
-
-            for (time, time_expr, level, started) in checkpoints {
-                let kind = if level > capacity {
-                    Kind::Overflow
-                } else if level < InfRational::zero() {
-                    Kind::Underflow
-                } else {
-                    continue;
-                };
-                let culprit_is_producer = kind == Kind::Overflow;
-
-                // atomi passati che causano la violazione
-                let past: BTreeSet<AtomId> = started.iter().copied().filter(|a| producers.contains(a) == culprit_is_producer).collect();
-                if past.is_empty() || !reported.insert((kind, past.clone(), time.clone())) {
-                    continue;
-                }
-                // atomi futuri del tipo opposto, che si possono anticipare
-                let future: Vec<AtomId> = atoms.iter().copied().filter(|a| producers.contains(a) != culprit_is_producer && ends[a] > time).collect();
-
-                let mut causes = Vec::new();
-                for &atom_id in &past {
-                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
-                        causes.extend(flaw.causes());
-                    }
-                }
-                flaws.push(Box::new(LevelFlaw::new(kind, causes, *instance_id, time_expr, past, future)));
             }
         }
 
@@ -361,12 +338,13 @@ impl Timeline for ConsumableResource {
         let mut json = json!({});
 
         for instance_id in self.instances.borrow().iter() {
-            let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
+            let obj = slv.get_object(*instance_id).expect("Instance should exist");
+            let capacity_var = match obj.get("capacity") {
                 Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
                 _ => unreachable!("Instance should have a 'capacity' field"),
             };
             let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
-            let initial_amount_var = match slv.get_object(*instance_id).expect("Instance should exist").get("initial_amount") {
+            let initial_amount_var = match obj.get("initial_amount") {
                 Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have an 'initial_amount' field"),
                 _ => unreachable!("Instance should have an 'initial_amount' field"),
             };
@@ -424,17 +402,7 @@ impl Timeline for ConsumableResource {
                     }
                 }
                 if let Some(starting) = starting_atoms.get(&pulse) {
-                    for atom_id in starting {
-                        if durations[atom_id].rational_part().is_zero() {
-                            if producers.contains(atom_id) {
-                                level += amounts[atom_id].clone();
-                            } else {
-                                level -= amounts[atom_id].clone();
-                            }
-                        } else {
-                            active_atoms.insert(*atom_id);
-                        }
-                    }
+                    active_atoms.extend(starting.iter().copied());
                 }
 
                 last_pulse = Some(pulse);
@@ -452,31 +420,14 @@ impl Timeline for ConsumableResource {
     }
 }
 
-fn get_atom_amount(slv: &SolverState, atom_id: AtomId) -> ArithExpr {
-    let atom = slv.get_atom(atom_id).expect("Atom should exist");
-    match atom.get("amount") {
-        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'amount' field"),
-        _ => unreachable!("Atom should have an 'amount' field"),
-    }
-}
-
-fn get_atom_vars(slv: &SolverState, atom_id: AtomId) -> (ArithExpr, ArithExpr) {
-    let atom = slv.get_atom(atom_id).expect("Atom should exist");
-    let start = match atom.get("start") {
-        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have a 'start' field"),
-        _ => unreachable!("Atom should have a 'start' field"),
-    };
-    let end = match atom.get("end") {
-        Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Atom should have an 'end' field"),
-        _ => unreachable!("Atom should have an 'end' field"),
-    };
-    (start, end)
-}
-
 fn flow_delta(amount: &InfRational, span: &InfRational, duration: &InfRational) -> InfRational {
-    let ratio = match span.rational_part() / duration.rational_part() {
-        Rational::Finite(r) => r,
-        other => panic!("flow ratio must be finite, got {other}"),
+    let ratio = if duration.rational_part().is_zero() {
+        span.infinitesimal_part().clone() / duration.infinitesimal_part()
+    } else {
+        match span.rational_part() / duration.rational_part() {
+            Rational::Finite(r) => r,
+            other => panic!("flow ratio must be finite, got {other}"),
+        }
     };
     amount * &ratio
 }
