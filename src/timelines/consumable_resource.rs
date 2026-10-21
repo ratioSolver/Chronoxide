@@ -4,10 +4,7 @@ use riddle::{
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::{
-    ast::ArithExpr,
-    rational::{InfRational, Rational},
-};
+use semitone::rational::{InfRational, Rational};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -310,7 +307,7 @@ impl Timeline for ConsumableResource {
                             let future: BTreeSet<AtomId> = others.iter().copied().filter(|a| ends[a] > *pulse).collect();
 
                             let mut causes = Vec::new();
-                            for &atom_id in &past {
+                            for &atom_id in past.iter().chain(future.iter()) {
                                 if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
                                     causes.extend(flaw.causes());
                                 }
@@ -501,10 +498,10 @@ impl Flaw for LevelFlaw {
             }
         }
 
-        let past_starts: Vec<ArithExpr> = self.past.iter().map(|&p| get_atom_vars(slv, p).0).collect();
         for &future_id in &self.future {
             let (_, future_end) = get_atom_vars(slv, future_id);
-            for past_start in &past_starts {
+            for &past_id in &self.past {
+                let (past_start, _) = get_atom_vars(slv, past_id);
                 let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
                 if smt.get_lit_val_and_level(order) != Some((false, 0)) {
                     self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), order)?);

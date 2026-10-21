@@ -92,6 +92,7 @@ impl SolverState {
             let prop_result = self.smt.borrow_mut().propagate();
             match prop_result {
                 Ok(_) => {
+                    self.graph.borrow_mut().refresh_costs();
                     let new_literals = &self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
                     self.graph.borrow_mut().propagate(new_literals.as_slice());
                     self.notified_len.set(self.smt.borrow().current_trail_len());

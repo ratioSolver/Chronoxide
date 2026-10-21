@@ -127,6 +127,7 @@ pub struct Graph {
 
     trail: Vec<(FlawId, f64)>,
     trail_lim: Vec<usize>,
+    costs_dirty: bool,
 
     flaw_q: VecDeque<FlawId>,
 
@@ -157,6 +158,7 @@ impl Graph {
 
             trail: Vec::new(),
             trail_lim: Vec::new(),
+            costs_dirty: false,
 
             flaw_q: VecDeque::new(),
 
@@ -516,10 +518,23 @@ impl Graph {
         self.propagate_costs(affected_flaws.as_slice());
     }
 
+    /// Recomputes the cost of every flaw after a backtrack.
+    /// Flaws and resolvers are never removed on backtrack, but costs computed after a flaw was expanded
+    /// at a deeper level are rolled back by the trail, leaving expanded flaws with a stale infinite cost.
+    pub(super) fn refresh_costs(&mut self) {
+        if !self.costs_dirty || self.is_busy() {
+            return;
+        }
+        self.costs_dirty = false;
+        let all: Vec<FlawId> = (0..self.flaws.len()).filter(|&i| self.flaws[i].is_some()).map(FlawId).collect();
+        self.propagate_costs(&all);
+    }
+
     pub(super) fn cancel_until(&mut self, level: usize, lits: &[Lit]) {
         if level >= self.trail_lim.len() {
             return;
         }
+        self.costs_dirty = true;
 
         let target_len = self.trail_lim[level];
         while self.trail.len() > target_len {
