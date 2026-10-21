@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fmt,
     rc::{Rc, Weak},
 };
 use tracing::trace;
@@ -96,9 +97,8 @@ impl ConsumableResource {
         cr
     }
 
-    fn atoms_by_instance(&self, slv: &SolverState) -> (HashMap<ObjectId, Vec<AtomId>>, HashSet<AtomId>) {
-        let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
-        let mut producers: HashSet<AtomId> = HashSet::new();
+    fn atoms_by_instance(&self, slv: &SolverState) -> HashMap<ObjectId, (BTreeSet<AtomId>, BTreeSet<AtomId>)> {
+        let mut atoms_by_instance: HashMap<ObjectId, (BTreeSet<AtomId>, BTreeSet<AtomId>)> = HashMap::new();
         let mut processed_classes = HashSet::new();
 
         let smt = slv.smt.borrow();
@@ -113,36 +113,39 @@ impl ConsumableResource {
             for pred in instance.class().predicates().iter() {
                 let is_producer = pred.name() == "Produce";
                 for atom_id in pred.atoms().iter() {
-                    let Some(sigma) = sigma.get(**atom_id) else {
+                    let Some(atom_sigma) = sigma.get(**atom_id) else {
                         continue;
                     };
-                    if smt.get_bool_val(sigma) != Some(true) {
+                    if smt.get_bool_val(atom_sigma) != Some(true) {
                         continue;
                     }
                     let Some(atom) = slv.get_atom(*atom_id) else {
                         continue;
                     };
-                    if is_producer {
-                        producers.insert(atom.id());
-                    }
-                    match atom.get("tau") {
-                        Some(Slot::ObjectRef(sv)) => {
-                            atoms_by_instance.entry(sv).or_default().push(atom.id());
-                        }
+                    let tau = match atom.get("tau") {
+                        Some(Slot::ObjectRef(sv)) => sv,
                         Some(Slot::Primitive(var)) => {
                             if let Some(enum_var) = var.downcast::<EnumVar>()
                                 && let Some(sv) = smt.get_enum_val(&enum_var.var)
                             {
-                                atoms_by_instance.entry(ObjectId::from(sv as usize)).or_default().push(atom.id());
+                                ObjectId::from(sv as usize)
+                            } else {
+                                continue;
                             }
                         }
                         _ => unreachable!("Atom should have a 'tau' field"),
+                    };
+                    let (productions, consumptions) = atoms_by_instance.entry(tau).or_default();
+                    if is_producer {
+                        productions.insert(atom.id());
+                    } else {
+                        consumptions.insert(atom.id());
                     }
                 }
             }
         }
 
-        (atoms_by_instance, producers)
+        atoms_by_instance
     }
 }
 
@@ -231,7 +234,7 @@ impl Class for ConsumableResource {
 impl Timeline for ConsumableResource {
     fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
         let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
-        let (atoms_by_instance, producers) = self.atoms_by_instance(slv);
+        let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported: HashSet<(Kind, BTreeSet<AtomId>)> = HashSet::new();
 
         let graph = slv.graph.borrow();
@@ -239,9 +242,10 @@ impl Timeline for ConsumableResource {
         let atom_flaw = slv.atom_flaw.borrow();
 
         for instance_id in self.instances.borrow().iter() {
-            let Some(atoms) = atoms_by_instance.get(instance_id) else {
+            let Some((productions, consumptions)) = atoms_by_instance.get(instance_id) else {
                 continue;
             };
+
             let obj = slv.get_object(*instance_id).expect("Instance should exist");
             let capacity_var = match obj.get("capacity") {
                 Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
@@ -256,12 +260,12 @@ impl Timeline for ConsumableResource {
 
             let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
             let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
-            let mut pulses: BTreeMap<InfRational, ArithExpr> = BTreeMap::new();
+            let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
             let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
             let mut durations: HashMap<AtomId, InfRational> = HashMap::new();
             let mut ends: HashMap<AtomId, InfRational> = HashMap::new();
 
-            for &atom_id in atoms {
+            for &atom_id in productions.iter().chain(consumptions.iter()) {
                 let (start_expr, end_expr) = get_atom_vars(slv, atom_id);
                 let start = smt.get_arith_val(&start_expr).expect("Start time should have a value");
                 let end = smt.get_arith_val(&end_expr).expect("End time should have a value");
@@ -270,8 +274,8 @@ impl Timeline for ConsumableResource {
                 ends.insert(atom_id, end.clone());
                 starting_atoms.entry(start.clone()).or_default().push(atom_id);
                 ending_atoms.entry(end.clone()).or_default().push(atom_id);
-                pulses.entry(start).or_insert(start_expr);
-                pulses.entry(end).or_insert(end_expr);
+                pulses.insert(start);
+                pulses.insert(end);
             }
 
             let mut started: BTreeSet<AtomId> = BTreeSet::new();
@@ -279,12 +283,12 @@ impl Timeline for ConsumableResource {
             let mut level = initial_amount;
             let mut last_pulse: Option<&InfRational> = None;
 
-            for (pulse, pulse_expr) in &pulses {
+            for pulse in &pulses {
                 if let Some(prev) = last_pulse {
                     let span = pulse.clone() - prev.clone();
                     for atom_id in &active {
                         let delta = flow_delta(&amounts[atom_id], &span, &durations[atom_id]);
-                        if producers.contains(atom_id) {
+                        if productions.contains(atom_id) {
                             level += delta;
                         } else {
                             level -= delta;
@@ -300,17 +304,18 @@ impl Timeline for ConsumableResource {
                     };
 
                     if let Some(kind) = kind {
-                        let culprit_is_producer = kind == Kind::Overflow;
-                        let past: BTreeSet<AtomId> = started.iter().copied().filter(|a| producers.contains(a) == culprit_is_producer).collect();
+                        let (culprits, others) = if kind == Kind::Overflow { (productions, consumptions) } else { (consumptions, productions) };
+                        let past: BTreeSet<AtomId> = started.intersection(culprits).copied().collect();
                         if !past.is_empty() && reported.insert((kind, past.clone())) {
-                            let future: Vec<AtomId> = atoms.iter().copied().filter(|a| producers.contains(a) != culprit_is_producer && ends[a] > *pulse).collect();
+                            let future: BTreeSet<AtomId> = others.iter().copied().filter(|a| ends[a] > *pulse).collect();
+
                             let mut causes = Vec::new();
                             for &atom_id in &past {
                                 if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
                                     causes.extend(flaw.causes());
                                 }
                             }
-                            flaws.push(Box::new(LevelFlaw::new(kind, causes, *instance_id, pulse_expr.clone(), past, future)));
+                            flaws.push(Box::new(LevelFlaw::new(kind, causes, *instance_id, past, future)));
                         }
                     }
                 }
@@ -333,7 +338,8 @@ impl Timeline for ConsumableResource {
     }
 
     fn to_json(&self, slv: &SolverState) -> Value {
-        let (atoms_by_instance, producers) = self.atoms_by_instance(slv);
+        let atoms_by_instance = self.atoms_by_instance(slv);
+        let empty = (BTreeSet::new(), BTreeSet::new());
         let smt = slv.smt.borrow();
         let mut json = json!({});
 
@@ -350,7 +356,7 @@ impl Timeline for ConsumableResource {
             };
             let initial_amount = smt.get_arith_val(&initial_amount_var).expect("Initial amount should have a value");
 
-            let atoms = atoms_by_instance.get(instance_id).map(Vec::as_slice).unwrap_or(&[]);
+            let (productions, consumptions) = atoms_by_instance.get(instance_id).unwrap_or(&empty);
 
             let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
             let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
@@ -358,7 +364,7 @@ impl Timeline for ConsumableResource {
             let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
             let mut durations: HashMap<AtomId, InfRational> = HashMap::new();
 
-            for &atom_id in atoms {
+            for &atom_id in productions.iter().chain(consumptions.iter()) {
                 let (start, end) = get_atom_vars(slv, atom_id);
                 let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
                 amounts.insert(atom_id, smt.get_arith_val(&get_atom_amount(slv, atom_id)).expect("Amount should have a value"));
@@ -380,7 +386,7 @@ impl Timeline for ConsumableResource {
                     let mut final_amount = level.clone();
                     for atom_id in &active_atoms {
                         let delta = flow_delta(&amounts[atom_id], &span, &durations[atom_id]);
-                        if producers.contains(atom_id) {
+                        if productions.contains(atom_id) {
                             final_amount += delta;
                         } else {
                             final_amount -= delta;
@@ -438,11 +444,11 @@ enum Kind {
     Underflow,
 }
 
-impl Kind {
-    fn as_str(self) -> &'static str {
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Kind::Overflow => "overflow",
-            Kind::Underflow => "underflow",
+            Kind::Overflow => write!(f, "overflow"),
+            Kind::Underflow => write!(f, "underflow"),
         }
     }
 }
@@ -455,14 +461,13 @@ struct LevelFlaw {
     resolvers: Vec<ResolverId>,
 
     instance: ObjectId,
-    at: ArithExpr,
-    atoms: BTreeSet<AtomId>,
-    future: Vec<AtomId>,
+    past: BTreeSet<AtomId>,
+    future: BTreeSet<AtomId>,
 }
 
 impl LevelFlaw {
-    fn new(kind: Kind, causes: Vec<ResolverId>, instance: ObjectId, at: ArithExpr, atoms: BTreeSet<AtomId>, future: Vec<AtomId>) -> Self {
-        Self { id: FlawId::default(), kind, causes, resolvers: Vec::new(), instance, at, atoms, future }
+    fn new(kind: Kind, causes: Vec<ResolverId>, instance: ObjectId, past: BTreeSet<AtomId>, future: BTreeSet<AtomId>) -> Self {
+        Self { id: FlawId::default(), kind, causes, resolvers: Vec::new(), instance, past, future }
     }
 }
 
@@ -478,11 +483,11 @@ impl Flaw for LevelFlaw {
     }
 
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        trace!("Expanding {} flaw {} with atoms {}", self.kind.as_str(), self.id, self.atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
+        trace!("Expanding {} flaw {} with atoms {}", self.kind, self.id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
 
-        for &atom_id in &self.atoms {
+        for &atom_id in &self.past {
             let tau = {
                 let atom = slv.get_atom(atom_id).ok_or(SolverError::RuntimeError(format!("Atom {} not found", atom_id)))?;
                 atom.get("tau").expect("Atom should have a 'tau' field")
@@ -496,11 +501,14 @@ impl Flaw for LevelFlaw {
             }
         }
 
-        for &atom_id in &self.future {
-            let (_, end) = get_atom_vars(slv, atom_id);
-            let anticipate = slv.track_expr(&mut smt, &mut graph, end.le(self.at.clone()))?;
-            if smt.get_lit_val_and_level(anticipate) != Some((false, 0)) {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Anticipate::new(self.id)), anticipate)?);
+        let past_starts: Vec<ArithExpr> = self.past.iter().map(|&p| get_atom_vars(slv, p).0).collect();
+        for &future_id in &self.future {
+            let (_, future_end) = get_atom_vars(slv, future_id);
+            for past_start in &past_starts {
+                let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
+                if smt.get_lit_val_and_level(order) != Some((false, 0)) {
+                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), order)?);
+                }
             }
         }
 
@@ -513,25 +521,25 @@ impl Flaw for LevelFlaw {
 
     fn to_json(&self) -> Value {
         json!({
-            "kind": self.kind.as_str(),
-            "atoms": self.atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            "kind" : self.kind.to_string(),
+            "past": self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
             "future": self.future.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
         })
     }
 }
 
-struct Anticipate {
+struct Order {
     id: ResolverId,
     flaw: FlawId,
 }
 
-impl Anticipate {
+impl Order {
     fn new(flaw: FlawId) -> Self {
         Self { id: ResolverId::default(), flaw }
     }
 }
 
-impl Resolver for Anticipate {
+impl Resolver for Order {
     fn id(&self) -> ResolverId {
         self.id
     }

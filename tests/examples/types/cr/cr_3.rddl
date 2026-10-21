@@ -1,0 +1,10 @@
+ConsumableResource cr = new ConsumableResource(10.0, 0.0);
+
+fact p0 = new cr.Produce(start:  0.0, amount: 4.0, duration: 2.0)!;
+fact p1 = new cr.Produce(start:  0.0, amount: 4.0, duration: 2.0)!;
+fact p2 = new cr.Produce(start: 10.0, amount: 4.0, duration: 2.0)!;
+fact p3 = new cr.Produce(start: 10.0, amount: 4.0, duration: 2.0)!;
+
+fact c0 = new cr.Consume(amount: 4.0, duration: 1.0)!;
+fact c1 = new cr.Consume(amount: 4.0, duration: 1.0)!;
+fact c2 = new cr.Consume(amount: 4.0, duration: 1.0)!;

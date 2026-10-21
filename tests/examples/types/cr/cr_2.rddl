@@ -1,0 +1,10 @@
+ConsumableResource cr = new ConsumableResource(10.0, 6.0);
+
+fact c_fixed = new cr.Consume(start: 3.0, amount: 6.0, duration: 2.0)!;
+
+fact p_fixed = new cr.Produce(start: 10.0, amount: 8.0, duration: 2.0)!;
+
+fact p_free = new cr.Produce(amount: 6.0, duration: 2.0)!;
+
+fact c_free0 = new cr.Consume(amount: 5.0, duration: 1.0)!;
+fact c_free1 = new cr.Consume(amount: 5.0, duration: 1.0)!;
