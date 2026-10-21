@@ -151,7 +151,7 @@ impl Class for StateVariable {
         self.constructors.borrow().clone()
     }
 
-    fn constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
+    fn get_constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
         if args.is_empty() { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 

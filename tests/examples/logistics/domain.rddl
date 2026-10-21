@@ -1,0 +1,82 @@
+class City {}
+
+class Location {
+
+    City city;
+
+    Location(City city) : city(city) {}
+}
+
+class Airport : Location {
+
+    Airport(City city) : Location(city) {}
+}
+
+class Package : StateVariable {
+
+    predicate At(Location l) : Interval {
+        duration >= 1;
+        Vehicle v;
+        goal unload = new v.cargo.Unload(end:start, p:tau, l:l)!;
+    }
+
+    predicate In(Vehicle v) : Interval {
+        duration >= 1;
+        goal load = new v.cargo.Load(end:start, p:tau)!;
+    }
+}
+
+class Cargo : StateVariable {
+
+    Vehicle v;
+
+    Cargo(Vehicle v) : v(v) {}
+
+    predicate Load(Package p, Location l) : Interval {
+        duration >= 1;
+        goal p_at = new p.At(end:start, l:l);
+        goal v_at = new v.At(l:l);
+        v_at.start <= start;
+        v_at.end >= end;
+    }
+
+    predicate Unload(Package p, Location l) : Interval {
+        duration >= 1;
+        goal p_in = new p.In(end:start, v:v);
+        goal v_at = new v.At(l:l);
+        v_at.start <= start;
+        v_at.end >= end;
+    }
+}
+
+class Vehicle : StateVariable {
+
+    Cargo cargo = new Cargo(this);
+}
+
+class Truck : Vehicle {
+
+    predicate At(Location l) : Interval {
+        duration >= 1;
+        goal going = new GoingTo(end:start, to:l)!;
+    }
+
+    predicate GoingTo(Location from, Location to) : Interval {
+        duration >= 1;
+        from.city == to.city;
+        goal at = new At(end:start, l:from);
+    }
+}
+
+class Airplane : Vehicle {
+
+    predicate At(Airport l) : Interval {
+        duration >= 1;
+        goal flying = new Flying(end:start, to:l)!;
+    }
+
+    predicate Flying(Airport from, Airport to) : Interval {
+        duration >= 1;
+        goal at = new At(end:start, l:from);
+    }
+}

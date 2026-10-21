@@ -1,0 +1,15 @@
+City city0 = new City();
+Location l0 = new Location(city0);
+Airport l1 = new Airport(city0);
+
+City city1 = new City();
+Location l2 = new Location(city1);
+Airport l3 = new Airport(city1);
+
+Package p0 = new Package();
+fact p0_at_l0 = new p0.At(start:origin, l:l0); p0_at_l0.duration >= 1;
+
+Truck t0 = new Truck();
+fact t0_at_l0 = new t0.At(start:origin, l:l0); t0_at_l0.duration >= 1;
+
+goal p0_at_l1 = new p0.At(l:l1);

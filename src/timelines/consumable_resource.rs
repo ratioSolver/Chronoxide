@@ -215,7 +215,7 @@ impl Class for ConsumableResource {
         self.constructors.borrow().clone()
     }
 
-    fn constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
+    fn get_constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
         if args.len() == 2 && args.iter().all(|a| a.name() == "real") { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 
