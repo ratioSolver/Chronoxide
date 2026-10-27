@@ -51,9 +51,9 @@ export namespace solver {
         switch (msg.msg_type) {
           case 'state-update': {
             for (const [id, item_msg] of Object.entries(msg.objects))
-              this.objects.set(id, new Item(id, item_msg.class, item_msg.env));
+              this.objects.set(id, new Item(this, id, item_msg.name, item_msg.class, item_msg.env));
             for (const [id, atom_msg] of Object.entries(msg.atoms))
-              this.atoms.set(id, new Atom(id, atom_msg.fact, atom_msg.predicate, atom_msg.env));
+              this.atoms.set(id, new Atom(this, id, atom_msg.fact, atom_msg.predicate, atom_msg.env));
             for (const [id, flaw_msg] of Object.entries(msg.flaws)) {
               const { phi, causes, required_by, status, cost, ...data } = flaw_msg;
               this.flaws.set(id, new Flaw(this, id, phi, causes ?? [], required_by ?? [], status, cost, data));
@@ -67,12 +67,12 @@ export namespace solver {
             break;
           }
           case 'new-object': {
-            const item = new Item(msg.id, msg.class, msg.env);
+            const item = new Item(this, msg.id, msg.name, msg.class, msg.env);
             this.objects.set(msg.id, item);
             break;
           }
           case 'new-atom': {
-            const atom = new Atom(msg.id, msg.fact, msg.predicate, msg.env);
+            const atom = new Atom(this, msg.id, msg.fact, msg.predicate, msg.env);
             this.atoms.set(msg.id, atom);
             break;
           }
@@ -199,44 +199,53 @@ export namespace solver {
   }
 
   export class Item {
+    private readonly slv: Solver;
     private readonly id: string;
+    private readonly name?: string;
     private readonly cls: string;
     private readonly env: Record<string, Value>;
 
-    constructor(id: string, cls: string, env: Record<string, Value>) {
+    constructor(slv: Solver, id: string, name: string | undefined, cls: string, env: Record<string, Value>) {
+      this.slv = slv;
       this.id = id;
+      this.name = name;
       this.cls = cls;
       this.env = env;
     }
 
+    get_solver(): Solver { return this.slv; }
     get_id(): string { return this.id; }
+    get_name(): string | undefined { return this.name; }
     get_class(): string { return this.cls; }
     get_env(): Record<string, Value> { return this.env; }
     to_string(): string {
-      const args = Object.entries(this.env).map(([k, v]) => `${k}: ${value_to_string(v)}`).join(', ');
+      const args = Object.entries(this.env).map(([k, v]) => `${k}: ${value_to_string(this.slv, v)}`).join(', ');
       return `${this.cls}(${args})`;
     }
   }
 
   export class Atom {
+    private readonly slv: Solver;
     private readonly id: string;
     private readonly fact: boolean;
     private readonly predicate: string;
     private readonly env: Record<string, Value>;
 
-    constructor(id: string, fact: boolean, predicate: string, env: Record<string, Value>) {
+    constructor(slv: Solver, id: string, fact: boolean, predicate: string, env: Record<string, Value>) {
+      this.slv = slv;
       this.id = id;
       this.fact = fact;
       this.predicate = predicate;
       this.env = env;
     }
 
+    get_solver(): Solver { return this.slv; }
     get_id(): string { return this.id; }
     is_fact(): boolean { return this.fact; }
     get_predicate(): string { return this.predicate; }
     get_env(): Record<string, Value> { return this.env; }
     to_string(): string {
-      const args = Object.entries(this.env).map(([k, v]) => `${k}: ${value_to_string(v)}`).join(', ');
+      const args = Object.entries(this.env).map(([k, v]) => `${k}: ${value_to_string(this.slv, v)}`).join(', ');
       return `${this.predicate}(${args})`;
     }
   }
@@ -319,7 +328,7 @@ export namespace solver {
     get_data(): Record<string, unknown> { return this.data; }
   }
 
-  export function value_to_string(val: Value): string {
+  export function value_to_string(slv: Solver, val: Value): string {
     if (typeof val === 'object' && val !== null) {
       if ('type' in val)
         switch (val.type) {
@@ -328,6 +337,9 @@ export namespace solver {
           case 'enum_var':
             return val.var;
           case 'object_ref':
+            const obj = slv.get_object(val.id);
+            const obj_name = obj?.get_name();
+            return obj_name ? obj_name : val.id;
           case 'atom_ref':
             return val.id;
         }
@@ -357,7 +369,7 @@ export namespace solver {
   export type ConsumableResourceInterval = { start: InfRational; end: InfRational; initial_amount: InfRational; final_amount: InfRational; };
   export type Timeline = StateVariableTimeline | ReusableResourceTimeline | ConsumableResourceTimeline;
   export type Value = InfRational | string | boolean | { type: 'bool_var'; lit: string } | { type: 'enum_var'; var: string } | { type: 'object_ref' | 'atom_ref'; id: string; };
-  type ObjectMessage = { class: string; env: Record<string, Value>; };
+  type ObjectMessage = { name?: string, class: string; env: Record<string, Value>; };
   type AtomMessage = { predicate: string; fact: boolean, env: Record<string, Value>; };
   type SolverMessage = { objects: Record<string, ObjectMessage>, atoms: Record<string, AtomMessage>, flaws: Record<string, FlawMessage>, resolvers: Record<string, ResolverMessage>, timelines: Record<string, Timeline> };
   type FlawMessage = { phi: string, causes?: string[], required_by?: string[], cost?: number, status: Status } & Record<string, unknown>;

@@ -127,13 +127,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         };
 
                         let send_result = match event {
-                            SolverEvent::NewObject { obj_id, class } => {
-                                let msg = json!({
+                            SolverEvent::NewObject { obj_id, name, class } => {
+                                let mut msg = json!({
                                     "msg_type": "new-object",
                                     "id": format!("{}", obj_id),
                                     "class": class,
                                     "env": {}
                                 });
+                                if let Some(name) = name {
+                                    msg["name"] = Value::String(name);
+                                }
                                 socket.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await
                             }
                             SolverEvent::NewAtom { atom_id, predicate, kind, args, resolution_constraint } => {

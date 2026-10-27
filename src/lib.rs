@@ -286,13 +286,14 @@ impl SolverState {
         let env = to_json(&smt, self);
         let mut objects_map = serde_json::Map::new();
         for object in &self.core.get_objects() {
-            objects_map.insert(
-                object.id().to_string(),
-                json!({
-                    "class": object.class().full_name(),
-                    "env": to_json(&smt, object.as_ref()),
-                }),
-            );
+            let mut obj = json!({
+                "class": object.class().full_name(),
+                "env": to_json(&smt, object.as_ref()),
+            });
+            if let Some(name) = self.core.get_object_name(object.id()) {
+                obj["name"] = json!(name);
+            }
+            objects_map.insert(object.id().to_string(), obj);
         }
         let mut atoms_map = serde_json::Map::new();
         for atom in &self.core.get_atoms() {
@@ -554,7 +555,7 @@ impl Core for SolverState {
         let obj = self.core.new_object(class.clone());
         trace!("Created new object {} of class {}", obj, class.full_name());
         #[cfg(feature = "server")]
-        let _ = self.tx_event.send(SolverEvent::NewObject { obj_id: obj, class: class.full_name() });
+        let _ = self.tx_event.send(SolverEvent::NewObject { obj_id: obj, name: self.core.get_object_name(obj), class: class.full_name() });
         obj
     }
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
@@ -830,7 +831,7 @@ pub enum SolverError {
 
 #[derive(Clone)]
 pub enum SolverEvent {
-    NewObject { obj_id: ObjectId, class: String },
+    NewObject { obj_id: ObjectId, name: Option<String>, class: String },
     NewAtom { atom_id: AtomId, predicate: String, kind: AtomKind, args: Value, resolution_constraint: ResolutionConstraint },
     NewFlaw { flaw_id: FlawId, phi: String, causes: Vec<ResolverId>, required_by: Vec<ResolverId>, status: Option<bool>, cost: f64, data: Value },
     FlawCostUpdate { flaw_id: FlawId, cost: f64 },

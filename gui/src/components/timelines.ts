@@ -77,7 +77,7 @@ export function timelines(slv: solver.Solver): VNode {
 
   const atom_label = (id: string): string => {
     const atm = slv.get_atom(id);
-    return atm ? atom(atm) : id;
+    return atm ? atom(slv, atm) : id;
   };
 
   const format_tooltip = (params: any): string => {
@@ -319,6 +319,6 @@ export function timelines(slv: solver.Solver): VNode {
   ]);
 }
 
-function atom(atm: Readonly<solver.Atom>): string {
-  return atm.get_predicate() + '(' + Object.entries(atm.get_env()).filter(([k, _v]) => k !== 'tau').map(([k, v]) => `${k}: ${solver.value_to_string(v)}`).join(', ') + ')';
+function atom(slv: solver.Solver, atm: Readonly<solver.Atom>): string {
+  return atm.get_predicate() + '(' + Object.entries(atm.get_env()).filter(([k, _v]) => k !== 'tau').map(([k, v]) => `${k}: ${solver.value_to_string(slv, v)}`).join(', ') + ')';
 }
