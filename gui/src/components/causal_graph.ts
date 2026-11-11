@@ -203,11 +203,11 @@ function flaw_name(slv: solver.Solver, flaw: solver.Flaw): string {
   return flaw.get_id();
 }
 
-function resolver_name(_slv: solver.Solver, resolver: solver.Resolver): string {
+function resolver_name(slv: solver.Solver, resolver: solver.Resolver): string {
   const data = resolver.get_data();
-  if (typeof data.val === 'number')
-    return `${resolver.get_id()} obj-${data.val}`;
   if (data.kind === 'unification')
     return `${resolver.get_id()} unify`;
+  if (typeof data.val === 'number')
+    return `${resolver.get_id()} ${solver.value_to_string(slv, { type: 'object_ref', id: 'obj-' + data.val })}`;
   return resolver.get_id();
 }
