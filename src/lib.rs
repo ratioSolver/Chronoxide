@@ -277,6 +277,7 @@ impl SolverState {
 
         let cost = smt.new_dl_var();
         let parent_cost_var = graph.flaw_cost(flaw_id);
+        // ρ → (cost(ϕ) >= cost(ρ) + intrinsic_cost(ρ)) (the flaw's cost is bounded by the cost of any of its resolvers plus the resolver's intrinsic cost)
         let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
 
@@ -293,7 +294,7 @@ impl SolverState {
         let (res_id, _) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver for DL causal link")))?;
         let res_cost = graph.resolver_cost(res_id);
         let flw_cost = graph.flaw_cost(flw_id);
-        // ρ → (cost(ρ) >= cost(flw_id))
+        // ρ → (cost(ρ) >= cost(ϕ)) (the flaw's cost is bounded by the cost of any of its resolvers)
         let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, flw_cost, rug::Rational::from(0)))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
