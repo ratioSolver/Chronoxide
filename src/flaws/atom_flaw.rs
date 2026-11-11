@@ -206,12 +206,13 @@ impl Resolver for GoalResolver {
 struct FactResolver {
     id: ResolverId,
     flaw: FlawId,
+    preconditions: Vec<FlawId>,
     atom: AtomId,
 }
 
 impl FactResolver {
     fn new(flaw: FlawId, atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, atom }
+        Self { id: ResolverId::default(), flaw, preconditions: vec![], atom }
     }
 }
 
@@ -249,6 +250,14 @@ impl Resolver for FactResolver {
         let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
         let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
         slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
+    }
+
+    fn preconditions(&self) -> Vec<FlawId> {
+        self.preconditions.clone()
+    }
+
+    fn add_precondition(&mut self, flaw_id: FlawId) {
+        self.preconditions.push(flaw_id);
     }
 
     fn to_json(&self) -> Value {

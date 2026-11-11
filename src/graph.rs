@@ -176,6 +176,11 @@ impl Graph {
         self.flaw_cost[*flw_id]
     }
 
+    /// Returns the DL cost variable associated with a resolver.
+    pub(super) fn resolver_cost(&self, res_id: ResolverId) -> DlVar {
+        self.resolver_cost[*res_id]
+    }
+
     /// Registers a new flaw in the graph. `phi`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
     pub fn add_flaw(&mut self, mut flw: Box<dyn Flaw>, phi: Lit, status: Option<bool>, cost: DlVar) -> FlawId {
         let flw_id = FlawId(self.flaws.len());

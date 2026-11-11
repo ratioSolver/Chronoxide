@@ -253,6 +253,15 @@ impl SolverState {
         };
         let status = smt.get_lit_val(phi);
         let cost = smt.new_dl_var();
+
+        for res_id in causes {
+            let rho = graph.rho(*res_id);
+            let res_cost = graph.resolver_cost(*res_id);
+            // ρ → (cost(ρ) >= cost(ϕ)) (the flaw's cost is bounded by the cost of any of its resolvers)
+            let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, cost, rug::Rational::from(0)))?;
+            self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
+        }
+
         Ok(graph.add_flaw(flw, phi, status, cost))
     }
 
@@ -275,10 +284,18 @@ impl SolverState {
         Ok(graph.add_resolver(res, rho, status, cost))
     }
 
-    /// Adds a causal link from the current resolver to `flw_id`, wiring the ρ → ϕ clause into `smt`.
+    /// Adds a causal link from the current resolver to `flw_id`, wiring the ρ → ϕ clause
+    /// and the DL cost constraint into `smt`.
     pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw_id: FlawId) -> Result<(), SolverError> {
         let (rho, phi) = graph.add_causal_link(flw_id)?;
-        self.add_clause(smt, graph, vec![!rho, phi])
+        self.add_clause(smt, graph, vec![!rho, phi])?;
+
+        let (res_id, _) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver for DL causal link")))?;
+        let res_cost = graph.resolver_cost(res_id);
+        let flw_cost = graph.flaw_cost(flw_id);
+        // ρ → (cost(ρ) >= cost(flw_id))
+        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, flw_cost, rug::Rational::from(0)))?;
+        self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
 
     fn to_json(&self) -> Value {
