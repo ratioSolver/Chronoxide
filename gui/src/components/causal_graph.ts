@@ -12,6 +12,8 @@ const CURRENT_NODE_SHADOW_COLOR = 'rgba(249, 115, 22, 0.7)';
 const FRONTIER_BORDER_COLOR = '#3b82f6';
 const FRONTIER_SHADOW_COLOR = 'rgba(59, 130, 246, 0.4)';
 
+const MUTEX_EDGE_COLOR = '#ef4444';
+
 export function causal_graph(slv: solver.Solver): VNode {
   let chart: echarts.ECharts | undefined;
 
@@ -60,18 +62,55 @@ export function causal_graph(slv: solver.Solver): VNode {
       }),
     ];
 
-    const links = resolvers.map((resolver) => ({
+    const links: Record<string, unknown>[] = resolvers.map((resolver) => ({
       source: resolver.get_id(),
       target: resolver.get_flaw(),
       lineStyle: edge_style(resolver.get_status()),
     }));
-    for (const flaw of flaws)
-      for (const res_id of flaw.get_required_by())
+
+    const drawn_mutexes = new Set<string>();
+
+    for (const flaw of flaws) {
+      for (const res_id of flaw.get_required_by()) {
         links.push({
           source: flaw.get_id(),
           target: res_id,
           lineStyle: edge_style(flaw.get_status()),
         });
+      }
+
+      // Draw a visual mutex edge (⊥) between the conflicting resolvers
+      const f_data = flaw.get_data();
+      if (f_data.kind === 'residual' && typeof f_data.excluded_resolver === 'string') {
+        const r1 = flaw.get_required_by()[0];
+        const r2 = f_data.excluded_resolver;
+        if (r1) {
+          const key = r1 < r2 ? `${r1}-${r2}` : `${r2}-${r1}`;
+          if (!drawn_mutexes.has(key)) {
+            drawn_mutexes.add(key);
+            links.push({
+              source: r1,
+              target: r2,
+              symbol: ['none', 'none'],
+              ignoreForceLayout: true,
+              lineStyle: {
+                width: 1.5,
+                color: MUTEX_EDGE_COLOR,
+                opacity: 0.7,
+                type: 'dashed',
+                curveness: 0.25,
+              },
+              label: {
+                show: true,
+                formatter: '⊥',
+                color: MUTEX_EDGE_COLOR,
+                fontSize: 11,
+              }
+            });
+          }
+        }
+      }
+    }
 
     return {
       series: [
@@ -200,6 +239,8 @@ function flaw_name(slv: solver.Solver, flaw: solver.Flaw): string {
     return `${flaw.get_id()} ${slv.get_atom(data.atom)!.to_string()}`;
   if (data.kind === 'enum' && typeof data.var === 'string')
     return `${flaw.get_id()} ${data.var}`;
+  if (data.kind === 'residual')
+    return `${flaw.get_id()} (${data.target_flaw} \\ ${data.excluded_resolver})`;
   return flaw.get_id();
 }
 
@@ -207,6 +248,8 @@ function resolver_name(slv: solver.Solver, resolver: solver.Resolver): string {
   const data = resolver.get_data();
   if (data.kind === 'unification')
     return `${resolver.get_id()} unify`;
+  if (data.kind === 'residual')
+    return `${resolver.get_id()} ↳ ${data.original_resolver}`;
   if (typeof data.val === 'number')
     return `${resolver.get_id()} ${solver.value_to_string(slv, { type: 'object_ref', id: 'obj-' + data.val })}`;
   return resolver.get_id();

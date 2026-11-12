@@ -236,7 +236,7 @@ impl SolverState {
 
     /// Attaches `f2 \ {r2}` as a precondition of `r1`.
     fn try_add_residual_for_pair(&self, r1: ResolverId, r2: ResolverId) -> Result<(), SolverError> {
-        let (f1, f2, allowed_resolvers, causes) = {
+        let (f1, f2, allowed_resolvers) = {
             let graph = self.graph.borrow();
             let smt = self.smt.borrow();
 
@@ -247,6 +247,13 @@ impl SolverState {
             let f1 = graph.resolver_flaw(r1);
             let f2 = graph.resolver_flaw(r2);
             if f1 == f2 || !graph.is_expanded(f2) {
+                return Ok(());
+            }
+
+            // Ensure that selecting `r1` implies `f2` is active (ρ₁ ⊨ ϕ₂):
+            // every cause `c` of `f2` must be true at level 0 or a causal ancestor of `r1`.
+            let f2_active_under_r1 = graph.flaw_causes(f2).iter().all(|&c| c == r1 || smt.get_lit_val_and_level(graph.rho(c)) == Some((true, 0)) || graph.is_causal_ancestor(c, r1));
+            if !f2_active_under_r1 {
                 return Ok(());
             }
 
@@ -265,28 +272,23 @@ impl SolverState {
                 return Ok(());
             }
 
-            let mut causes = vec![r1];
-            for &c in graph.flaw_causes(f2) {
-                if smt.get_lit_val_and_level(graph.rho(c)) != Some((true, 0)) && !causes.contains(&c) {
-                    causes.push(c);
-                }
-            }
-
-            (f1, f2, allowed, causes)
+            (f1, f2, allowed)
         };
 
-        // Degenerate case: r2 was the only remaining resolver for f2 -> (r1 ∧ causes(f2)) → ¬ϕ2
+        // Degenerate case: r2 was the only remaining resolver for f2, so r1 cannot be selected (¬ρ₁)
         if allowed_resolvers.is_empty() {
+            self.cancel_to_root();
             let mut smt = self.smt.borrow_mut();
             let mut graph = self.graph.borrow_mut();
-            let mut clause: Vec<Lit> = causes.iter().map(|&c| !graph.rho(c)).collect();
-            clause.push(!graph.phi(f2));
-            return self.add_clause(&mut smt, &mut graph, clause);
+            let not_r1 = !graph.rho(r1);
+            return self.add_clause(&mut smt, &mut graph, vec![not_r1]);
         }
 
         if !self.graph.borrow_mut().register_residual(r1, f2, r2) {
             return Ok(());
         }
+
+        self.cancel_to_root();
 
         trace!("Creating ResidualFlaw for {} excluding {} as precondition of {}", f2, r2, r1);
 
@@ -294,7 +296,7 @@ impl SolverState {
             let mut smt = self.smt.borrow_mut();
             let mut graph = self.graph.borrow_mut();
             let res_flw = Box::new(ResidualFlaw::new(f2, r2, allowed_resolvers));
-            let flw_id = self.add_flaw(&mut smt, &mut graph, causes, res_flw)?;
+            let flw_id = self.add_flaw(&mut smt, &mut graph, vec![r1], res_flw)?;
             graph.remove_from_flaw_q(flw_id);
             graph.add_precondition_to_resolver(r1, flw_id);
             flw_id
