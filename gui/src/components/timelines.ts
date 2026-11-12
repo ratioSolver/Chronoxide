@@ -86,7 +86,6 @@ export function timelines(slv: solver.Solver): VNode {
 
     const start = num(ref.interval.start);
     const end = num(ref.interval.end);
-    const head = `<strong>${esc(ref.objId)}</strong> &middot; `;
     const common = `Start: ${start}<br/>End: ${end}<br/>Duration: ${end - start}`;
 
     switch (ref.type) {
@@ -94,14 +93,14 @@ export function timelines(slv: solver.Solver): VNode {
         const n = ref.interval.atoms.length;
         const title = n === 0 ? 'Idle' : n === 1 ? 'Atom' : `Conflict (${n} atoms)`;
         const atoms = ref.interval.atoms.map(id => `&nbsp;&nbsp;${esc(atom_label(id))}`).join('<br/>');
-        return `${head}${title}<br/>${common}${atoms ? `<br/>Atoms:<br/>${atoms}` : ''}`;
+        return `${title}<br/>${common}${atoms ? `<br/>Atoms:<br/>${atoms}` : ''}`;
       }
       case 'ReusableResource': {
         const amount = num(ref.interval.amount);
         const capacity = num(ref.timeline.capacity);
         const usage = capacity > 0 ? ` (${((amount / capacity) * 100).toFixed(1)}%)` : '';
         const overload = amount > capacity ? '<br/><strong style="color:#ef4444">Over capacity</strong>' : '';
-        return `${head}Reusable resource<br/>${common}<br/>Amount: ${amount} / ${capacity}${usage}${overload}`;
+        return `${common}<br/>Amount: ${amount} / ${capacity}${usage}${overload}`;
       }
       case 'ConsumableResource': {
         const from = num(ref.interval.initial_amount);
@@ -110,7 +109,7 @@ export function timelines(slv: solver.Solver): VNode {
         const delta = to - from;
         const violated = Math.min(from, to) < 0 || Math.max(from, to) > capacity;
         const warn = violated ? '<br/><strong style="color:#ef4444">Out of bounds</strong>' : '';
-        return `${head}Consumable resource<br/>${common}<br/>Amount: ${from} &rarr; ${to} (${delta >= 0 ? '+' : ''}${delta})<br/>Capacity: ${capacity}${warn}`;
+        return `${common}<br/>Amount: ${from} &rarr; ${to} (${delta >= 0 ? '+' : ''}${delta})<br/>Capacity: ${capacity}${warn}`;
       }
     }
   };
