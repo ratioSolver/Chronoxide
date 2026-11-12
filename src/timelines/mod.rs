@@ -15,8 +15,10 @@ use riddle::{
 use semitone::ast::ArithExpr;
 use serde_json::Value;
 
+type FlawWithResolvers = (Vec<ResolverId>, Box<dyn Flaw>);
+
 pub trait Timeline: Class {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<(Vec<ResolverId>, Box<dyn Flaw>)>, SolverError>;
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<FlawWithResolvers>, SolverError>;
 
     fn to_json(&self, slv: &SolverState) -> Value;
 }

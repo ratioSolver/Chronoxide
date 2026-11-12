@@ -1,9 +1,9 @@
 use crate::{
     SolverError, SolverState, Timeline,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    graph::{Flaw, Resolver, ResolverId},
     inf_rat_to_json,
     objects::EnumVar,
-    timelines::get_atom_vars,
+    timelines::{FlawWithResolvers, get_atom_vars},
 };
 use riddle::{
     core::Core,
@@ -165,7 +165,7 @@ impl Class for StateVariable {
 }
 
 impl Timeline for StateVariable {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<(Vec<ResolverId>, Box<dyn Flaw>)>, SolverError> {
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<FlawWithResolvers>, SolverError> {
         let mut flaws: Vec<(Vec<ResolverId>, Box<dyn Flaw>)> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported: HashSet<(AtomId, AtomId)> = HashSet::new();

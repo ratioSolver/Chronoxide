@@ -3,7 +3,7 @@ use crate::{
     graph::{Flaw, Resolver, ResolverId},
     inf_rat_to_json,
     objects::{ArithVar, EnumVar},
-    timelines::{Timeline, get_atom_amount, get_atom_vars},
+    timelines::{FlawWithResolvers, Timeline, get_atom_amount, get_atom_vars},
 };
 use riddle::{
     core::Core,
@@ -201,7 +201,7 @@ impl Class for ReusableResource {
 }
 
 impl Timeline for ReusableResource {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<(Vec<ResolverId>, Box<dyn Flaw>)>, SolverError> {
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<FlawWithResolvers>, SolverError> {
         let mut flaws: Vec<(Vec<ResolverId>, Box<dyn Flaw>)> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported: HashSet<BTreeSet<AtomId>> = HashSet::new();

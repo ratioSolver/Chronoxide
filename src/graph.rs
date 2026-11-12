@@ -218,16 +218,8 @@ impl Graph {
         self.c_flaw
     }
 
-    pub(super) fn flaw(&self, flw_id: FlawId) -> Option<&dyn Flaw> {
-        self.flaws[*flw_id].as_deref()
-    }
-
     pub(super) fn flaw_causes(&self, flw_id: FlawId) -> &[ResolverId] {
         &self.flaw_causes[*flw_id]
-    }
-
-    pub(super) fn flaw_required_by(&self, flw_id: FlawId) -> &[ResolverId] {
-        &self.flaw_required_by[*flw_id]
     }
 
     pub(super) fn flaw_resolvers(&self, flw_id: FlawId) -> &[ResolverId] {
