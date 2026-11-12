@@ -300,6 +300,10 @@ impl Graph {
         self.resolver_rho[*res_id]
     }
 
+    pub(super) fn resolvers_for_lit(&self, lit: Lit) -> Option<&[ResolverId]> {
+        self.lit_to_resolver.get(&lit).map(|v| v.as_slice())
+    }
+
     pub(super) fn current_resolver(&self) -> Option<(ResolverId, Lit)> {
         self.c_res
     }

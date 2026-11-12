@@ -100,6 +100,15 @@ impl SolverState {
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
 
                     if !self.graph.borrow().has_estimated_solution() {
+                        if self.smt.borrow().decision_level() > 0 {
+                            trace!("Backtracking to decision level 0 before expanding graph...");
+                            let mut smt = self.smt.borrow_mut();
+                            let mut graph = self.graph.borrow_mut();
+                            let vars_to_undo = smt.cancel_until(0);
+                            self.notified_len.set(smt.current_trail_len());
+                            graph.cancel_until(0, vars_to_undo.as_slice());
+                            graph.refresh_costs();
+                        }
                         trace!("Expanding graph...");
                         let (mut flaw, flw_id) = {
                             let mut graph = self.graph.borrow_mut();
@@ -179,10 +188,48 @@ impl SolverState {
         if smt.decision_level() == 0 {
             return false;
         }
+        if let Some(mutex_resolvers) = self.extract_conflicting_resolvers(smt, graph, &lemma) {
+            trace!("Conflicting resolvers: [{}]", mutex_resolvers.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "));
+        }
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         graph.cancel_until(bt_level, vars_to_undo.as_slice());
         smt.add_clause(lemma).is_ok()
+    }
+
+    fn extract_conflicting_resolvers(&self, smt: &SeMiTONE, graph: &Graph, lemma: &[Lit]) -> Option<Vec<ResolverId>> {
+        let mut queue: std::collections::VecDeque<Lit> = lemma.iter().map(|&l| !l).collect();
+        let mut visited: std::collections::HashSet<Lit> = queue.iter().copied().collect();
+        let mut resolvers = Vec::new();
+
+        while let Some(p) = queue.pop_front() {
+            if smt.get_lit_level(p) == Some(0) {
+                continue;
+            }
+
+            if let Some(res_ids) = graph.resolvers_for_lit(p) {
+                for &r_id in res_ids {
+                    if !resolvers.contains(&r_id) {
+                        resolvers.push(r_id);
+                    }
+                }
+                continue;
+            }
+
+            if let Some(antecedents) = smt.get_lit_antecedents(p) {
+                for &q in antecedents {
+                    let premise = !q;
+                    if visited.insert(premise) {
+                        queue.push_back(premise);
+                    }
+                }
+            } else {
+                // `p` is a decision literal, not a resolver, so we cannot extract any more resolvers from the conflict
+                return None;
+            }
+        }
+
+        Some(resolvers)
     }
 
     /// Notifies `graph` of any SAT literals assigned since the last sync (e.g. forced by a clause
