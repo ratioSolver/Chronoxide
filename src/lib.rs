@@ -328,16 +328,11 @@ impl SolverState {
                 continue;
             }
 
-            if let Some(antecedents) = smt.get_lit_antecedents(p) {
-                for &q in antecedents {
-                    let premise = !q;
-                    if visited.insert(premise) {
-                        queue.push_back(premise);
-                    }
+            for &q in smt.get_lit_antecedents(p)? {
+                let premise = !q;
+                if visited.insert(premise) {
+                    queue.push_back(premise);
                 }
-            } else {
-                // `p` is a decision literal that is not a resolver (e.g., `!ϕ` on an unexpanded flaw)
-                return None;
             }
         }
 
