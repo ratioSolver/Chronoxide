@@ -93,27 +93,27 @@ impl SolverState {
             match prop_result {
                 Ok(_) => {
                     self.graph.borrow_mut().refresh_costs();
-                    let new_literals = &self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
-                    self.graph.borrow_mut().propagate(new_literals.as_slice());
+                    let new_literals = self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
+                    let mutexes = self.detect_propagation_mutexes(&new_literals);
+
+                    self.graph.borrow_mut().propagate(&new_literals);
                     self.notified_len.set(self.smt.borrow().current_trail_len());
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
 
-                    if !self.graph.borrow().has_estimated_solution() {
-                        if self.smt.borrow().decision_level() > 0 {
-                            trace!("Backtracking to decision level 0 before expanding graph...");
-                            let mut smt = self.smt.borrow_mut();
-                            let mut graph = self.graph.borrow_mut();
-                            let vars_to_undo = smt.cancel_until(0);
-                            self.notified_len.set(smt.current_trail_len());
-                            graph.cancel_until(0, vars_to_undo.as_slice());
-                            graph.refresh_costs();
+                    if !mutexes.is_empty() {
+                        for (r1, r2) in mutexes {
+                            self.add_mutex_residuals(r1, r2)?;
                         }
+                        continue;
+                    }
+
+                    if !self.graph.borrow().has_estimated_solution() {
+                        self.cancel_to_root();
 
                         trace!("Expanding graph...");
                         let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
                         self.expand_flaw(flw_id)?;
-                        continue;
                     } else {
                         trace!("Picking branching literal...");
                         let decision = self.graph.borrow().pick_branching_literal();
@@ -128,16 +128,12 @@ impl SolverState {
                             }
                             if !extracted_flaws.is_empty() {
                                 trace!("Extracted {} new flaws from timelines", extracted_flaws.len());
-                                let mut graph = self.graph.borrow_mut();
                                 let mut smt = self.smt.borrow_mut();
+                                let mut graph = self.graph.borrow_mut();
                                 for (causes, flaw) in extracted_flaws {
                                     self.add_flaw(&mut smt, &mut graph, causes, flaw)?;
                                 }
-                                if self.notified_len.get() > smt.current_trail_len() {
-                                    let new_literals = &smt.get_trail_delta(self.notified_len.get()).to_vec();
-                                    graph.propagate(new_literals.as_slice());
-                                    self.notified_len.set(smt.current_trail_len());
-                                }
+                                self.sync_graph(&smt, &mut graph);
                                 continue;
                             }
 
@@ -147,26 +143,28 @@ impl SolverState {
                     }
                 }
                 Err((bt_level, lemma)) => {
-                    let mutex_resolvers = {
-                        let mut smt = self.smt.borrow_mut();
-                        let mut graph = self.graph.borrow_mut();
-                        let mutex_resolvers = self.extract_conflicting_resolvers(&smt, &graph, &lemma);
-                        if !self.backtrack_and_learn(&mut smt, &mut graph, bt_level, lemma) {
-                            return Err(SolverError::Inconsistent);
-                        }
-                        mutex_resolvers
-                    };
-
-                    if let Some(resolvers) = mutex_resolvers {
-                        trace!("Conflicting resolvers: [{}]", resolvers.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "));
-                        if resolvers.len() == 2 {
-                            self.add_mutex_residuals(resolvers[0], resolvers[1])?;
-                        }
+                    let mut smt = self.smt.borrow_mut();
+                    let mut graph = self.graph.borrow_mut();
+                    if !self.backtrack_and_learn(&mut smt, &mut graph, bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// Backtracks both `smt` and `graph` to decision level 0 and refreshes heuristic costs.
+    fn cancel_to_root(&self) {
+        if self.smt.borrow().decision_level() > 0 {
+            trace!("Backtracking to decision level 0...");
+            let mut smt = self.smt.borrow_mut();
+            let mut graph = self.graph.borrow_mut();
+            let vars_to_undo = smt.cancel_until(0);
+            self.notified_len.set(smt.current_trail_len());
+            graph.cancel_until(0, &vars_to_undo);
+            graph.refresh_costs();
+        }
     }
 
     /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.
@@ -192,8 +190,41 @@ impl SolverState {
 
         let mut graph = self.graph.borrow_mut();
         graph.return_flaw(flaw);
+        self.sync_graph(&self.smt.borrow(), &mut graph);
         graph.propagate_costs(&[flw_id]);
         Ok(())
+    }
+
+    /// Inspects newly propagated literals at decision level > 0 to detect unit-propagated mutexes (ρ₁ ⊢ ¬ρ₂).
+    fn detect_propagation_mutexes(&self, new_literals: &[Lit]) -> Vec<(ResolverId, ResolverId)> {
+        let mut mutexes = Vec::new();
+        let smt = self.smt.borrow();
+        if smt.decision_level() == 0 {
+            return mutexes;
+        }
+
+        let graph = self.graph.borrow();
+        for &lit in new_literals {
+            if smt.get_lit_level(lit) == Some(0) {
+                continue;
+            }
+            if let Some(res_ids) = graph.resolvers_for_lit(!lit)
+                && let Some(&r2_raw) = res_ids.first()
+                && let Some(ants) = smt.get_lit_antecedents(lit)
+                && let Some(causes) = self.extract_conflicting_resolvers(&smt, &graph, ants)
+                && causes.len() == 1
+            {
+                let r1 = causes[0];
+                for r2 in graph.branching_resolvers(r2_raw) {
+                    if graph.resolver_flaw(r1) != graph.resolver_flaw(r2) && !graph.is_causal_ancestor(r1, r2) && !graph.is_causal_ancestor(r2, r1) && !mutexes.contains(&(r1, r2)) && !mutexes.contains(&(r2, r1)) {
+                        trace!("Propagation mutex detected: {} and {}", r1, r2);
+                        mutexes.push((r1, r2));
+                    }
+                }
+            }
+        }
+
+        mutexes
     }
 
     /// Builds residual flaws in both directions (when acyclic) for a pair of mutually exclusive resolvers.
@@ -274,10 +305,10 @@ impl SolverState {
         Ok(())
     }
 
-    fn extract_conflicting_resolvers(&self, smt: &SeMiTONE, graph: &Graph, lemma: &[Lit]) -> Option<Vec<ResolverId>> {
-        let mut queue: VecDeque<Lit> = lemma.iter().map(|&l| !l).collect();
+    fn extract_conflicting_resolvers(&self, smt: &SeMiTONE, graph: &Graph, clause: &[Lit]) -> Option<Vec<ResolverId>> {
+        let mut queue: VecDeque<Lit> = clause.iter().map(|&l| !l).collect();
         let mut visited: HashSet<Lit> = queue.iter().copied().collect();
-        let mut resolvers = Vec::new();
+        let mut raw_resolvers = Vec::new();
 
         while let Some(p) = queue.pop_front() {
             if smt.get_lit_level(p) == Some(0) {
@@ -285,25 +316,31 @@ impl SolverState {
             }
 
             if let Some(res_ids) = graph.resolvers_for_lit(p) {
-                // Take the canonical (first) resolver associated with `p`
-                if let Some(&r_id) = res_ids.first()
-                    && !resolvers.contains(&r_id)
-                {
-                    resolvers.push(r_id);
+                if let Some(&r_id) = res_ids.first() {
+                    for b_res in graph.branching_resolvers(r_id) {
+                        if smt.get_lit_level(graph.rho(b_res)) != Some(0) && !raw_resolvers.contains(&b_res) {
+                            raw_resolvers.push(b_res);
+                        }
+                    }
                 }
                 continue;
             }
 
-            {
-                let antecedents = smt.get_lit_antecedents(p)?;
+            if let Some(antecedents) = smt.get_lit_antecedents(p) {
                 for &q in antecedents {
                     let premise = !q;
                     if visited.insert(premise) {
                         queue.push_back(premise);
                     }
                 }
+            } else {
+                // `p` is a decision literal that is not a resolver (e.g., `!ϕ` on an unexpanded flaw)
+                return None;
             }
         }
+
+        // Filter out any resolver that is already a causal ancestor of another resolver in the conflict
+        let resolvers: Vec<ResolverId> = raw_resolvers.iter().copied().filter(|&r_anc| !raw_resolvers.iter().any(|&r_desc| graph.is_causal_ancestor(r_anc, r_desc))).collect();
 
         Some(resolvers)
     }
@@ -316,14 +353,14 @@ impl SolverState {
         }
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
-        graph.cancel_until(bt_level, vars_to_undo.as_slice());
+        graph.cancel_until(bt_level, &vars_to_undo);
         smt.add_clause(lemma).is_ok()
     }
 
     /// Notifies `graph` of any SAT literals assigned since the last sync (e.g. forced by a clause
     /// just added), keeping its flaw/resolver status and agenda consistent with `smt`'s trail.
     /// A no-op while a flaw/resolver is checked out (`graph.is_busy()`): the sync is deferred to the
-    /// next safe point, i.e. the top of the solve loop.
+    /// next safe point.
     fn sync_graph(&self, smt: &SeMiTONE, graph: &mut Graph) {
         if graph.is_busy() {
             return;

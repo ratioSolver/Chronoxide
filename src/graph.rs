@@ -722,4 +722,53 @@ impl Graph {
 
         true
     }
+
+    /// Walks up `flaw_causes` if `res_id` is the only resolver of its flaw, returning
+    /// the ancestor resolvers that belong to flaws with multiple alternatives.
+    pub(super) fn branching_resolvers(&self, res_id: ResolverId) -> Vec<ResolverId> {
+        let mut result = Vec::new();
+        let mut queue = VecDeque::from([res_id]);
+        let mut visited = HashSet::new();
+
+        while let Some(curr) = queue.pop_front() {
+            if !visited.insert(curr) {
+                continue;
+            }
+            let flw_id = self.resolver_flaw[*curr];
+            if self.flaw_resolvers[*flw_id].len() > 1 || self.flaw_causes[*flw_id].is_empty() {
+                if !result.contains(&curr) {
+                    result.push(curr);
+                }
+            } else {
+                for &cause in &self.flaw_causes[*flw_id] {
+                    queue.push_back(cause);
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Returns true if `anc` is a causal ancestor of `desc` along `flaw_causes`.
+    pub(super) fn is_causal_ancestor(&self, anc: ResolverId, desc: ResolverId) -> bool {
+        if anc == desc {
+            return false;
+        }
+        let mut queue = VecDeque::from([self.resolver_flaw[*desc]]);
+        let mut visited = HashSet::new();
+
+        while let Some(f_id) = queue.pop_front() {
+            if !visited.insert(f_id) {
+                continue;
+            }
+            for &c_res in &self.flaw_causes[*f_id] {
+                if c_res == anc {
+                    return true;
+                }
+                queue.push_back(self.resolver_flaw[*c_res]);
+            }
+        }
+
+        false
+    }
 }

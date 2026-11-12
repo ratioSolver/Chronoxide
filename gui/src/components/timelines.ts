@@ -167,7 +167,7 @@ export function timelines(slv: solver.Solver): VNode {
     let top = TOP;
     let gi = 0;
     for (const [id, timeline] of timelines) {
-      const objId = `${id}`;
+      const objId = solver.value_to_string(slv, { type: 'object_ref', id });
       const body = BODY[timeline.type];
 
       titles.push({ text: objId, left: LEFT, top, textStyle: { fontSize: 12, fontWeight: 'bold' } });
