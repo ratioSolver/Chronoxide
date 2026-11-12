@@ -49,57 +49,25 @@ impl fmt::Display for ResolverId {
 }
 
 pub trait Flaw {
-    /// Unique identifier of this flaw in the graph.
-    fn id(&self) -> FlawId;
-    /// Sets the unique identifier of this flaw in the graph.
-    fn set_id(&mut self, id: FlawId);
-    /// Causes for this flaw to exist in the graph.
-    fn causes(&self) -> &Vec<ResolverId>;
-
-    fn required_by(&self) -> &Vec<ResolverId> {
-        self.causes()
-    }
-    fn add_required_by(&mut self, _res_id: ResolverId) {
-        unimplemented!("add_required_by is not implemented for this flaw");
-    }
-
     /// Expands this flaw by adding resolvers to the graph that can potentially solve it.
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError>;
 
-    /// Resolvers that can potentially solve this flaw.
-    fn resolvers(&self) -> Vec<ResolverId>;
-
-    fn to_json(&self) -> serde_json::Value;
+    /// Serializes the domain-specific payload of this flaw to JSON.
+    fn to_json(&self) -> Value;
 }
 
 pub trait Resolver {
-    /// Unique identifier of this resolver in the graph.
-    fn id(&self) -> ResolverId;
-    /// Sets the unique identifier of this resolver in the graph.
-    fn set_id(&mut self, id: ResolverId);
-    /// Flaw that this resolver is attempting to solve.
-    fn flaw(&self) -> FlawId;
-
     /// The intrinsic cost of selecting this resolver, independent from the current state of the graph.
     fn intrinsic_cost(&self) -> rug::Rational {
         rug::Rational::from(1)
     }
 
-    /// Applies this resolver.
+    /// Applies this resolver, adding its constraints, sub-flaws, or causal links to the solver state.
     fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
         Ok(())
     }
 
-    /// Preconditions that must be satisfied for this resolver to be applicable.
-    fn preconditions(&self) -> Vec<FlawId> {
-        vec![]
-    }
-
-    /// Adds a precondition to this resolver.
-    fn add_precondition(&mut self, _flaw_id: FlawId) {
-        unimplemented!("add_precondition is not implemented for this resolver");
-    }
-
+    /// Serializes the domain-specific payload of this resolver to JSON.
     fn to_json(&self) -> Value {
         Value::Null
     }
@@ -118,10 +86,18 @@ pub struct Graph {
     flaw_status: Vec<Option<bool>>,
     flaw_phi: Vec<Lit>,
     flaw_cost: Vec<DlVar>,
+    flaw_causes: Vec<Vec<ResolverId>>,
+    flaw_required_by: Vec<Vec<ResolverId>>,
+    flaw_resolvers: Vec<Vec<ResolverId>>,
+
     lit_to_resolver: HashMap<Lit, Vec<ResolverId>>,
     resolver_status: Vec<Option<bool>>,
     resolver_rho: Vec<Lit>,
     resolver_cost: Vec<DlVar>,
+    resolver_flaw: Vec<FlawId>,
+    resolver_preconditions: Vec<Vec<FlawId>>,
+
+    created_residuals: HashSet<(ResolverId, FlawId, ResolverId)>,
 
     agenda: HashSet<FlawId>,
 
@@ -149,10 +125,18 @@ impl Graph {
             flaw_status: Vec::new(),
             flaw_phi: Vec::new(),
             flaw_cost: Vec::new(),
+            flaw_causes: Vec::new(),
+            flaw_required_by: Vec::new(),
+            flaw_resolvers: Vec::new(),
+
             lit_to_resolver: HashMap::new(),
             resolver_status: Vec::new(),
             resolver_rho: Vec::new(),
             resolver_cost: Vec::new(),
+            resolver_flaw: Vec::new(),
+            resolver_preconditions: Vec::new(),
+
+            created_residuals: HashSet::new(),
 
             agenda: HashSet::new(),
 
@@ -166,9 +150,14 @@ impl Graph {
         }
     }
 
+    /// Returns the currently active resolver as a cause vector (empty if at root level).
+    pub(super) fn current_cause(&self) -> Vec<ResolverId> {
+        self.c_res.map(|(r_id, _)| vec![r_id]).unwrap_or_default()
+    }
+
     /// Returns the ρ literals of the given resolvers, used by the caller to build a flaw's causes clause.
     pub(super) fn resolver_rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
-        res_ids.iter().map(|&r_id| self.resolver_rho[r_id.0]).collect()
+        res_ids.iter().map(|&r_id| self.resolver_rho[*r_id]).collect()
     }
 
     /// Returns the DL cost variable associated with a flaw.
@@ -181,21 +170,20 @@ impl Graph {
         self.resolver_cost[*res_id]
     }
 
-    /// Registers a new flaw in the graph. `phi`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
-    pub fn add_flaw(&mut self, mut flw: Box<dyn Flaw>, phi: Lit, status: Option<bool>, cost: DlVar) -> FlawId {
+    /// Registers a new flaw in the graph. `phi`, `status`, and `cost` must already be set up in the SAT/theory solver by the caller.
+    pub fn add_flaw(&mut self, flw: Box<dyn Flaw>, causes: Vec<ResolverId>, phi: Lit, status: Option<bool>, cost: DlVar) -> FlawId {
         let flw_id = FlawId(self.flaws.len());
-        flw.set_id(flw_id);
         if self.c_res.is_some() {
             self.c_preconditions.push(flw_id);
         }
-        trace!("Adding flaw: {} ({})", flw.id(), phi);
+        trace!("Adding flaw: {} ({})", flw_id, phi);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewFlaw {
             flaw_id: flw_id,
             phi: phi.to_string(),
-            causes: flw.causes().to_vec(),
-            required_by: flw.required_by().to_vec(),
+            causes: causes.clone(),
+            required_by: causes.clone(),
             status,
             cost: f64::INFINITY,
             data: flw.to_json(),
@@ -212,6 +200,9 @@ impl Graph {
         }
         self.flaw_phi.push(phi);
         self.flaw_cost.push(cost);
+        self.flaw_causes.push(causes.clone());
+        self.flaw_required_by.push(causes);
+        self.flaw_resolvers.push(Vec::new());
         self.h_flaw.push(f64::INFINITY);
 
         self.flaw_q.push_back(flw_id);
@@ -231,6 +222,18 @@ impl Graph {
         self.flaws[*flw_id].as_deref()
     }
 
+    pub(super) fn flaw_causes(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_causes[*flw_id]
+    }
+
+    pub(super) fn flaw_required_by(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_required_by[*flw_id]
+    }
+
+    pub(super) fn flaw_resolvers(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_resolvers[*flw_id]
+    }
+
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
         self.c_flaw.replace((flw_id, self.flaw_phi[*flw_id]));
         #[cfg(feature = "server")]
@@ -239,9 +242,8 @@ impl Graph {
     }
 
     pub(super) fn return_flaw(&mut self, flw: Box<dyn Flaw>) {
-        let id = flw.id();
+        let (id, _) = self.c_flaw.take().expect("A flaw must be checked out when calling return_flaw");
         self.flaws[*id] = Some(flw);
-        self.c_flaw.take();
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
     }
@@ -252,7 +254,7 @@ impl Graph {
         } else {
             let mut min_cost = f64::INFINITY;
 
-            for &resolver_id in self.flaws[*flw_id].as_ref().expect("Flaw should exist").resolvers().iter() {
+            for &resolver_id in &self.flaw_resolvers[*flw_id] {
                 let resolver_cost = self.compute_resolver_cost(resolver_id);
                 if resolver_cost < min_cost {
                     min_cost = resolver_cost;
@@ -263,25 +265,26 @@ impl Graph {
         }
     }
 
-    /// Registers a new resolver in the graph. `rho`, `status` and `cost` must already be set up in the SAT/theory solver by the caller.
-    pub fn add_resolver(&mut self, mut res: Box<dyn Resolver>, rho: Lit, status: Option<bool>, cost: DlVar) -> ResolverId {
+    /// Registers a new resolver for the currently checked-out flaw (`c_flaw`).
+    /// `rho`, `status`, and `cost` must already be set up in the SAT/theory solver by the caller.
+    pub fn add_resolver(&mut self, res: Box<dyn Resolver>, rho: Lit, status: Option<bool>, cost: DlVar) -> ResolverId {
+        let (flaw_id, _) = self.c_flaw.expect("Cannot add a resolver when no flaw is checked out");
         let r_id = ResolverId(self.resolvers.len());
-        trace!("Adding resolver: {} ({}) for flaw {}", r_id, rho, res.flaw());
-        res.set_id(r_id);
+        trace!("Adding resolver: {} ({}) for flaw {}", r_id, rho, flaw_id);
 
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::NewResolver {
             resolver_id: r_id,
-            flaw_id: res.flaw(),
+            flaw_id,
             rho: rho.to_string(),
             status,
             intrinsic_cost: res.intrinsic_cost().to_f64(),
-            preconditions: res.preconditions().to_vec(),
+            preconditions: Vec::new(),
             data: res.to_json(),
         });
 
-        let flaw_id = res.flaw();
         self.resolvers.push(Some(res));
+        self.flaw_resolvers[*flaw_id].push(r_id);
         self.lit_to_resolver.entry(rho).or_default().push(r_id);
         self.resolver_status.push(status);
         if status == Some(true) {
@@ -292,12 +295,26 @@ impl Graph {
         }
         self.resolver_rho.push(rho);
         self.resolver_cost.push(cost);
+        self.resolver_flaw.push(flaw_id);
+        self.resolver_preconditions.push(Vec::new());
 
         r_id
     }
 
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
         self.resolver_rho[*res_id]
+    }
+
+    pub(super) fn resolver(&self, res_id: ResolverId) -> Option<&dyn Resolver> {
+        self.resolvers[*res_id].as_deref()
+    }
+
+    pub(super) fn resolver_flaw(&self, res_id: ResolverId) -> FlawId {
+        self.resolver_flaw[*res_id]
+    }
+
+    pub(super) fn resolver_preconditions(&self, res_id: ResolverId) -> &[FlawId] {
+        &self.resolver_preconditions[*res_id]
     }
 
     pub(super) fn resolvers_for_lit(&self, lit: Lit) -> Option<&[ResolverId]> {
@@ -321,13 +338,14 @@ impl Graph {
         self.resolvers[*res_id].take()
     }
 
-    pub(super) fn return_resolver(&mut self, mut res: Box<dyn Resolver>) {
+    pub(super) fn return_resolver(&mut self, res: Box<dyn Resolver>) {
+        let (id, _) = self.c_res.take().expect("A resolver must be checked out when calling return_resolver");
         for pre in self.c_preconditions.drain(..) {
-            res.add_precondition(pre);
+            if !self.resolver_preconditions[*id].contains(&pre) {
+                self.resolver_preconditions[*id].push(pre);
+            }
         }
-        let id = res.id();
         self.resolvers[*id] = Some(res);
-        self.c_res.take();
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
@@ -337,7 +355,9 @@ impl Graph {
     pub(super) fn add_causal_link(&mut self, flw_id: FlawId) -> Result<(Lit, Lit), SolverError> {
         let phi = self.flaw_phi[*flw_id];
         let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError(String::from("No current resolver to add causal link from")))?;
-        self.flaws[*flw_id].as_mut().ok_or(SolverError::RuntimeError(format!("Flaw {} not found", flw_id)))?.add_required_by(res_id);
+        if !self.flaw_required_by[*flw_id].contains(&res_id) {
+            self.flaw_required_by[*flw_id].push(res_id);
+        }
         self.c_preconditions.push(flw_id);
 
         #[cfg(feature = "server")]
@@ -346,14 +366,34 @@ impl Graph {
         Ok((rho, phi))
     }
 
+    /// Links `flw_id` as a precondition of `res_id` directly (used when attaching a `ResidualFlaw`).
+    pub(super) fn add_precondition_to_resolver(&mut self, res_id: ResolverId, flw_id: FlawId) {
+        if !self.resolver_preconditions[*res_id].contains(&flw_id) {
+            self.resolver_preconditions[*res_id].push(flw_id);
+        }
+        if !self.flaw_required_by[*flw_id].contains(&res_id) {
+            self.flaw_required_by[*flw_id].push(res_id);
+        }
+    }
+
+    /// Removes `flw_id` from the unexpanded flaw queue (used when expanding a `ResidualFlaw` immediately).
+    pub(super) fn remove_from_flaw_q(&mut self, flw_id: FlawId) {
+        self.flaw_q.retain(|&id| id != flw_id);
+    }
+
+    /// Records a `(cause_res, target_flaw, excluded_res)` tuple to avoid creating duplicate residual flaws.
+    pub(super) fn register_residual(&mut self, cause_res: ResolverId, target_flaw: FlawId, excluded_res: ResolverId) -> bool {
+        self.created_residuals.insert((cause_res, target_flaw, excluded_res))
+    }
+
     fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {
         if self.resolver_status[*res_id] == Some(false) {
             f64::INFINITY
         } else {
             #[cfg(feature = "h_add")]
-            let precondition_cost: f64 = self.resolvers[*res_id].as_ref().expect("Resolver should exist").preconditions().iter().map(|&f_id| self.h_flaw[*f_id]).sum();
+            let precondition_cost: f64 = self.resolver_preconditions[*res_id].iter().map(|&f_id| self.h_flaw[*f_id]).sum();
             #[cfg(feature = "h_max")]
-            let precondition_cost: f64 = self.resolvers[*res_id].as_ref().expect("Resolver should exist").preconditions().iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
+            let precondition_cost: f64 = self.resolver_preconditions[*res_id].iter().fold(0.0_f64, |acc, &f_id| acc.max(self.h_flaw[*f_id]));
 
             self.resolvers[*res_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
         }
@@ -391,8 +431,7 @@ impl Graph {
         let mut best_res_id = None;
         let mut best_res_cost = f64::INFINITY;
 
-        let flaw = self.flaws[**best_flaw_id].as_ref().unwrap();
-        for &r_id in flaw.resolvers().iter() {
+        for &r_id in &self.flaw_resolvers[**best_flaw_id] {
             if self.resolver_status[*r_id] == Some(false) {
                 continue;
             }
@@ -410,6 +449,14 @@ impl Graph {
     }
 
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
+        let mut to_keep = Vec::new();
+        for &f_id in &self.flaw_q {
+            if !self.is_unreachable(f_id) {
+                to_keep.push(f_id);
+            }
+        }
+        self.flaw_q = VecDeque::from(to_keep);
+
         if self.flaw_q.is_empty() {
             return None;
         }
@@ -439,16 +486,21 @@ impl Graph {
         self.flaw_q.remove(best_idx)
     }
 
+    /// Returns true if the flaw is already false or all resolvers requiring it are false.
+    fn is_unreachable(&self, flw_id: FlawId) -> bool {
+        if self.flaw_status[*flw_id] == Some(false) {
+            return true;
+        }
+        let req = &self.flaw_required_by[*flw_id];
+        !req.is_empty() && req.iter().all(|&r_id| self.resolver_status[*r_id] == Some(false))
+    }
+
     fn has_finite_cost_ancestor(&self, target: FlawId) -> bool {
         let mut queue = Vec::new();
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
 
-        if let Some(flw) = self.flaws[*target].as_ref() {
-            for &res_id in flw.causes().iter() {
-                if let Some(res) = self.resolvers[*res_id].as_ref() {
-                    queue.push(res.flaw());
-                }
-            }
+        for &res_id in &self.flaw_causes[*target] {
+            queue.push(self.resolver_flaw[*res_id]);
         }
 
         while let Some(f_id) = queue.pop() {
@@ -460,12 +512,8 @@ impl Graph {
                 return true;
             }
 
-            if let Some(flw) = self.flaws[*f_id].as_ref() {
-                for res_id in flw.causes() {
-                    if let Some(res) = self.resolvers[**res_id].as_ref() {
-                        queue.push(res.flaw());
-                    }
-                }
+            for &res_id in &self.flaw_causes[*f_id] {
+                queue.push(self.resolver_flaw[*res_id]);
             }
         }
 
@@ -484,7 +532,7 @@ impl Graph {
                     self.flaw_status[*flw_id] = Some(true);
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
-                    if !self.flaws[*flw_id].as_ref().is_some_and(|f| f.resolvers().iter().any(|r| self.resolver_status[**r] == Some(true))) {
+                    if !self.flaw_resolvers[*flw_id].iter().any(|&r| self.resolver_status[*r] == Some(true)) {
                         self.agenda.insert(flw_id);
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                         #[cfg(feature = "server")]
@@ -505,7 +553,7 @@ impl Graph {
             if let Some(res_ids) = self.lit_to_resolver.get(&lit) {
                 for &res_id in res_ids {
                     self.resolver_status[*res_id] = Some(true);
-                    let flaw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
+                    let flaw_id = self.resolver_flaw[*res_id];
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
                     self.agenda.remove(&flaw_id);
@@ -519,7 +567,7 @@ impl Graph {
                     self.resolver_status[*res_id] = Some(false);
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(false) });
-                    affected_flaws.push(self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw());
+                    affected_flaws.push(self.resolver_flaw[*res_id]);
                 }
             }
         }
@@ -580,8 +628,8 @@ impl Graph {
                     self.resolver_status[*res_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
-                    let flw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
-                    if self.flaw_status[*flw_id] == Some(true) && !self.flaws[*flw_id].as_ref().is_some_and(|f| f.resolvers().iter().any(|r| self.resolver_status[**r] == Some(true))) {
+                    let flw_id = self.resolver_flaw[*res_id];
+                    if self.flaw_status[*flw_id] == Some(true) && !self.flaw_resolvers[*flw_id].iter().any(|&r| self.resolver_status[*r] == Some(true)) {
                         self.agenda.insert(flw_id);
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                         #[cfg(feature = "server")]
@@ -622,8 +670,8 @@ impl Graph {
                 #[cfg(feature = "server")]
                 let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id: f_id, cost: c_cost });
 
-                for &r_id in self.flaws[*f_id].as_ref().expect("Flaw should exist").required_by().iter() {
-                    let parent_flaw_id = self.resolvers[*r_id].as_ref().expect("Resolver should exist").flaw();
+                for &r_id in &self.flaw_required_by[*f_id] {
+                    let parent_flaw_id = self.resolver_flaw[*r_id];
                     if !in_queue[*parent_flaw_id] {
                         queue.push_back(parent_flaw_id);
                         in_queue[*parent_flaw_id] = true;
@@ -637,28 +685,46 @@ impl Graph {
         !self.flaw_q.contains(&flw_id)
     }
 
-    pub(super) fn can_unify(&self, causes: &[ResolverId], target: FlawId) -> bool {
-        let mut queue = Vec::new();
-        for &res_id in causes {
-            let flw_id = self.resolvers[*res_id].as_ref().expect("Resolver should exist").flaw();
-            if flw_id == target {
-                return false;
-            }
-            queue.push(flw_id);
-        }
-        let mut visited = std::collections::HashSet::new();
+    /// Checks whether `source_flaw` can unify with `target` without creating a causal cycle.
+    pub(super) fn can_unify(&self, source_flaw: FlawId, target: FlawId) -> bool {
+        let mut queue = vec![source_flaw];
+        let mut visited = HashSet::new();
 
         while let Some(f_id) = queue.pop() {
+            if f_id == target {
+                return false;
+            }
             if !visited.insert(f_id) {
                 continue;
             }
 
-            for &r_id in self.flaws[*f_id].as_ref().expect("Flaw should exist").causes().iter() {
-                let flw_id = self.resolvers[*r_id].as_ref().expect("Resolver should exist").flaw();
-                if flw_id == target {
+            for &r_id in &self.flaw_causes[*f_id] {
+                let parent_flaw = self.resolver_flaw[*r_id];
+                if parent_flaw == target {
                     return false;
                 }
-                queue.push(flw_id);
+                queue.push(parent_flaw);
+            }
+        }
+
+        true
+    }
+
+    /// Checks whether `source_flaw` can depend on `targets` (via `flaw_required_by`) without creating a cycle.
+    pub(super) fn can_depend_on(&self, source_flaw: FlawId, targets: &[FlawId]) -> bool {
+        let mut queue = vec![source_flaw];
+        let mut visited = HashSet::new();
+
+        while let Some(f_id) = queue.pop() {
+            if targets.contains(&f_id) {
+                return false;
+            }
+            if !visited.insert(f_id) {
+                continue;
+            }
+
+            for &r_id in &self.flaw_required_by[*f_id] {
+                queue.push(self.resolver_flaw[*r_id]);
             }
         }
 

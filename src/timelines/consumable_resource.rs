@@ -16,7 +16,7 @@ use tracing::trace;
 
 use crate::{
     SolverError, SolverState,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    graph::{Flaw, Resolver, ResolverId},
     inf_rat_to_json,
     objects::{ArithVar, EnumVar},
     timelines::{Timeline, get_atom_amount, get_atom_vars},
@@ -229,8 +229,8 @@ impl Class for ConsumableResource {
 }
 
 impl Timeline for ConsumableResource {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
-        let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<(Vec<ResolverId>, Box<dyn Flaw>)>, SolverError> {
+        let mut flaws: Vec<(Vec<ResolverId>, Box<dyn Flaw>)> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported: HashSet<(Kind, BTreeSet<AtomId>)> = HashSet::new();
 
@@ -308,11 +308,10 @@ impl Timeline for ConsumableResource {
 
                             let mut causes = Vec::new();
                             for &atom_id in past.iter().chain(future.iter()) {
-                                if let Some(flaw) = graph.flaw(*atom_flaw.get(*atom_id).expect("Atom should have an associated flaw")) {
-                                    causes.extend(flaw.causes());
-                                }
+                                let flw_id = *atom_flaw.get(*atom_id).expect("Atom should have an associated flaw");
+                                causes.extend_from_slice(graph.flaw_causes(flw_id));
                             }
-                            flaws.push(Box::new(LevelFlaw::new(kind, causes, *instance_id, past, future)));
+                            flaws.push((causes, Box::new(LevelFlaw::new(kind, *instance_id, past, future))));
                         }
                     }
                 }
@@ -451,38 +450,24 @@ impl fmt::Display for Kind {
 }
 
 struct LevelFlaw {
-    id: FlawId,
-
     kind: Kind,
-    causes: Vec<ResolverId>,
-    resolvers: Vec<ResolverId>,
-
     instance: ObjectId,
     past: BTreeSet<AtomId>,
     future: BTreeSet<AtomId>,
 }
 
 impl LevelFlaw {
-    fn new(kind: Kind, causes: Vec<ResolverId>, instance: ObjectId, past: BTreeSet<AtomId>, future: BTreeSet<AtomId>) -> Self {
-        Self { id: FlawId::default(), kind, causes, resolvers: Vec::new(), instance, past, future }
+    fn new(kind: Kind, instance: ObjectId, past: BTreeSet<AtomId>, future: BTreeSet<AtomId>) -> Self {
+        Self { kind, instance, past, future }
     }
 }
 
 impl Flaw for LevelFlaw {
-    fn id(&self) -> FlawId {
-        self.id
-    }
-    fn set_id(&mut self, id: FlawId) {
-        self.id = id;
-    }
-    fn causes(&self) -> &Vec<ResolverId> {
-        &self.causes
-    }
-
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        trace!("Expanding {} flaw {} with atoms {}", self.kind, self.id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        trace!("Expanding {} flaw {} with atoms {}", self.kind, flw_id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
 
         for &atom_id in &self.past {
             let tau = {
@@ -493,7 +478,7 @@ impl Flaw for LevelFlaw {
                 let var = var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !var.eq(*self.instance as i32))?;
                 if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), displace)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
                 }
             }
         }
@@ -504,16 +489,12 @@ impl Flaw for LevelFlaw {
                 let (past_start, _) = get_atom_vars(slv, past_id);
                 let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
                 if smt.get_lit_val_and_level(order) != Some((false, 0)) {
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), order)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(Order), order)?;
                 }
             }
         }
 
         Ok(())
-    }
-
-    fn resolvers(&self) -> Vec<ResolverId> {
-        self.resolvers.clone()
     }
 
     fn to_json(&self) -> Value {
@@ -525,32 +506,9 @@ impl Flaw for LevelFlaw {
     }
 }
 
-struct Order {
-    id: ResolverId,
-    flaw: FlawId,
-}
-
-impl Order {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
-    }
-}
+struct Order;
 
 impl Resolver for Order {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
-        Ok(())
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "anticipate"
@@ -558,32 +516,9 @@ impl Resolver for Order {
     }
 }
 
-struct Displace {
-    id: ResolverId,
-    flaw: FlawId,
-}
-
-impl Displace {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
-    }
-}
+struct Displace;
 
 impl Resolver for Displace {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
-        Ok(())
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "displace"

@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
+    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw, residual_flaw::ResidualFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource},
@@ -18,7 +18,7 @@ use semitone::{
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     rc::{Rc, Weak},
     str::FromStr,
 };
@@ -109,34 +109,10 @@ impl SolverState {
                             graph.cancel_until(0, vars_to_undo.as_slice());
                             graph.refresh_costs();
                         }
+
                         trace!("Expanding graph...");
-                        let (mut flaw, flw_id) = {
-                            let mut graph = self.graph.borrow_mut();
-                            let flw_id = graph.pop_flaw().ok_or(SolverError::Inconsistent)?;
-                            (graph.take_flaw(flw_id).expect("Flaw should exist in graph"), flw_id)
-                        };
-
-                        flaw.expand(self)?;
-                        let resolvers = flaw.resolvers();
-
-                        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ) (solving the flaw implies applying at least one of its resolvers)
-                        let mut clause = Vec::with_capacity(resolvers.len() + 1);
-                        clause.push(!self.graph.borrow().phi(flw_id));
-                        for res_id in resolvers {
-                            clause.push(self.graph.borrow().rho(res_id));
-                            let mut resolver = self.graph.borrow_mut().take_resolver(res_id).expect("Resolver should exist in graph");
-                            resolver.apply(self)?;
-                            self.graph.borrow_mut().return_resolver(resolver);
-                        }
-                        {
-                            let mut smt = self.smt.borrow_mut();
-                            let mut graph = self.graph.borrow_mut();
-                            self.add_clause(&mut smt, &mut graph, clause)?;
-                        }
-
-                        let mut graph = self.graph.borrow_mut();
-                        graph.return_flaw(flaw);
-                        graph.propagate_costs(&[flw_id]);
+                        let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
+                        self.expand_flaw(flw_id)?;
                         continue;
                     } else {
                         trace!("Picking branching literal...");
@@ -154,8 +130,8 @@ impl SolverState {
                                 trace!("Extracted {} new flaws from timelines", extracted_flaws.len());
                                 let mut graph = self.graph.borrow_mut();
                                 let mut smt = self.smt.borrow_mut();
-                                for flaw in extracted_flaws {
-                                    self.add_flaw(&mut smt, &mut graph, flaw)?;
+                                for (causes, flaw) in extracted_flaws {
+                                    self.add_flaw(&mut smt, &mut graph, causes, flaw)?;
                                 }
                                 if self.notified_len.get() > smt.current_trail_len() {
                                     let new_literals = &smt.get_trail_delta(self.notified_len.get()).to_vec();
@@ -171,10 +147,21 @@ impl SolverState {
                     }
                 }
                 Err((bt_level, lemma)) => {
-                    let mut smt = self.smt.borrow_mut();
-                    let mut graph = self.graph.borrow_mut();
-                    if !self.backtrack_and_learn(&mut smt, &mut graph, bt_level, lemma) {
-                        return Err(SolverError::Inconsistent);
+                    let mutex_resolvers = {
+                        let mut smt = self.smt.borrow_mut();
+                        let mut graph = self.graph.borrow_mut();
+                        let mutex_resolvers = self.extract_conflicting_resolvers(&smt, &graph, &lemma);
+                        if !self.backtrack_and_learn(&mut smt, &mut graph, bt_level, lemma) {
+                            return Err(SolverError::Inconsistent);
+                        }
+                        mutex_resolvers
+                    };
+
+                    if let Some(resolvers) = mutex_resolvers {
+                        trace!("Conflicting resolvers: [{}]", resolvers.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "));
+                        if resolvers.len() == 2 {
+                            self.add_mutex_residuals(resolvers[0], resolvers[1])?;
+                        }
                     }
                 }
             }
@@ -182,24 +169,114 @@ impl SolverState {
         Ok(())
     }
 
-    /// Backtracks `smt` and `graph` to `bt_level` and learns `lemma`.
-    /// Returns `false` if the conflict is at the root level and cannot be recovered from.
-    fn backtrack_and_learn(&self, smt: &mut SeMiTONE, graph: &mut Graph, bt_level: usize, lemma: Vec<Lit>) -> bool {
-        if smt.decision_level() == 0 {
-            return false;
+    /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.
+    fn expand_flaw(&self, flw_id: FlawId) -> Result<(), SolverError> {
+        let mut flaw = self.graph.borrow_mut().take_flaw(flw_id).expect("Flaw should exist in graph");
+        flaw.expand(self)?;
+        let resolvers = self.graph.borrow().flaw_resolvers(flw_id).to_vec();
+
+        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ) (solving the flaw implies applying at least one of its resolvers)
+        let mut clause = Vec::with_capacity(resolvers.len() + 1);
+        clause.push(!self.graph.borrow().phi(flw_id));
+        for res_id in resolvers {
+            clause.push(self.graph.borrow().rho(res_id));
+            let mut resolver = self.graph.borrow_mut().take_resolver(res_id).expect("Resolver should exist in graph");
+            resolver.apply(self)?;
+            self.graph.borrow_mut().return_resolver(resolver);
         }
-        if let Some(mutex_resolvers) = self.extract_conflicting_resolvers(smt, graph, &lemma) {
-            trace!("Conflicting resolvers: [{}]", mutex_resolvers.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "));
+        {
+            let mut smt = self.smt.borrow_mut();
+            let mut graph = self.graph.borrow_mut();
+            self.add_clause(&mut smt, &mut graph, clause)?;
         }
-        let vars_to_undo = smt.cancel_until(bt_level);
-        self.notified_len.set(smt.current_trail_len());
-        graph.cancel_until(bt_level, vars_to_undo.as_slice());
-        smt.add_clause(lemma).is_ok()
+
+        let mut graph = self.graph.borrow_mut();
+        graph.return_flaw(flaw);
+        graph.propagate_costs(&[flw_id]);
+        Ok(())
+    }
+
+    /// Builds residual flaws in both directions (when acyclic) for a pair of mutually exclusive resolvers.
+    fn add_mutex_residuals(&self, r1: ResolverId, r2: ResolverId) -> Result<(), SolverError> {
+        self.try_add_residual_for_pair(r1, r2)?;
+        self.try_add_residual_for_pair(r2, r1)?;
+        Ok(())
+    }
+
+    /// Attaches `f2 \ {r2}` as a precondition of `r1`.
+    fn try_add_residual_for_pair(&self, r1: ResolverId, r2: ResolverId) -> Result<(), SolverError> {
+        let (f1, f2, allowed_resolvers, causes) = {
+            let graph = self.graph.borrow();
+            let smt = self.smt.borrow();
+
+            if smt.get_lit_val_and_level(graph.rho(r1)) == Some((false, 0)) || smt.get_lit_val_and_level(graph.rho(r2)) == Some((false, 0)) {
+                return Ok(());
+            }
+
+            let f1 = graph.resolver_flaw(r1);
+            let f2 = graph.resolver_flaw(r2);
+            if f1 == f2 || !graph.is_expanded(f2) {
+                return Ok(());
+            }
+
+            let allowed: Vec<ResolverId> = graph.flaw_resolvers(f2).iter().copied().filter(|&r| r != r2 && smt.get_lit_val_and_level(graph.rho(r)) != Some((false, 0))).collect();
+
+            let mut target_preconditions = vec![f2];
+            for &r in &allowed {
+                for &pre in graph.resolver_preconditions(r) {
+                    if !target_preconditions.contains(&pre) {
+                        target_preconditions.push(pre);
+                    }
+                }
+            }
+
+            if !graph.can_depend_on(f1, &target_preconditions) {
+                return Ok(());
+            }
+
+            let mut causes = vec![r1];
+            for &c in graph.flaw_causes(f2) {
+                if smt.get_lit_val_and_level(graph.rho(c)) != Some((true, 0)) && !causes.contains(&c) {
+                    causes.push(c);
+                }
+            }
+
+            (f1, f2, allowed, causes)
+        };
+
+        // Degenerate case: r2 was the only remaining resolver for f2 -> (r1 ∧ causes(f2)) → ¬ϕ2
+        if allowed_resolvers.is_empty() {
+            let mut smt = self.smt.borrow_mut();
+            let mut graph = self.graph.borrow_mut();
+            let mut clause: Vec<Lit> = causes.iter().map(|&c| !graph.rho(c)).collect();
+            clause.push(!graph.phi(f2));
+            return self.add_clause(&mut smt, &mut graph, clause);
+        }
+
+        if !self.graph.borrow_mut().register_residual(r1, f2, r2) {
+            return Ok(());
+        }
+
+        trace!("Creating ResidualFlaw for {} excluding {} as precondition of {}", f2, r2, r1);
+
+        let res_flw_id = {
+            let mut smt = self.smt.borrow_mut();
+            let mut graph = self.graph.borrow_mut();
+            let res_flw = Box::new(ResidualFlaw::new(f2, r2, allowed_resolvers));
+            let flw_id = self.add_flaw(&mut smt, &mut graph, causes, res_flw)?;
+            graph.remove_from_flaw_q(flw_id);
+            graph.add_precondition_to_resolver(r1, flw_id);
+            flw_id
+        };
+
+        self.expand_flaw(res_flw_id)?;
+        self.graph.borrow_mut().propagate_costs(&[f1]);
+        Ok(())
     }
 
     fn extract_conflicting_resolvers(&self, smt: &SeMiTONE, graph: &Graph, lemma: &[Lit]) -> Option<Vec<ResolverId>> {
-        let mut queue: std::collections::VecDeque<Lit> = lemma.iter().map(|&l| !l).collect();
-        let mut visited: std::collections::HashSet<Lit> = queue.iter().copied().collect();
+        let mut queue: VecDeque<Lit> = lemma.iter().map(|&l| !l).collect();
+        let mut visited: HashSet<Lit> = queue.iter().copied().collect();
         let mut resolvers = Vec::new();
 
         while let Some(p) = queue.pop_front() {
@@ -208,10 +285,11 @@ impl SolverState {
             }
 
             if let Some(res_ids) = graph.resolvers_for_lit(p) {
-                for &r_id in res_ids {
-                    if !resolvers.contains(&r_id) {
-                        resolvers.push(r_id);
-                    }
+                // Take the canonical (first) resolver associated with `p`
+                if let Some(&r_id) = res_ids.first()
+                    && !resolvers.contains(&r_id)
+                {
+                    resolvers.push(r_id);
                 }
                 continue;
             }
@@ -224,12 +302,24 @@ impl SolverState {
                     }
                 }
             } else {
-                // `p` is a decision literal, not a resolver, so we cannot extract any more resolvers from the conflict
+                // `p` is a decision literal that is not a resolver (e.g., `!ϕ` on an unexpanded flaw)
                 return None;
             }
         }
 
         Some(resolvers)
+    }
+
+    /// Backtracks `smt` and `graph` to `bt_level` and learns `lemma`.
+    /// Returns `false` if the conflict is at the root level and cannot be recovered from.
+    fn backtrack_and_learn(&self, smt: &mut SeMiTONE, graph: &mut Graph, bt_level: usize, lemma: Vec<Lit>) -> bool {
+        if smt.decision_level() == 0 {
+            return false;
+        }
+        let vars_to_undo = smt.cancel_until(bt_level);
+        self.notified_len.set(smt.current_trail_len());
+        graph.cancel_until(bt_level, vars_to_undo.as_slice());
+        smt.add_clause(lemma).is_ok()
     }
 
     /// Notifies `graph` of any SAT literals assigned since the last sync (e.g. forced by a clause
@@ -286,14 +376,13 @@ impl SolverState {
 
     /// Registers a new flaw: allocates its ϕ literal (and the causes → ϕ clause) in `smt`, then
     /// delegates bookkeeping to `graph`. This is the only place where a flaw's SAT encoding is created.
-    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
-        let causes = flw.causes();
+    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, causes: Vec<ResolverId>, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
         let phi = if causes.is_empty() {
             Lit::TRUE
         } else {
             let phi = smt.new_lit();
             // (ρ₁ ∧ ρ₂ ∧ ... ∧ ρₙ) → ϕ (the flaw is active if all its causes are active)
-            let mut clause: Vec<Lit> = graph.resolver_rhos(causes).into_iter().map(|r| !r).collect();
+            let mut clause: Vec<Lit> = graph.resolver_rhos(&causes).into_iter().map(|r| !r).collect();
             clause.push(phi);
             self.add_clause(smt, graph, clause)?;
             phi
@@ -301,30 +390,29 @@ impl SolverState {
         let status = smt.get_lit_val(phi);
         let cost = smt.new_dl_var();
 
-        for res_id in causes {
-            let rho = graph.rho(*res_id);
-            let res_cost = graph.resolver_cost(*res_id);
+        for &res_id in &causes {
+            let rho = graph.rho(res_id);
+            let res_cost = graph.resolver_cost(res_id);
             // ρ → (cost(ρ) >= cost(ϕ)) (the flaw's cost is bounded by the cost of any of its resolvers)
             let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, cost, rug::Rational::from(0)))?;
             self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
         }
 
-        Ok(graph.add_flaw(flw, phi, status, cost))
+        Ok(graph.add_flaw(flw, causes, phi, status, cost))
     }
 
-    /// Registers a new resolver: adds its ρ → ϕ implication and DL cost constraint to `smt`, then
-    /// delegates bookkeeping to `graph`.
+    /// Registers a new resolver for the currently checked-out flaw: adds its ρ → ϕ implication
+    /// and DL cost constraint to `smt`, then delegates bookkeeping to `graph`.
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, res: Box<dyn Resolver>, rho: Lit) -> Result<ResolverId, SolverError> {
         assert!(smt.get_lit_val_and_level(rho) != Some((false, 0)), "Cannot add resolver with a false ρ");
 
-        let flaw_id = res.flaw();
-        let phi = graph.phi(flaw_id);
+        let (flaw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw when adding resolver")))?;
         // ρ → ϕ (applying the resolver implies solving the flaw)
         self.add_clause(smt, graph, vec![!rho, phi])?;
 
         let cost = smt.new_dl_var();
         let parent_cost_var = graph.flaw_cost(flaw_id);
-        // ρ → (cost(ϕ) >= cost(ρ) + intrinsic_cost(ρ)) (the flaw's cost is bounded by the cost of any of its resolvers plus the resolver's intrinsic cost)
+        // ρ → (cost(ϕ) >= cost(ρ) + intrinsic_cost(ρ))
         let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
 
@@ -341,7 +429,7 @@ impl SolverState {
         let (res_id, _) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver for DL causal link")))?;
         let res_cost = graph.resolver_cost(res_id);
         let flw_cost = graph.flaw_cost(flw_id);
-        // ρ → (cost(ρ) >= cost(ϕ)) (the flaw's cost is bounded by the cost of any of its resolvers)
+        // ρ → (cost(ρ) >= cost(ϕ))
         let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, flw_cost, rug::Rational::from(0)))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
@@ -463,8 +551,8 @@ impl Core for SolverState {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
         let var = smt.new_bool();
-        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        self.add_flaw(&mut smt, &mut graph, Box::new(BoolFlaw::new(cause, var.clone()))).expect("Failed to add BoolFlaw to graph");
+        let causes = graph.current_cause();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(BoolFlaw::new(var.clone()))).expect("Failed to add BoolFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
@@ -580,16 +668,16 @@ impl Core for SolverState {
                     if let BoolExpr::Or { terms, .. } = clause.as_ref()
                         && terms.len() > 1
                     {
-                        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+                        let causes = graph.current_cause();
                         let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                        self.add_flaw(&mut smt, &mut graph, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                        self.add_flaw(&mut smt, &mut graph, causes, Box::new(ClauseFlaw::new(terms))).expect("Failed to add ClauseFlaw to graph");
                     }
                 }
             }
             BoolExpr::Or { terms, .. } if terms.len() > 1 => {
-                let cause = graph.current_resolver().map(|(res_id, _)| res_id);
+                let causes = graph.current_cause();
                 let terms = terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>();
-                self.add_flaw(&mut smt, &mut graph, Box::new(ClauseFlaw::new(cause, terms))).expect("Failed to add ClauseFlaw to graph");
+                self.add_flaw(&mut smt, &mut graph, causes, Box::new(ClauseFlaw::new(terms))).expect("Failed to add ClauseFlaw to graph");
             }
             _ => {}
         }
@@ -605,15 +693,15 @@ impl Core for SolverState {
         let mut graph = self.graph.borrow_mut();
         let domain = instances.iter().map(|id| **id as i32).collect::<Vec<_>>();
         let var = smt.new_enum(domain.clone());
-        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        self.add_flaw(&mut smt, &mut graph, Box::new(EnumFlaw::new(cause, var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
+        let causes = graph.current_cause();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(EnumFlaw::new(var.clone(), domain))).expect("Failed to add EnumFlaw to graph");
         Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
-        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        self.add_flaw(&mut smt, &mut graph, Box::new(DisjunctionFlaw::new(cause, disjunction))).expect("Failed to add DisjunctionFlaw to graph");
+        let causes = graph.current_cause();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(DisjunctionFlaw::new(disjunction))).expect("Failed to add DisjunctionFlaw to graph");
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
@@ -640,8 +728,8 @@ impl Core for SolverState {
             resolution_constraint,
         });
         self.sigma.borrow_mut().push(smt.new_bool());
-        let cause = graph.current_resolver().map(|(res_id, _)| res_id);
-        let flaw = self.add_flaw(&mut smt, &mut graph, Box::new(AtomFlaw::new(cause, atm))).expect("Failed to add AtomFlaw to graph");
+        let causes = graph.current_cause();
+        let flaw = self.add_flaw(&mut smt, &mut graph, causes, Box::new(AtomFlaw::new(atm))).expect("Failed to add AtomFlaw to graph");
         self.atom_flaw.borrow_mut().push(flaw);
         Ok(atm)
     }

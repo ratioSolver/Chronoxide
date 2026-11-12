@@ -1,6 +1,6 @@
 use crate::{
     SolverError, SolverState,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    graph::{Flaw, Resolver},
 };
 use riddle::{
     env::Env,
@@ -11,51 +11,26 @@ use serde_json::{Value, json};
 use std::{rc::Rc, str::FromStr};
 
 pub(crate) struct DisjunctionFlaw {
-    id: FlawId,
-
-    causes: Vec<ResolverId>,
-    resolvers: Vec<ResolverId>,
-
     disjunction: Disjunction,
 }
 
 impl DisjunctionFlaw {
-    pub(crate) fn new(cause: Option<ResolverId>, disjunction: Disjunction) -> Self {
-        Self {
-            id: FlawId::default(),
-            causes: cause.into_iter().collect(),
-            resolvers: Vec::with_capacity(disjunction.disjuncts.len()),
-            disjunction,
-        }
+    pub(crate) fn new(disjunction: Disjunction) -> Self {
+        Self { disjunction }
     }
 }
 
 impl Flaw for DisjunctionFlaw {
-    fn id(&self) -> FlawId {
-        self.id
-    }
-    fn set_id(&mut self, id: FlawId) {
-        self.id = id;
-    }
-    fn causes(&self) -> &Vec<ResolverId> {
-        &self.causes
-    }
-
-    fn expand(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
+    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
 
         for (disjunct, cost) in &self.disjunction.disjuncts {
             let rho = smt.new_lit();
-            let resolver_id = slv.add_resolver(&mut smt, &mut graph, Box::new(DisjunctionResolver::new(self.id, expr_to_cost(cost), self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec())), rho)?;
-            self.resolvers.push(resolver_id);
+            slv.add_resolver(&mut smt, &mut graph, Box::new(DisjunctionResolver::new(expr_to_cost(cost), self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec())), rho)?;
         }
 
         Ok(())
-    }
-
-    fn resolvers(&self) -> Vec<ResolverId> {
-        self.resolvers.clone()
     }
 
     fn to_json(&self) -> Value {
@@ -66,32 +41,19 @@ impl Flaw for DisjunctionFlaw {
 }
 
 struct DisjunctionResolver {
-    id: ResolverId,
-    flaw: FlawId,
     cost: rug::Rational,
-    preconditions: Vec<FlawId>,
     scp: Rc<dyn Scope>,
     env: Rc<dyn Env>,
     disjunct: Vec<Statement>,
 }
 
 impl DisjunctionResolver {
-    fn new(flaw: FlawId, cost: rug::Rational, scp: Rc<dyn Scope>, env: Rc<dyn Env>, disjunct: Vec<Statement>) -> Self {
-        Self { id: ResolverId::default(), flaw, cost, preconditions: vec![], scp, env, disjunct }
+    fn new(cost: rug::Rational, scp: Rc<dyn Scope>, env: Rc<dyn Env>, disjunct: Vec<Statement>) -> Self {
+        Self { cost, scp, env, disjunct }
     }
 }
 
 impl Resolver for DisjunctionResolver {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
     fn intrinsic_cost(&self) -> rug::Rational {
         self.cost.clone()
     }
@@ -102,14 +64,6 @@ impl Resolver for DisjunctionResolver {
         }
 
         Ok(())
-    }
-
-    fn preconditions(&self) -> Vec<FlawId> {
-        self.preconditions.clone()
-    }
-
-    fn add_precondition(&mut self, flaw_id: FlawId) {
-        self.preconditions.push(flaw_id);
     }
 }
 

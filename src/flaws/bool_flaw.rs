@@ -1,64 +1,42 @@
 use crate::{
-    SolverState,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    SolverError, SolverState,
+    graph::{Flaw, Resolver},
 };
 use semitone::ast::BoolExpr;
 use serde_json::{Value, json};
 use tracing::trace;
 
 pub(crate) struct BoolFlaw {
-    id: FlawId,
-
-    causes: Vec<ResolverId>,
-    resolvers: Vec<ResolverId>,
-
     expr: BoolExpr,
 }
 
 impl BoolFlaw {
-    pub(crate) fn new(cause: Option<ResolverId>, expr: BoolExpr) -> Self {
-        Self {
-            id: FlawId::default(),
-            causes: cause.into_iter().collect(),
-            resolvers: Vec::with_capacity(2),
-            expr,
-        }
+    pub(crate) fn new(expr: BoolExpr) -> Self {
+        Self { expr }
     }
 }
 
 impl Flaw for BoolFlaw {
-    fn id(&self) -> FlawId {
-        self.id
-    }
-    fn set_id(&mut self, id: FlawId) {
-        self.id = id;
-    }
-    fn causes(&self) -> &Vec<ResolverId> {
-        &self.causes
-    }
-
-    fn expand(&mut self, slv: &SolverState) -> Result<(), crate::SolverError> {
-        trace!("Expanding BoolFlaw {} with expression: {}", self.id, self.expr);
+    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        trace!("Expanding BoolFlaw {} with expression: {}", flw_id, self.expr);
+
         let expr = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
         match smt.get_lit_val_and_level(expr) {
             Some((true, 0)) => {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), expr)?);
+                slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver), expr)?;
             }
             Some((false, 0)) => {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), !expr)?);
+                slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver), !expr)?;
             }
             _ => {
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), expr)?);
-                self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver::new(self.id)), !expr)?);
+                slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver), expr)?;
+                slv.add_resolver(&mut smt, &mut graph, Box::new(BoolResolver), !expr)?;
             }
         }
         Ok(())
-    }
-
-    fn resolvers(&self) -> Vec<ResolverId> {
-        self.resolvers.clone()
     }
 
     fn to_json(&self) -> Value {
@@ -68,25 +46,6 @@ impl Flaw for BoolFlaw {
     }
 }
 
-struct BoolResolver {
-    id: ResolverId,
-    flaw: FlawId,
-}
+struct BoolResolver;
 
-impl BoolResolver {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
-    }
-}
-
-impl Resolver for BoolResolver {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-}
+impl Resolver for BoolResolver {}

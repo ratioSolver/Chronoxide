@@ -165,8 +165,8 @@ impl Class for StateVariable {
 }
 
 impl Timeline for StateVariable {
-    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<Box<dyn Flaw>>, SolverError> {
-        let mut flaws: Vec<Box<dyn Flaw>> = Vec::new();
+    fn extract_flaws(&self, slv: &SolverState) -> Result<Vec<(Vec<ResolverId>, Box<dyn Flaw>)>, SolverError> {
+        let mut flaws: Vec<(Vec<ResolverId>, Box<dyn Flaw>)> = Vec::new();
         let atoms_by_instance = self.atoms_by_instance(slv);
         let mut reported: HashSet<(AtomId, AtomId)> = HashSet::new();
 
@@ -213,13 +213,9 @@ impl Timeline for StateVariable {
                         continue;
                     }
                     let mut causes = Vec::with_capacity(2);
-                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*a).expect("Atom should have an associated flaw")) {
-                        causes.extend(flaw.causes())
-                    }
-                    if let Some(flaw) = graph.flaw(*atom_flaw.get(*b).expect("Atom should have an associated flaw")) {
-                        causes.extend(flaw.causes())
-                    }
-                    flaws.push(Box::new(Peak::new(causes, a, b)));
+                    causes.extend_from_slice(graph.flaw_causes(*atom_flaw.get(*a).expect("Atom should have an associated flaw")));
+                    causes.extend_from_slice(graph.flaw_causes(*atom_flaw.get(*b).expect("Atom should have an associated flaw")));
+                    flaws.push((causes, Box::new(Peak::new(a, b))));
                 }
             }
         }
@@ -286,36 +282,22 @@ impl Timeline for StateVariable {
 }
 
 struct Peak {
-    id: FlawId,
-
-    causes: Vec<ResolverId>,
-    resolvers: Vec<ResolverId>,
-
     a: AtomId,
     b: AtomId,
 }
 
 impl Peak {
-    pub(crate) fn new(causes: Vec<ResolverId>, a: AtomId, b: AtomId) -> Self {
-        Self { id: FlawId::default(), causes, resolvers: Vec::new(), a, b }
+    pub(crate) fn new(a: AtomId, b: AtomId) -> Self {
+        Self { a, b }
     }
 }
 
 impl Flaw for Peak {
-    fn id(&self) -> FlawId {
-        self.id
-    }
-    fn set_id(&mut self, id: FlawId) {
-        self.id = id;
-    }
-    fn causes(&self) -> &Vec<ResolverId> {
-        &self.causes
-    }
-
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        trace!("Expanding Peak flaw {} between atoms {} and {}", self.id, self.a, self.b);
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
+        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        trace!("Expanding Peak flaw {} between atoms {} and {}", flw_id, self.a, self.b);
 
         let (a_tau, b_tau) = {
             let a_atom = slv.get_atom(self.a).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.a)))?;
@@ -327,14 +309,14 @@ impl Flaw for Peak {
                 let a_var = a_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !a_var.eq(*b_sv as i32))?;
                 if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), displace)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
                 }
             }
             (Slot::ObjectRef(a_sv), Slot::Primitive(b_var)) => {
                 let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !b_var.eq(*a_sv as i32))?;
                 if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), displace)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
                 }
             }
             (Slot::Primitive(a_var), Slot::Primitive(b_var)) => {
@@ -342,7 +324,7 @@ impl Flaw for Peak {
                 let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !a_var.eq(b_var))?;
                 if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Displace::new(self.id)), displace)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
                 }
             }
             _ => {}
@@ -353,18 +335,14 @@ impl Flaw for Peak {
 
         let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
         if smt.get_lit_val_and_level(a_before_b) != Some((false, 0)) {
-            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), a_before_b)?);
+            slv.add_resolver(&mut smt, &mut graph, Box::new(Order), a_before_b)?;
         }
         let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
         if smt.get_lit_val_and_level(b_before_a) != Some((false, 0)) {
-            self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(Order::new(self.id)), b_before_a)?);
+            slv.add_resolver(&mut smt, &mut graph, Box::new(Order), b_before_a)?;
         }
 
         Ok(())
-    }
-
-    fn resolvers(&self) -> Vec<ResolverId> {
-        self.resolvers.clone()
     }
 
     fn to_json(&self) -> Value {
@@ -375,32 +353,9 @@ impl Flaw for Peak {
     }
 }
 
-struct Order {
-    id: ResolverId,
-    flaw: FlawId,
-}
-
-impl Order {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
-    }
-}
+struct Order;
 
 impl Resolver for Order {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
-        Ok(())
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "order"
@@ -408,32 +363,9 @@ impl Resolver for Order {
     }
 }
 
-struct Displace {
-    id: ResolverId,
-    flaw: FlawId,
-}
-
-impl Displace {
-    fn new(flaw: FlawId) -> Self {
-        Self { id: ResolverId::default(), flaw }
-    }
-}
+struct Displace;
 
 impl Resolver for Displace {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
-        Ok(())
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "displace"

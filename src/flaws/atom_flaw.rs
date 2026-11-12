@@ -1,6 +1,6 @@
 use crate::{
     SolverError, SolverState, eq_to_bool,
-    graph::{Flaw, FlawId, Resolver, ResolverId},
+    graph::{Flaw, Resolver},
 };
 use riddle::{
     RiddleError,
@@ -18,51 +18,27 @@ use std::{collections::HashSet, rc::Rc};
 use tracing::trace;
 
 pub(crate) struct AtomFlaw {
-    id: FlawId,
-
-    causes: Vec<ResolverId>,
-    required_by: Vec<ResolverId>,
-    resolvers: Vec<ResolverId>,
-
     atom: AtomId,
 }
 
 impl AtomFlaw {
-    pub(crate) fn new(cause: Option<ResolverId>, atom: AtomId) -> Self {
-        Self {
-            id: FlawId::default(),
-            causes: cause.into_iter().collect(),
-            required_by: cause.into_iter().collect(),
-            resolvers: Vec::new(),
-            atom,
-        }
+    pub(crate) fn new(atom: AtomId) -> Self {
+        Self { atom }
     }
 }
 
 impl Flaw for AtomFlaw {
-    fn id(&self) -> FlawId {
-        self.id
-    }
-    fn set_id(&mut self, id: FlawId) {
-        self.id = id;
-    }
-    fn causes(&self) -> &Vec<ResolverId> {
-        &self.causes
-    }
-
-    fn required_by(&self) -> &Vec<ResolverId> {
-        &self.required_by
-    }
-    fn add_required_by(&mut self, res_id: ResolverId) {
-        self.required_by.push(res_id);
-    }
-
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
         let predicate = atom.predicate();
+
+        let mut graph = slv.graph.borrow_mut();
+        let mut smt = slv.smt.borrow_mut();
+        let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+
         trace!(
             "Expanding AtomFlaw {} for {} {} with predicate {}",
-            self.id,
+            flw_id,
             match atom.kind() {
                 AtomKind::Fact => "fact",
                 AtomKind::Goal => "goal",
@@ -71,8 +47,6 @@ impl Flaw for AtomFlaw {
             predicate.name()
         );
 
-        let mut graph = slv.graph.borrow_mut();
-        let mut smt = slv.smt.borrow_mut();
         let sigma = slv.sigma.borrow();
 
         if atom.resolution_constraint() != ResolutionConstraint::CannotUnify {
@@ -86,7 +60,7 @@ impl Flaw for AtomFlaw {
                     trace!("Skipping unification with {} for atom {} because target flaw is not expanded", target, self.atom);
                     continue;
                 }
-                if !graph.can_unify(self.causes().as_slice(), target_flaw) {
+                if !graph.can_unify(flw_id, target_flaw) {
                     trace!("Skipping unification with {} for atom {} because it would create a cycle", target, self.atom);
                     continue;
                 }
@@ -96,7 +70,7 @@ impl Flaw for AtomFlaw {
                 let rho = slv.track_expr(&mut smt, &mut graph, And(unif_eqs))?;
                 if smt.get_lit_val_and_level(rho) != Some((false, 0)) {
                     trace!("{} can unify with {}", self.atom, target);
-                    self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(UnificationResolver::new(self.id, self.atom, target)), rho)?);
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(UnificationResolver::new(self.atom, target)), rho)?;
                 } else {
                     trace!("Skipping unification with {} for atom {} due to unsatisfiable unification equations", target, self.atom);
                 }
@@ -104,34 +78,18 @@ impl Flaw for AtomFlaw {
         }
 
         if atom.resolution_constraint() != ResolutionConstraint::MustUnify {
-            if self.resolvers.is_empty() {
-                let (_, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
-                match atom.kind() {
-                    AtomKind::Fact => {
-                        self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.id, self.atom)), phi)?);
-                    }
-                    AtomKind::Goal => {
-                        self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.id, self.atom)), phi)?);
-                    }
+            let rho = if graph.flaw_resolvers(flw_id).is_empty() { phi } else { smt.new_lit() };
+            match atom.kind() {
+                AtomKind::Fact => {
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.atom)), rho)?;
                 }
-            } else {
-                let rho = smt.new_lit();
-                match atom.kind() {
-                    AtomKind::Fact => {
-                        self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.id, self.atom)), rho)?);
-                    }
-                    AtomKind::Goal => {
-                        self.resolvers.push(slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.id, self.atom)), rho)?);
-                    }
+                AtomKind::Goal => {
+                    slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.atom)), rho)?;
                 }
             }
         }
 
         Ok(())
-    }
-
-    fn resolvers(&self) -> Vec<ResolverId> {
-        self.resolvers.clone()
     }
 
     fn to_json(&self) -> Value {
@@ -143,29 +101,16 @@ impl Flaw for AtomFlaw {
 }
 
 struct GoalResolver {
-    id: ResolverId,
-    flaw: FlawId,
-    preconditions: Vec<FlawId>,
     atom: AtomId,
 }
 
 impl GoalResolver {
-    fn new(flaw: FlawId, atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, preconditions: vec![], atom }
+    fn new(atom: AtomId) -> Self {
+        Self { atom }
     }
 }
 
 impl Resolver for GoalResolver {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying GoalResolver for atom {}", self.atom);
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
@@ -187,14 +132,6 @@ impl Resolver for GoalResolver {
         slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }
 
-    fn preconditions(&self) -> Vec<FlawId> {
-        self.preconditions.clone()
-    }
-
-    fn add_precondition(&mut self, flaw_id: FlawId) {
-        self.preconditions.push(flaw_id);
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "goal",
@@ -204,29 +141,16 @@ impl Resolver for GoalResolver {
 }
 
 struct FactResolver {
-    id: ResolverId,
-    flaw: FlawId,
-    preconditions: Vec<FlawId>,
     atom: AtomId,
 }
 
 impl FactResolver {
-    fn new(flaw: FlawId, atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, preconditions: vec![], atom }
+    fn new(atom: AtomId) -> Self {
+        Self { atom }
     }
 }
 
 impl Resolver for FactResolver {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying FactResolver for atom {}", self.atom);
         let atom = slv.get_atom(self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found", self.atom)))?;
@@ -252,14 +176,6 @@ impl Resolver for FactResolver {
         slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
     }
 
-    fn preconditions(&self) -> Vec<FlawId> {
-        self.preconditions.clone()
-    }
-
-    fn add_precondition(&mut self, flaw_id: FlawId) {
-        self.preconditions.push(flaw_id);
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "fact",
@@ -269,30 +185,17 @@ impl Resolver for FactResolver {
 }
 
 struct UnificationResolver {
-    id: ResolverId,
-    flaw: FlawId,
-    preconditions: Vec<FlawId>,
     current_atom: AtomId,
     target_atom: AtomId,
 }
 
 impl UnificationResolver {
-    fn new(flaw: FlawId, current_atom: AtomId, target_atom: AtomId) -> Self {
-        Self { id: ResolverId::default(), flaw, preconditions: vec![], current_atom, target_atom }
+    fn new(current_atom: AtomId, target_atom: AtomId) -> Self {
+        Self { current_atom, target_atom }
     }
 }
 
 impl Resolver for UnificationResolver {
-    fn id(&self) -> ResolverId {
-        self.id
-    }
-    fn set_id(&mut self, id: ResolverId) {
-        self.id = id;
-    }
-    fn flaw(&self) -> FlawId {
-        self.flaw
-    }
-
     fn intrinsic_cost(&self) -> rug::Rational {
         rug::Rational::from(0)
     }
@@ -303,14 +206,6 @@ impl Resolver for UnificationResolver {
         let mut graph = slv.graph.borrow_mut();
         let target_flaw = slv.atom_flaw.borrow().get(*self.target_atom).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", self.target_atom)))?;
         slv.add_causal_link(&mut smt, &mut graph, target_flaw)
-    }
-
-    fn preconditions(&self) -> Vec<FlawId> {
-        self.preconditions.clone()
-    }
-
-    fn add_precondition(&mut self, flaw_id: FlawId) {
-        self.preconditions.push(flaw_id);
     }
 
     fn to_json(&self) -> Value {
