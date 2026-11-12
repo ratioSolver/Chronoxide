@@ -565,9 +565,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "riddle-lang"
-version = "0.2.25"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6353bfb11d0760cf45a8c824575c328812d3ec3b8f0992a898e9d8ef87580ce"
+checksum = "6253fefb613d60472af7185b47365399d602c17a82db356b89f4c1344e16d433"
 
 [[package]]
 name = "rug"

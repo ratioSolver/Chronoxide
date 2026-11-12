@@ -42,6 +42,7 @@ impl ConsumableResource {
                     predicates: vec![
                         PredicateDef {
                             name: String::from("Produce"),
+                            invariant: true,
                             args: vec![(vec![String::from("real")], String::from("amount"))],
                             parents: vec![vec![String::from("Interval")]],
                             statements: vec![
@@ -59,6 +60,7 @@ impl ConsumableResource {
                         },
                         PredicateDef {
                             name: String::from("Consume"),
+                            invariant: true,
                             args: vec![(vec![String::from("real")], String::from("amount"))],
                             parents: vec![vec![String::from("Interval")]],
                             statements: vec![

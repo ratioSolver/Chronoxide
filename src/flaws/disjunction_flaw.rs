@@ -3,12 +3,14 @@ use crate::{
     graph::{Flaw, Resolver},
 };
 use riddle::{
+    RiddleError,
     env::Env,
     language::{Disjunction, Expr, Statement, execute},
     scope::Scope,
 };
 use serde_json::{Value, json};
 use std::{rc::Rc, str::FromStr};
+use tracing::trace;
 
 pub(crate) struct DisjunctionFlaw {
     disjunction: Disjunction,
@@ -58,9 +60,20 @@ impl Resolver for DisjunctionResolver {
         self.cost.clone()
     }
 
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         for stmt in &self.disjunct {
-            execute(&self.scp, self.env.clone(), stmt).map_err(|e| SolverError::RuntimeError(format!("Error executing statement in disjunction resolver: {}", e)))?;
+            if let Err(e) = execute(&self.scp, self.env.clone(), stmt) {
+                return match e {
+                    RiddleError::InconsistencyError(msg) => {
+                        trace!("DisjunctionResolver inconsistency: {}", msg);
+                        let mut smt = slv.smt.borrow_mut();
+                        let mut graph = slv.graph.borrow_mut();
+                        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+                        slv.add_clause(&mut smt, &mut graph, vec![!rho])
+                    }
+                    _ => Err(SolverError::RuntimeError(format!("Error executing statement in disjunction resolver: {}", e))),
+                };
+            }
         }
 
         Ok(())

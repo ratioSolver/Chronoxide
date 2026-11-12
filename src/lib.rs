@@ -7,6 +7,7 @@ use crate::{
 use riddle::{
     RiddleError,
     core::{CommonCore, Core},
+    delegate_env, delegate_scope,
     env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
     language::{AtomKind, Disjunction, ResolutionConstraint},
     scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
@@ -516,64 +517,8 @@ impl SolverState {
     }
 }
 
-impl Scope for SolverState {
-    fn core(&self) -> Rc<dyn Core> {
-        self.slv.upgrade().expect("SolverState should never be dropped while in use")
-    }
-    fn scope(&self) -> Option<Rc<dyn Scope>> {
-        None
-    }
-
-    fn fields(&self) -> Vec<Rc<Field>> {
-        self.core.fields()
-    }
-
-    fn get_field(&self, name: &str) -> Option<Rc<Field>> {
-        self.core.get_field(name)
-    }
-
-    fn functions(&self) -> Vec<Rc<Function>> {
-        self.core.functions()
-    }
-
-    fn get_function(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Function>> {
-        self.core.get_function(name, types)
-    }
-
-    fn types(&self) -> Vec<Rc<dyn Type>> {
-        self.core.types()
-    }
-
-    fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
-        self.core.get_type(name)
-    }
-
-    fn predicates(&self) -> Vec<Rc<Predicate>> {
-        self.core.predicates()
-    }
-
-    fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
-        self.core.get_predicate(name)
-    }
-}
-
-impl Env for SolverState {
-    fn parent(&self) -> Option<Rc<dyn Env>> {
-        None
-    }
-
-    fn get_slots(&self) -> HashMap<String, Slot> {
-        self.core.get_slots()
-    }
-
-    fn get(&self, name: &str) -> Option<Slot> {
-        self.core.get(name)
-    }
-
-    fn set(&self, name: String, value: Slot) {
-        self.core.set(name, value);
-    }
-}
+delegate_scope!(SolverState, core);
+delegate_env!(SolverState, core);
 
 impl Core for SolverState {
     fn new_bool(&self, value: bool) -> Slot {

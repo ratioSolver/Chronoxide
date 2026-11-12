@@ -39,6 +39,7 @@ impl ReusableResource {
                     functions: Vec::new(),
                     predicates: vec![PredicateDef {
                         name: String::from("Use"),
+                        invariant: true,
                         args: vec![(vec![String::from("real")], String::from("amount"))],
                         parents: vec![vec![String::from("Interval")]],
                         statements: vec![
