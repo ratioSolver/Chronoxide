@@ -4,7 +4,10 @@ use riddle::{
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::rational::{InfRational, Rational};
+use semitone::{
+    Lit,
+    rational::{InfRational, Rational},
+};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -100,8 +103,9 @@ impl ConsumableResource {
         let mut atoms_by_instance: HashMap<ObjectId, (BTreeSet<AtomId>, BTreeSet<AtomId>)> = HashMap::new();
         let mut processed_classes = HashSet::new();
 
+        let graph = slv.graph.borrow();
         let smt = slv.smt.borrow();
-        let sigma = slv.sigma.borrow();
+        let atom_fg = slv.atom_fg.borrow();
         for instance_id in self.instances.borrow().iter() {
             let Some(instance) = slv.get_object(*instance_id) else {
                 continue;
@@ -111,14 +115,14 @@ impl ConsumableResource {
             }
             for pred in instance.class().predicates().iter() {
                 let is_producer = pred.name() == "Produce";
-                for atom_id in pred.atoms().iter() {
-                    let Some(atom_sigma) = sigma.get(**atom_id) else {
+                for atom_id in pred.atoms() {
+                    let Some(Some(fg_res)) = atom_fg.get(*atom_id) else {
                         continue;
                     };
-                    if smt.get_bool_val(atom_sigma) != Some(true) {
+                    if smt.get_lit_val(graph.rho(*fg_res)) != Some(true) {
                         continue;
                     }
-                    let Some(atom) = slv.get_atom(*atom_id) else {
+                    let Some(atom) = slv.get_atom(atom_id) else {
                         continue;
                     };
                     let tau = match atom.get("tau") {
@@ -311,7 +315,11 @@ impl Timeline for ConsumableResource {
                             let mut causes = Vec::new();
                             for &atom_id in past.iter().chain(future.iter()) {
                                 let flw_id = *atom_flaw.get(*atom_id).expect("Atom should have an associated flaw");
-                                causes.extend_from_slice(graph.flaw_causes(flw_id));
+                                for &c in graph.flaw_causes(flw_id) {
+                                    if !causes.contains(&c) {
+                                        causes.push(c);
+                                    }
+                                }
                             }
                             flaws.push((causes, Box::new(LevelFlaw::new(kind, *instance_id, past, future))));
                         }
@@ -468,8 +476,10 @@ impl Flaw for LevelFlaw {
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding {} flaw {} with atoms {}", self.kind, flw_id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
+
+        let mut candidates: Vec<(Box<dyn Resolver>, Lit)> = Vec::new();
 
         for &atom_id in &self.past {
             let tau = {
@@ -479,8 +489,8 @@ impl Flaw for LevelFlaw {
             if let Slot::Primitive(var) = tau {
                 let var = var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !var.eq(*self.instance as i32))?;
-                if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
+                if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
+                    candidates.push((Box::new(Displace::new(displace)), displace));
                 }
             }
         }
@@ -490,10 +500,17 @@ impl Flaw for LevelFlaw {
             for &past_id in &self.past {
                 let (past_start, _) = get_atom_vars(slv, past_id);
                 let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
-                if smt.get_lit_val_and_level(order) != Some((false, 0)) {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(Order), order)?;
+                if smt.probe(&[phi, order]).map_err(|_| SolverError::Inconsistent)? {
+                    candidates.push((Box::new(Order::new(order)), order));
                 }
             }
+        }
+
+        let single = candidates.len() == 1;
+        for (resolver, lit) in candidates {
+            let rho = if single { phi } else { smt.new_lit() };
+            slv.add_clause(&mut smt, &mut graph, vec![!phi, !lit, rho])?;
+            slv.add_resolver(&mut smt, &mut graph, resolver, rho)?;
         }
 
         Ok(())
@@ -508,9 +525,24 @@ impl Flaw for LevelFlaw {
     }
 }
 
-struct Order;
+struct Order {
+    lit: Lit,
+}
+
+impl Order {
+    fn new(lit: Lit) -> Self {
+        Self { lit }
+    }
+}
 
 impl Resolver for Order {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "anticipate"
@@ -518,9 +550,24 @@ impl Resolver for Order {
     }
 }
 
-struct Displace;
+struct Displace {
+    lit: Lit,
+}
+
+impl Displace {
+    fn new(lit: Lit) -> Self {
+        Self { lit }
+    }
+}
 
 impl Resolver for Displace {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "displace"

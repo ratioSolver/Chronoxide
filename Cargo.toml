@@ -24,7 +24,7 @@ required-features = ["server"]
 
 [dependencies]
 rug = "1.30.0"
-semitone = "0.0.33"
+semitone = "0.0.34"
 riddle-lang = "0.2.27"
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.1", features = ["fs"], optional = true }

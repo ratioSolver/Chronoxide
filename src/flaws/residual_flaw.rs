@@ -2,6 +2,7 @@ use crate::{
     SolverError, SolverState,
     graph::{Flaw, FlawId, Resolver, ResolverId},
 };
+use semitone::Lit;
 use serde_json::{Value, json};
 use tracing::trace;
 
@@ -22,18 +23,27 @@ impl Flaw for ResidualFlaw {
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding ResidualFlaw {} (target {}, excluding {})", flw_id, self.target_flaw, self.excluded_resolver);
 
+        let mut candidates = Vec::with_capacity(self.allowed_resolvers.len());
         for &orig_res_id in &self.allowed_resolvers {
-            let rho = graph.rho(orig_res_id);
-            if smt.get_lit_val_and_level(rho) == Some((false, 0)) {
-                continue;
+            let orig_rho = graph.rho(orig_res_id);
+            if smt.probe(&[phi, orig_rho]).map_err(|_| SolverError::Inconsistent)? {
+                let intrinsic_cost = graph.resolver(orig_res_id).ok_or_else(|| SolverError::RuntimeError(format!("Resolver {} not found", orig_res_id)))?.intrinsic_cost();
+                let orig_preconditions = graph.resolver_preconditions(orig_res_id).to_vec();
+                candidates.push((orig_res_id, orig_rho, intrinsic_cost, orig_preconditions));
             }
-            let intrinsic_cost = graph.resolver(orig_res_id).ok_or_else(|| SolverError::RuntimeError(format!("Resolver {} not found", orig_res_id)))?.intrinsic_cost();
-            let orig_preconditions = graph.resolver_preconditions(orig_res_id).to_vec();
+        }
 
-            let proxy = Box::new(ResidualResolver::new(orig_res_id, intrinsic_cost, orig_preconditions));
+        let single = candidates.len() == 1;
+        for (orig_res_id, orig_rho, intrinsic_cost, orig_preconditions) in candidates {
+            let rho = if single { phi } else { smt.new_lit() };
+            if rho != phi {
+                // (ϕ ∧ orig_rho) → ρ
+                slv.add_clause(&mut smt, &mut graph, vec![!phi, !orig_rho, rho])?;
+            }
+            let proxy = Box::new(ResidualResolver::new(orig_res_id, orig_rho, intrinsic_cost, orig_preconditions));
             slv.add_resolver(&mut smt, &mut graph, proxy, rho)?;
         }
 
@@ -52,13 +62,14 @@ impl Flaw for ResidualFlaw {
 /// A proxy resolver that delegates to an existing resolver's literal, cost, and preconditions.
 struct ResidualResolver {
     original_resolver: ResolverId,
+    orig_rho: Lit,
     cost: rug::Rational,
     target_preconditions: Vec<FlawId>,
 }
 
 impl ResidualResolver {
-    fn new(original_resolver: ResolverId, cost: rug::Rational, target_preconditions: Vec<FlawId>) -> Self {
-        Self { original_resolver, cost, target_preconditions }
+    fn new(original_resolver: ResolverId, orig_rho: Lit, cost: rug::Rational, target_preconditions: Vec<FlawId>) -> Self {
+        Self { original_resolver, orig_rho, cost, target_preconditions }
     }
 }
 
@@ -70,6 +81,9 @@ impl Resolver for ResidualResolver {
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        // ρ → orig_rho
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.orig_rho])?;
         for &pre_flaw in &self.target_preconditions {
             slv.add_causal_link(&mut smt, &mut graph, pre_flaw)?;
         }

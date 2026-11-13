@@ -9,7 +9,10 @@ use riddle::{
     language::{AtomKind, ResolutionConstraint},
     scope::{Predicate, get_predicate_by_path},
 };
-use semitone::ast::{self, BoolExpr::And};
+use semitone::{
+    Lit,
+    ast::{self, BoolExpr::And},
+};
 use serde_json::{Value, json};
 use std::{collections::HashSet, rc::Rc};
 use tracing::trace;
@@ -44,7 +47,7 @@ impl Flaw for AtomFlaw {
             predicate.name()
         );
 
-        let sigma = slv.sigma.borrow();
+        let mut valid_unifications = Vec::new();
 
         if atom.resolution_constraint() != ResolutionConstraint::CannotUnify {
             for target in predicate.atoms() {
@@ -52,38 +55,54 @@ impl Flaw for AtomFlaw {
                     continue;
                 }
                 trace!("Checking if {} can unify with {}", self.atom, target);
-                let target_flaw = slv.atom_flaw.borrow().get(*target).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", target)))?;
+                let target_flaw = slv.atom_flaw.borrow().get(*target).copied().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", target)))?;
                 if !graph.is_expanded(target_flaw) {
                     trace!("Skipping unification with {} for atom {} because target flaw is not expanded", target, self.atom);
                     continue;
                 }
-                if !graph.can_unify(flw_id, target_flaw) {
+                let Some(target_fg_res) = slv.atom_fg.borrow().get(*target).copied().flatten() else {
+                    trace!("Skipping unification with {} for atom {} because target has no fact/goal resolver", target, self.atom);
+                    continue;
+                };
+                let target_fg = graph.rho(target_fg_res);
+                if !graph.can_unify(flw_id, target_flaw) || !graph.can_depend_on(flw_id, &[target_flaw]) {
                     trace!("Skipping unification with {} for atom {} because it would create a cycle", target, self.atom);
                     continue;
                 }
-                let mut unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found", target)))?, atom.predicate());
-                unif_eqs.push(!sigma.get(*self.atom).ok_or(SolverError::RuntimeError(format!("Current atom {} not found in sigma", self.atom)))?.clone());
-                unif_eqs.push(sigma.get(*target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found in sigma", target)))?.clone());
-                let rho = slv.track_expr(&mut smt, &mut graph, And(unif_eqs))?;
-                if smt.get_lit_val_and_level(rho) != Some((false, 0)) {
+
+                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target).ok_or(SolverError::RuntimeError(format!("Target atom {} not found", target)))?, atom.predicate());
+                if unif_eqs.first() == Some(&ast::BoolExpr::False) {
+                    trace!("Skipping unification with {} for atom {} due to incompatible arguments", target, self.atom);
+                    continue;
+                }
+
+                let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
+
+                if smt.probe(&[phi, target_fg, eq_lit]).map_err(|_| SolverError::Inconsistent)? {
                     trace!("{} can unify with {}", self.atom, target);
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(UnificationResolver::new(self.atom, target)), rho)?;
+                    valid_unifications.push((target, target_fg, eq_lit));
                 } else {
                     trace!("Skipping unification with {} for atom {} due to unsatisfiable unification equations", target, self.atom);
                 }
             }
         }
 
-        if atom.resolution_constraint() != ResolutionConstraint::MustUnify {
-            let rho = if graph.flaw_resolvers(flw_id).is_empty() { phi } else { smt.new_lit() };
-            match atom.kind() {
-                AtomKind::Fact => {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.atom)), rho)?;
-                }
-                AtomKind::Goal => {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.atom)), rho)?;
-                }
-            }
+        let can_expand_as_new = atom.resolution_constraint() != ResolutionConstraint::MustUnify;
+        let total_resolvers = valid_unifications.len() + usize::from(can_expand_as_new);
+
+        let self_fg = if can_expand_as_new { Some(if valid_unifications.is_empty() { phi } else { smt.new_lit() }) } else { None };
+
+        for (target, target_fg, eq_lit) in valid_unifications {
+            let rho = if total_resolvers == 1 { phi } else { smt.new_lit() };
+            slv.add_resolver(&mut smt, &mut graph, Box::new(UnificationResolver::new(self.atom, target, target_fg, eq_lit, self_fg)), rho)?;
+        }
+
+        if let Some(rho_fg) = self_fg {
+            let res_id = match atom.kind() {
+                AtomKind::Fact => slv.add_resolver(&mut smt, &mut graph, Box::new(FactResolver::new(self.atom)), rho_fg)?,
+                AtomKind::Goal => slv.add_resolver(&mut smt, &mut graph, Box::new(GoalResolver::new(self.atom)), rho_fg)?,
+            };
+            slv.atom_fg.borrow_mut()[*self.atom] = Some(res_id);
         }
 
         Ok(())
@@ -124,11 +143,7 @@ impl Resolver for GoalResolver {
             };
         }
 
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
-        let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
+        Ok(())
     }
 
     fn to_json(&self) -> Value {
@@ -150,15 +165,6 @@ impl FactResolver {
 }
 
 impl Resolver for FactResolver {
-    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        trace!("Applying FactResolver for atom {}", self.atom);
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
-        let sigma = slv.track_expr(&mut smt, &mut graph, slv.sigma.borrow().get(*self.atom).ok_or(SolverError::RuntimeError(format!("Atom {} not found in sigma", self.atom)))?.clone())?;
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, sigma])
-    }
-
     fn to_json(&self) -> Value {
         json!({
             "kind": "fact",
@@ -170,11 +176,14 @@ impl Resolver for FactResolver {
 struct UnificationResolver {
     current_atom: AtomId,
     target_atom: AtomId,
+    target_fg: Lit,
+    eq_lit: Lit,
+    self_fg: Option<Lit>,
 }
 
 impl UnificationResolver {
-    fn new(current_atom: AtomId, target_atom: AtomId) -> Self {
-        Self { current_atom, target_atom }
+    fn new(current_atom: AtomId, target_atom: AtomId, target_fg: Lit, eq_lit: Lit, self_fg: Option<Lit>) -> Self {
+        Self { current_atom, target_atom, target_fg, eq_lit, self_fg }
     }
 }
 
@@ -187,7 +196,20 @@ impl Resolver for UnificationResolver {
         trace!("Applying UnificationResolver for atoms {} and {}", self.current_atom, self.target_atom);
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
-        let target_flaw = slv.atom_flaw.borrow().get(*self.target_atom).cloned().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", self.target_atom)))?;
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+
+        // ρ → target_fg (il target deve essere attivo come Fact/Goal autonomo, non unificato a sua volta)
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.target_fg])?;
+        // ρ → eq_lit (equazioni di unificazione sugli argomenti)
+        if self.eq_lit != Lit::TRUE {
+            slv.add_clause(&mut smt, &mut graph, vec![!rho, self.eq_lit])?;
+        }
+        // ρ → ¬self_fg (se l'atomo corrente unifica, non viene attivato come nuovo Fact/Goal)
+        if let Some(self_fg) = self.self_fg {
+            slv.add_clause(&mut smt, &mut graph, vec![!rho, !self_fg])?;
+        }
+
+        let target_flaw = slv.atom_flaw.borrow().get(*self.target_atom).copied().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", self.target_atom)))?;
         slv.add_causal_link(&mut smt, &mut graph, target_flaw)
     }
 

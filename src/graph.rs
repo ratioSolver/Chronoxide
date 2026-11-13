@@ -175,6 +175,12 @@ impl Graph {
         let flw_id = FlawId(self.flaws.len());
         if self.c_res.is_some() {
             self.c_preconditions.push(flw_id);
+        } else {
+            for &r_id in &causes {
+                if !self.resolver_preconditions[*r_id].contains(&flw_id) {
+                    self.resolver_preconditions[*r_id].push(flw_id);
+                }
+            }
         }
         trace!("Adding flaw: {} ({})", flw_id, phi);
 

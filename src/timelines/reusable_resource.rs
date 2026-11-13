@@ -11,7 +11,7 @@ use riddle::{
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
-use semitone::{ast::ArithExpr, rational::InfRational};
+use semitone::{Lit, ast::ArithExpr, rational::InfRational};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -78,8 +78,9 @@ impl ReusableResource {
         let mut atoms_by_instance: HashMap<ObjectId, Vec<AtomId>> = HashMap::new();
         let mut processed_classes = HashSet::new();
 
+        let graph = slv.graph.borrow();
         let smt = slv.smt.borrow();
-        let sigma = slv.sigma.borrow();
+        let atom_fg = slv.atom_fg.borrow();
         for instance_id in self.instances.borrow().iter() {
             let Some(instance) = slv.get_object(*instance_id) else {
                 continue;
@@ -88,14 +89,14 @@ impl ReusableResource {
                 continue;
             }
             for pred in instance.class().predicates().iter() {
-                for atom_id in pred.atoms().iter() {
-                    let Some(sigma) = sigma.get(**atom_id) else {
+                for atom_id in pred.atoms() {
+                    let Some(Some(fg_res)) = atom_fg.get(*atom_id) else {
                         continue;
                     };
-                    if smt.get_bool_val(sigma) != Some(true) {
+                    if smt.get_lit_val(graph.rho(*fg_res)) != Some(true) {
                         continue;
                     }
-                    let Some(atom) = slv.get_atom(*atom_id) else {
+                    let Some(atom) = slv.get_atom(atom_id) else {
                         continue;
                     };
                     match atom.get("tau") {
@@ -262,7 +263,11 @@ impl Timeline for ReusableResource {
                         let mut causes = Vec::new();
                         for &atom_id in &conflict {
                             let flw_id = *atom_flaw.get(*atom_id).expect("Atom should have an associated flaw");
-                            causes.extend_from_slice(graph.flaw_causes(flw_id));
+                            for &c in graph.flaw_causes(flw_id) {
+                                if !causes.contains(&c) {
+                                    causes.push(c);
+                                }
+                            }
                         }
                         flaws.push((causes, Box::new(Peak::new(capacity_var.clone(), conflict))));
                     }
@@ -381,8 +386,10 @@ impl Flaw for Peak {
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
-        let (flw_id, _) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
+        let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding Peak flaw {} with atoms {}", flw_id, self.atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
+
+        let mut candidates: Vec<(Box<dyn Resolver>, Lit)> = Vec::new();
 
         let atoms_vec: Vec<AtomId> = self.atoms.iter().copied().collect();
         for i in 0..atoms_vec.len() {
@@ -395,42 +402,39 @@ impl Flaw for Peak {
                     let b_atom = slv.get_atom(b).ok_or(SolverError::RuntimeError(format!("Atom {} not found", b)))?;
                     (a_atom.get("tau").expect("Atom should have a 'tau' field"), b_atom.get("tau").expect("Atom should have a 'tau' field"))
                 };
-                match (a_tau, b_tau) {
+                let displace_expr = match (a_tau, b_tau) {
                     (Slot::Primitive(a_var), Slot::ObjectRef(b_sv)) => {
                         let a_var = a_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                        let displace = slv.track_expr(&mut smt, &mut graph, !a_var.eq(*b_sv as i32))?;
-                        if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                            slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
-                        }
+                        Some(!a_var.eq(*b_sv as i32))
                     }
                     (Slot::ObjectRef(a_sv), Slot::Primitive(b_var)) => {
                         let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                        let displace = slv.track_expr(&mut smt, &mut graph, !b_var.eq(*a_sv as i32))?;
-                        if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                            slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
-                        }
+                        Some(!b_var.eq(*a_sv as i32))
                     }
                     (Slot::Primitive(a_var), Slot::Primitive(b_var)) => {
                         let a_var = a_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                         let b_var = b_var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
-                        let displace = slv.track_expr(&mut smt, &mut graph, !a_var.eq(b_var))?;
-                        if smt.get_lit_val_and_level(displace) != Some((false, 0)) {
-                            slv.add_resolver(&mut smt, &mut graph, Box::new(Displace), displace)?;
-                        }
+                        Some(!a_var.eq(b_var))
                     }
-                    _ => {}
+                    _ => None,
+                };
+                if let Some(expr) = displace_expr {
+                    let displace = slv.track_expr(&mut smt, &mut graph, expr)?;
+                    if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
+                        candidates.push((Box::new(Displace::new(displace)), displace));
+                    }
                 }
 
                 let (a_start, a_end) = get_atom_vars(slv, a);
                 let (b_start, b_end) = get_atom_vars(slv, b);
 
                 let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
-                if smt.get_lit_val_and_level(a_before_b) != Some((false, 0)) {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(Order), a_before_b)?;
+                if smt.probe(&[phi, a_before_b]).map_err(|_| SolverError::Inconsistent)? {
+                    candidates.push((Box::new(Order::new(a_before_b)), a_before_b));
                 }
                 let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
-                if smt.get_lit_val_and_level(b_before_a) != Some((false, 0)) {
-                    slv.add_resolver(&mut smt, &mut graph, Box::new(Order), b_before_a)?;
+                if smt.probe(&[phi, b_before_a]).map_err(|_| SolverError::Inconsistent)? {
+                    candidates.push((Box::new(Order::new(b_before_a)), b_before_a));
                 }
             }
         }
@@ -448,8 +452,15 @@ impl Flaw for Peak {
                 .collect::<Vec<_>>(),
         );
         let over_capacity = slv.track_expr(&mut smt, &mut graph, amount.le(self.capacity.clone()))?;
-        if smt.get_lit_val_and_level(over_capacity) != Some((false, 0)) {
-            slv.add_resolver(&mut smt, &mut graph, Box::new(Compress), over_capacity)?;
+        if smt.probe(&[phi, over_capacity]).map_err(|_| SolverError::Inconsistent)? {
+            candidates.push((Box::new(Compress::new(over_capacity)), over_capacity));
+        }
+
+        let single = candidates.len() == 1;
+        for (resolver, lit) in candidates {
+            let rho = if single { phi } else { smt.new_lit() };
+            slv.add_clause(&mut smt, &mut graph, vec![!phi, !lit, rho])?;
+            slv.add_resolver(&mut smt, &mut graph, resolver, rho)?;
         }
 
         Ok(())
@@ -463,9 +474,24 @@ impl Flaw for Peak {
     }
 }
 
-struct Order;
+struct Order {
+    lit: Lit,
+}
+
+impl Order {
+    fn new(lit: Lit) -> Self {
+        Self { lit }
+    }
+}
 
 impl Resolver for Order {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "order"
@@ -473,9 +499,24 @@ impl Resolver for Order {
     }
 }
 
-struct Compress;
+struct Compress {
+    lit: Lit,
+}
+
+impl Compress {
+    fn new(lit: Lit) -> Self {
+        Self { lit }
+    }
+}
 
 impl Resolver for Compress {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "compress"
@@ -483,9 +524,24 @@ impl Resolver for Compress {
     }
 }
 
-struct Displace;
+struct Displace {
+    lit: Lit,
+}
+
+impl Displace {
+    fn new(lit: Lit) -> Self {
+        Self { lit }
+    }
+}
 
 impl Resolver for Displace {
+    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "displace"
