@@ -44,13 +44,31 @@ impl Graph {
         }
     }
 
+    pub(super) fn current_flaw(&self) -> Option<(FlawId, Lit)> {
+        self.c_flaw
+    }
+
+    pub(super) fn current_resolver(&self) -> Option<(ResolverId, Lit)> {
+        self.c_res
+    }
+
     /// Returns the currently active resolver as a cause vector (empty if at root level).
     pub(super) fn current_causes(&self) -> Vec<ResolverId> {
         self.c_res.map(|(r_id, _)| vec![r_id]).unwrap_or_default()
     }
 
-    /// Returns the ρ literals of the given resolvers, used by the caller to build a flaw's causes clause.
-    pub(super) fn resolver_rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
+    /// Returns the ϕ literal of the given flaw.
+    pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
+        self.flaw_phi[*flw_id]
+    }
+
+    /// Returns the ρ literal of the given resolver.
+    pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
+        self.resolver_rho[*res_id]
+    }
+
+    /// Returns the ρ literals of the given resolvers.
+    pub(super) fn rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
         res_ids.iter().map(|&r_id| self.resolver_rho[*r_id]).collect()
     }
 }

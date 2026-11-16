@@ -136,8 +136,8 @@ impl Env for EnumVar {
                         Slot::Primitive(p) => bool_expr(&p),
                         _ => None,
                     }?;
-                    let selected = slv.track_expr(&mut smt, &mut graph, self.var.eq(*inst as i32)).ok()?;
-                    let same = slv.track_expr(&mut smt, &mut graph, r.eq(&val)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst as i32)).ok()?;
+                    let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }
                 Slot::Primitive(Rc::new(BoolVar::new(tp, r)))
@@ -149,8 +149,8 @@ impl Env for EnumVar {
                         Slot::Primitive(p) => p.downcast::<ArithVar>().map(|v| v.lin.clone()),
                         _ => None,
                     }?;
-                    let selected = slv.track_expr(&mut smt, &mut graph, self.var.eq(*inst as i32)).ok()?;
-                    let same = slv.track_expr(&mut smt, &mut graph, r.eq(&val)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst as i32)).ok()?;
+                    let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }
                 Slot::Primitive(Rc::new(ArithVar::new(tp, r)))
@@ -169,8 +169,8 @@ impl Env for EnumVar {
                         Slot::Primitive(p) => p.downcast::<EnumVar>().map(|v| v.var.clone())?,
                         Slot::AtomRef(_) => return None,
                     };
-                    let selected = slv.track_expr(&mut smt, &mut graph, self.var.eq(*inst as i32)).ok()?;
-                    let same = slv.track_expr(&mut smt, &mut graph, r.eq(&val)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst as i32)).ok()?;
+                    let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }
                 Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp_class, r)))

@@ -4,6 +4,7 @@ use crate::{
 };
 use semitone::{Lit, ast::BoolExpr};
 use serde_json::{Value, json};
+use tracing::trace;
 
 pub(crate) struct BoolFlaw {
     expr: BoolExpr,
@@ -17,6 +18,31 @@ impl BoolFlaw {
 
 impl Flaw for BoolFlaw {
     fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+        let mut graph = slv.graph.borrow_mut();
+        let mut smt = slv.smt.borrow_mut();
+        let (flw_id, phi) = graph.current_flaw().expect("No current flaw found");
+        trace!("Expanding BoolFlaw {} with expr: {}", flw_id, self.expr);
+
+        let lit = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
+        let mut candidates = Vec::with_capacity(2);
+        for (val, val_lit) in [(true, lit), (false, !lit)] {
+            if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
+                candidates.push((val, val_lit));
+            }
+        }
+
+        if candidates.len() == 1 {
+            let (val, val_lit) = candidates[0];
+            slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(val, val_lit)))?;
+        } else {
+            for (val, val_lit) in candidates {
+                let rho = smt.new_lit();
+                // ρ → ϕ
+                slv.add_clause(&mut smt, &mut graph, vec![!rho, phi])?;
+                slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val, val_lit)))?;
+            }
+        }
+
         Ok(())
     }
 
@@ -41,7 +67,11 @@ impl BoolResolver {
 
 impl Resolver for BoolResolver {
     fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
-        Ok(())
+        let mut smt = slv.smt.borrow_mut();
+        let mut graph = slv.graph.borrow_mut();
+        let (_, rho) = graph.current_resolver().expect("No current resolver found");
+        // ρ → val_lit
+        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
     }
 
     fn to_json(&self) -> Value {

@@ -78,20 +78,47 @@ impl SolverState {
     }
 
     pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, causes: Vec<ResolverId>, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
-        let mut cause_lits: Vec<Lit> = graph.resolver_rhos(&causes);
+        let mut cause_lits: Vec<Lit> = graph.rhos(&causes);
         cause_lits.sort_unstable();
         cause_lits.dedup();
+
+        let phi = match cause_lits.as_slice() {
+            [] => Lit::TRUE,
+            &[lit] => lit, // ϕ = ρ if there's only one cause
+            _ => {
+                let phi = smt.new_lit();
+                // (ρ₁ ∧ ... ∧ ρₙ) → ϕ (the activation of all causes implies the activation of the flaw)
+                let mut clause: Vec<Lit> = cause_lits.iter().map(|&r| !r).collect();
+                clause.push(phi);
+                self.add_clause(smt, graph, clause)?;
+                // ϕ → ρᵢ for each cause ρᵢ (the flaw's activation implies the application of all of its causes)
+                for &rho in &cause_lits {
+                    self.add_clause(smt, graph, vec![!phi, rho])?;
+                }
+                phi
+            }
+        };
+
+        let status = smt.get_lit_val(phi);
+        let cost = smt.new_dl_var();
 
         unimplemented!()
     }
 
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, rho: Lit, res: Box<dyn Resolver>) -> Result<ResolverId, SolverError> {
+        let (flaw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw when adding resolver")))?;
+        // ρ → ϕ (the activation of the resolver implies the activation of the flaw)
+        self.add_clause(smt, graph, vec![!rho, phi])?;
+
+        let status = smt.get_lit_val(rho);
+        let cost = smt.new_dl_var();
+
         unimplemented!()
     }
 
-    fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: ast::BoolExpr) -> Result<Lit, SolverError> {
+    fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: &ast::BoolExpr) -> Result<Lit, SolverError> {
         loop {
-            match smt.track_expr(expr.as_ref()) {
+            match smt.track_expr(expr) {
                 Ok(lit) => {
                     return Ok(lit);
                 }
