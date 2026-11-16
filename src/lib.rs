@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{FlawId, ResolverId},
+    flaws::{Flaw, FlawId, Resolver, ResolverId},
     graph::Graph,
 };
 use riddle::{
@@ -10,14 +10,15 @@ use riddle::{
     language::{AtomKind, Disjunction, ResolutionConstraint},
     scope::{Class, Field, Function, Predicate, Scope, Type},
 };
-use semitone::SeMiTONE;
+use semitone::{Lit, SeMiTONE, ast};
 use serde_json::Value;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
 };
 use tokio::sync::broadcast;
+use tracing::trace;
 
 mod flaws;
 mod graph;
@@ -26,6 +27,7 @@ pub struct SolverState {
     core: Rc<CommonCore>,
     slv: Weak<SolverState>,
     smt: RefCell<SeMiTONE>,
+    notified_len: Cell<usize>,
     graph: RefCell<Graph>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
@@ -39,10 +41,68 @@ impl SolverState {
             },
             slv: core.clone(),
             smt: RefCell::new(SeMiTONE::new()),
+            notified_len: Cell::new(0),
             graph: RefCell::new(Graph::new(tx_event.clone())),
             tx_event,
         });
         slv
+    }
+
+    fn read(&self, script: &str) -> Result<(), SolverError> {
+        trace!("Reading RiDDle script");
+        self.core.read(script).map_err(|e| SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e)))
+    }
+
+    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, causes: Vec<ResolverId>, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+        let mut cause_lits: Vec<Lit> = graph.resolver_rhos(&causes);
+        cause_lits.sort_unstable();
+        cause_lits.dedup();
+
+        unimplemented!()
+    }
+
+    pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, rho: Lit, res: Box<dyn Resolver>) -> Result<ResolverId, SolverError> {
+        unimplemented!()
+    }
+
+    fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: ast::BoolExpr) -> Result<Lit, SolverError> {
+        loop {
+            match smt.track_expr(expr.as_ref()) {
+                Ok(lit) => {
+                    return Ok(lit);
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(smt, graph, bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_clause(&self, smt: &mut SeMiTONE, graph: &mut Graph, clause: impl IntoIterator<Item = Lit>) -> Result<(), SolverError> {
+        let clause: Vec<Lit> = clause.into_iter().collect();
+        loop {
+            match smt.add_clause(clause.clone()) {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(smt, graph, bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                }
+            }
+        }
+    }
+
+    fn backtrack_and_learn(&self, smt: &mut SeMiTONE, graph: &mut Graph, bt_level: usize, lemma: Vec<Lit>) -> bool {
+        if smt.decision_level() == 0 {
+            return false;
+        }
+        let vars_to_undo = smt.cancel_until(bt_level);
+        self.notified_len.set(smt.current_trail_len());
+        smt.add_clause(lemma).is_ok()
     }
 }
 
