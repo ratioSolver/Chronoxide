@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{Flaw, FlawId, Resolver, ResolverId},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -20,6 +20,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
+    str::FromStr,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{info, trace};
@@ -174,28 +175,33 @@ delegate_env!(SolverState, core);
 
 impl Core for SolverState {
     fn new_bool(&self, value: bool) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), if value { ast::BoolExpr::True } else { ast::BoolExpr::False })))
     }
     fn new_bool_var(&self) -> Slot {
-        unimplemented!()
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let var = smt.new_bool();
+        let causes = graph.current_causes();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(BoolFlaw::new(var.clone()))).expect("Failed to add BoolFlaw to graph");
+        Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), ast::ArithExpr::Const(rug::Rational::from_str(value).expect("Invalid integer literal")))))
     }
     fn new_int_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(ArithVar::new(self.int_type(), self.smt.borrow_mut().new_int())))
     }
     fn new_real(&self, num: &str, den: &str) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), ast::ArithExpr::Const(rug::Rational::from_str(&format!("{}/{}", num, den)).expect("Invalid rational literal")))))
     }
     fn new_real_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(ArithVar::new(self.real_type(), self.smt.borrow_mut().new_real())))
     }
     fn new_string(&self, value: &str) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(StringVar::new(self.string_type(), value.into())))
     }
     fn new_string_var(&self) -> Slot {
-        unimplemented!()
+        Slot::Primitive(Rc::new(StringVar::new(self.string_type(), String::new())))
     }
 
     fn sum(&self, sum: &[Slot]) -> Result<Slot, RiddleError> {

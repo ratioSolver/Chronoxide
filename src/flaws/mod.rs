@@ -1,8 +1,8 @@
+use crate::{SolverError, SolverState};
+use serde_json::Value;
 use std::{fmt, ops::Deref};
 
-use serde_json::Value;
-
-use crate::{SolverError, SolverState};
+pub(super) mod bool_flaw;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FlawId(usize);
