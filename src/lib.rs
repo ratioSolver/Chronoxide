@@ -17,9 +17,9 @@ use semitone::{
 };
 use serde_json::{Value, json};
 use std::{
-    borrow::Borrow,
     cell::{Cell, RefCell},
     collections::HashMap,
+    error, fmt,
     rc::{Rc, Weak},
     str::FromStr,
 };
@@ -57,7 +57,7 @@ impl SolverState {
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
         trace!("Reading RiDDle script");
-        self.core.read(script).map_err(|e| SolverError::RuntimeError(format!("Failed to read RiDDle script: {:?}", e)))
+        self.core.read(script).map_err(|e| SolverError::runtime(format!("Failed to read RiDDle script: {:?}", e)))
     }
 
     fn solve(&self) -> Result<(), SolverError> {
@@ -107,7 +107,7 @@ impl SolverState {
     }
 
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, rho: Lit, res: Box<dyn Resolver>) -> Result<ResolverId, SolverError> {
-        let (flaw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw when adding resolver")))?;
+        let (flaw_id, phi) = graph.current_flaw().ok_or(SolverError::runtime("No current flaw when adding resolver"))?;
         // ρ → ϕ (the activation of the resolver implies the activation of the flaw)
         self.add_clause(smt, graph, vec![!rho, phi])?;
 
@@ -312,6 +312,23 @@ pub enum SolverError {
     Inconsistent,
 }
 
+impl SolverError {
+    fn runtime(msg: impl Into<String>) -> Self {
+        Self::RuntimeError(msg.into())
+    }
+}
+
+impl fmt::Display for SolverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SolverError::RuntimeError(msg) => write!(f, "Runtime error: {msg}"),
+            SolverError::Inconsistent => write!(f, "Problem is inconsistent"),
+        }
+    }
+}
+
+impl error::Error for SolverError {}
+
 #[derive(Clone)]
 pub enum SolverEvent {
     NewObject { obj_id: ObjectId, name: Option<String>, class: String },
@@ -330,7 +347,7 @@ pub enum SolverEvent {
 }
 
 fn bool_expr(p: &Rc<dyn Var>) -> Option<ast::BoolExpr> {
-    if let Some(var) = p.downcast::<BoolVar>() { Some(var.lit.clone()) } else { p.downcast::<BoolExpr>().map(|expr| expr_to_bool(expr)) }
+    if let Some(var) = p.downcast::<BoolVar>() { Some(var.lit.clone()) } else { p.downcast::<BoolExpr>().map(expr_to_bool) }
 }
 
 fn expr_to_bool(expr: impl AsRef<BoolExpr>) -> ast::BoolExpr {
@@ -360,9 +377,9 @@ fn expr_to_bool(expr: impl AsRef<BoolExpr>) -> ast::BoolExpr {
             }
             unreachable!("Expected compatible primitive types in BoolExpr::Leq");
         }
-        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t.as_ref())).collect::<Vec<_>>()),
-        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t.as_ref())).collect::<Vec<_>>()),
-        BoolExpr::Not { term, .. } => !expr_to_bool(term.as_ref()),
+        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
+        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
+        BoolExpr::Not { term, .. } => !expr_to_bool(term),
     }
 }
 
@@ -388,7 +405,7 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
             }
         }
         (Slot::ObjectRef(left), Slot::ObjectRef(right)) => {
-            return (**left as i32).eq(&(**right as i32)).into();
+            return if left == right { ast::BoolExpr::True } else { ast::BoolExpr::False };
         }
         _ => return ast::BoolExpr::False,
     }
@@ -402,20 +419,11 @@ fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
             Slot::Primitive(p) => {
                 if let Some(bool_expr) = bool_expr(&p) {
                     match smt.get_bool_val(&bool_expr) {
-                        Some(true) => {
-                            env_json.insert(name, json!(true));
-                        }
-                        Some(false) => {
-                            env_json.insert(name, json!(false));
+                        Some(val) => {
+                            env_json.insert(name, json!(val));
                         }
                         None => {
-                            env_json.insert(
-                                name,
-                                json!({
-                                    "type": "bool_var",
-                                    "lit": bool_expr.to_string()
-                                }),
-                            );
+                            env_json.insert(name, json!({ "type": "bool_var", "lit": bool_expr.to_string() }));
                         }
                     }
                 } else if let Some(arith_var) = p.downcast::<ArithVar>() {
@@ -555,21 +563,22 @@ impl Solver {
         Self { tx_cmd, tx_event }
     }
 
-    pub async fn read(&self, riddle: String) -> Result<(), SolverError> {
+    async fn send_command<T>(&self, make_cmd: impl FnOnce(CommandResult<T>) -> SolverCommand) -> Result<T, SolverError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::ReadRiDDle(riddle, reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send ReadRiDDle command: {:?}", e)))?;
-        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive ReadRiDDle response: {:?}", e)))?
+        self.tx_cmd.send(make_cmd(reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Solver worker terminated: {e}")))?;
+        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Solver worker dropped response: {e}")))?
+    }
+
+    pub async fn read(&self, riddle: impl Into<String>) -> Result<(), SolverError> {
+        let riddle = riddle.into();
+        self.send_command(|tx| SolverCommand::ReadRiDDle(riddle, tx)).await
     }
 
     pub async fn solve(&self) -> Result<(), SolverError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::Solve(reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send Solve command: {:?}", e)))?;
-        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive Solve response: {:?}", e)))?
+        self.send_command(SolverCommand::Solve).await
     }
 
     pub async fn to_json(&self) -> Result<Value, SolverError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx_cmd.send(SolverCommand::ToJson(reply_tx)).await.map_err(|e| SolverError::RuntimeError(format!("Failed to send ToJson command: {:?}", e)))?;
-        reply_rx.await.map_err(|e| SolverError::RuntimeError(format!("Failed to receive ToJson response: {:?}", e)))?
+        self.send_command(SolverCommand::ToJson).await
     }
 }
