@@ -36,8 +36,6 @@ impl Flaw for BoolFlaw {
         } else {
             for val_lit in candidates {
                 let rho = smt.new_lit();
-                // ρ → ϕ
-                slv.add_clause(&mut smt, &mut graph, vec![!rho, phi])?;
                 slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val_lit)))?;
             }
         }

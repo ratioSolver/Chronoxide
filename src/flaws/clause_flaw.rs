@@ -37,8 +37,6 @@ impl Flaw for ClauseFlaw {
         } else {
             for val_lit in candidates {
                 let rho = smt.new_lit();
-                // ρ → ϕ
-                slv.add_clause(&mut smt, &mut graph, vec![!rho, phi])?;
                 slv.add_resolver(&mut smt, &mut graph, rho, Box::new(ClauseResolver::new(val_lit)))?;
             }
         }
@@ -67,7 +65,7 @@ impl Resolver for ClauseResolver {
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
         let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → val_lit
+        // ρ → lit
         slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
     }
 

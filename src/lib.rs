@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, enum_flaw::EnumFlaw},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -286,7 +286,16 @@ impl Core for SolverState {
         true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        if instances.is_empty() {
+            return Err(RiddleError::InconsistencyError(format!("Cannot create a new variable of type {} with no instances", tp.full_name())));
+        }
+
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let var = smt.new_enum(instances.iter().map(|&id| *id as usize));
+        let causes = graph.current_causes();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(EnumFlaw::new(var.clone(), instances.to_vec()))).expect("Failed to add EnumFlaw to graph");
+        Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
         unimplemented!()
@@ -296,13 +305,13 @@ impl Core for SolverState {
         unimplemented!()
     }
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
-        unimplemented!()
+        self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, kind: AtomKind, args: HashMap<String, Slot>, resolution_constraint: ResolutionConstraint) -> Result<AtomId, RiddleError> {
         unimplemented!()
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
-        unimplemented!()
+        self.core.get_atom(id)
     }
 }
 
@@ -396,12 +405,12 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.downcast::<EnumVar>() {
-                return left.var.eq(**right as i32);
+                return left.var.eq(**right as usize);
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.downcast::<EnumVar>() {
-                return right.var.eq(**left as i32);
+                return right.var.eq(**left as usize);
             }
         }
         (Slot::ObjectRef(left), Slot::ObjectRef(right)) => {

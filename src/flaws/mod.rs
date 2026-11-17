@@ -4,6 +4,7 @@ use std::{fmt, ops::Deref};
 
 pub(super) mod bool_flaw;
 pub(super) mod clause_flaw;
+pub(super) mod enum_flaw;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FlawId(usize);
