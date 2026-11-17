@@ -25,21 +25,20 @@ impl Flaw for BoolFlaw {
 
         let lit = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
         let mut candidates = Vec::with_capacity(2);
-        for (val, val_lit) in [(true, lit), (false, !lit)] {
+        for val_lit in [lit, !lit] {
             if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
-                candidates.push((val, val_lit));
+                candidates.push(val_lit);
             }
         }
 
         if candidates.len() == 1 {
-            let (val, val_lit) = candidates[0];
-            slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(val, val_lit)))?;
+            slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(candidates[0])))?;
         } else {
-            for (val, val_lit) in candidates {
+            for val_lit in candidates {
                 let rho = smt.new_lit();
                 // ρ → ϕ
                 slv.add_clause(&mut smt, &mut graph, vec![!rho, phi])?;
-                slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val, val_lit)))?;
+                slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val_lit)))?;
             }
         }
 
@@ -55,13 +54,12 @@ impl Flaw for BoolFlaw {
 }
 
 struct BoolResolver {
-    val: bool,
     lit: Lit,
 }
 
 impl BoolResolver {
-    fn new(val: bool, lit: Lit) -> Self {
-        Self { val, lit }
+    fn new(lit: Lit) -> Self {
+        Self { lit }
     }
 }
 
@@ -76,7 +74,7 @@ impl Resolver for BoolResolver {
 
     fn to_json(&self) -> Value {
         json!({
-            "val": self.val,
+            "val": self.lit.to_string(),
         })
     }
 }

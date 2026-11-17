@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -7,7 +7,7 @@ use riddle::{
     RiddleError,
     core::{CommonCore, Core},
     delegate_env, delegate_scope,
-    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var},
+    env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
     language::{AtomKind, Disjunction, ResolutionConstraint},
     scope::{Class, Field, Function, Predicate, Scope, Type},
 };
@@ -17,6 +17,7 @@ use semitone::{
 };
 use serde_json::{Value, json};
 use std::{
+    borrow::Borrow,
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
@@ -116,9 +117,9 @@ impl SolverState {
         unimplemented!()
     }
 
-    fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: &ast::BoolExpr) -> Result<Lit, SolverError> {
+    fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: impl AsRef<ast::BoolExpr>) -> Result<Lit, SolverError> {
         loop {
-            match smt.track_expr(expr) {
+            match smt.track_expr(&expr) {
                 Ok(lit) => {
                     return Ok(lit);
                 }
@@ -245,7 +246,44 @@ impl Core for SolverState {
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
-        unimplemented!()
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+
+        let expr = match self.track_expr(&mut smt, &mut graph, expr_to_bool(&term)) {
+            Ok(lit) => lit,
+            Err(_) => return false,
+        };
+
+        if let Some((_c_res, rho)) = graph.current_resolver() {
+            if self.add_clause(&mut smt, &mut graph, vec![!rho, expr]).is_err() {
+                return false;
+            }
+        } else if self.add_clause(&mut smt, &mut graph, vec![expr]).is_err() {
+            return false;
+        }
+
+        let cnf_expr = to_cnf(&term);
+        match cnf_expr.as_ref() {
+            BoolExpr::And { terms, .. } => {
+                for clause in terms {
+                    if let BoolExpr::Or { terms, .. } = clause.as_ref()
+                        && terms.len() > 1
+                    {
+                        let causes = graph.current_causes();
+                        let terms = terms.iter().map(expr_to_bool).collect::<Vec<_>>();
+                        self.add_flaw(&mut smt, &mut graph, causes, Box::new(ClauseFlaw::new(terms))).expect("Failed to add ClauseFlaw to graph");
+                    }
+                }
+            }
+            BoolExpr::Or { terms, .. } if terms.len() > 1 => {
+                let causes = graph.current_causes();
+                let terms = terms.iter().map(expr_to_bool).collect::<Vec<_>>();
+                self.add_flaw(&mut smt, &mut graph, causes, Box::new(ClauseFlaw::new(terms))).expect("Failed to add ClauseFlaw to graph");
+            }
+            _ => {}
+        }
+
+        true
     }
     fn new_var(&self, tp: Rc<dyn Class>, instances: &[ObjectId]) -> Result<Slot, RiddleError> {
         unimplemented!()
@@ -292,11 +330,11 @@ pub enum SolverEvent {
 }
 
 fn bool_expr(p: &Rc<dyn Var>) -> Option<ast::BoolExpr> {
-    if let Some(var) = p.downcast::<BoolVar>() { Some(var.lit.clone()) } else { p.downcast::<BoolExpr>().map(|expr| expr_to_bool(&expr)) }
+    if let Some(var) = p.downcast::<BoolVar>() { Some(var.lit.clone()) } else { p.downcast::<BoolExpr>().map(|expr| expr_to_bool(expr)) }
 }
 
-fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
-    match expr {
+fn expr_to_bool(expr: impl AsRef<BoolExpr>) -> ast::BoolExpr {
+    match expr.as_ref() {
         BoolExpr::Term { term, .. } => {
             if let Slot::Primitive(var) = term
                 && let Some(var) = var.downcast::<BoolVar>()
@@ -322,9 +360,9 @@ fn expr_to_bool(expr: &BoolExpr) -> ast::BoolExpr {
             }
             unreachable!("Expected compatible primitive types in BoolExpr::Leq");
         }
-        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
-        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t)).collect::<Vec<_>>()),
-        BoolExpr::Not { term, .. } => !expr_to_bool(term),
+        BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(|t| expr_to_bool(t.as_ref())).collect::<Vec<_>>()),
+        BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(|t| expr_to_bool(t.as_ref())).collect::<Vec<_>>()),
+        BoolExpr::Not { term, .. } => !expr_to_bool(term.as_ref()),
     }
 }
 
