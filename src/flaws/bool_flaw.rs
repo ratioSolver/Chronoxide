@@ -31,13 +31,18 @@ impl Flaw for BoolFlaw {
             }
         }
 
-        if candidates.len() == 1 {
-            slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(candidates[0])))?;
-        } else {
-            for val_lit in candidates {
-                let rho = smt.new_lit();
-                slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val_lit)))?;
+        match candidates.len() {
+            0 => return Err(SolverError::Inconsistent),
+            1 => {
+                slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(candidates[0])))?;
             }
+            2 => {
+                for val_lit in candidates {
+                    let rho = smt.new_lit();
+                    slv.add_resolver(&mut smt, &mut graph, rho, Box::new(BoolResolver::new(val_lit)))?;
+                }
+            }
+            _ => unreachable!("BoolFlaw should have at most 2 candidates"),
         }
 
         Ok(())

@@ -292,7 +292,7 @@ impl Core for SolverState {
 
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
-        let var = smt.new_enum(instances.iter().map(|&id| *id as usize));
+        let var = smt.new_enum(instances.iter().map(|&id| *id));
         let causes = graph.current_causes();
         self.add_flaw(&mut smt, &mut graph, causes, Box::new(EnumFlaw::new(var.clone(), instances.to_vec()))).expect("Failed to add EnumFlaw to graph");
         Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
@@ -405,12 +405,12 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.downcast::<EnumVar>() {
-                return left.var.eq(**right as usize);
+                return left.var.eq(**right);
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.downcast::<EnumVar>() {
-                return right.var.eq(**left as usize);
+                return right.var.eq(**left);
             }
         }
         (Slot::ObjectRef(left), Slot::ObjectRef(right)) => {

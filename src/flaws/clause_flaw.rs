@@ -1,11 +1,10 @@
-use semitone::{Lit, ast::BoolExpr};
-use serde_json::{Value, json};
-use tracing::trace;
-
 use crate::{
     SolverError, SolverState,
     flaws::{Flaw, Resolver},
 };
+use semitone::{Lit, ast::BoolExpr};
+use serde_json::{Value, json};
+use tracing::trace;
 
 pub(crate) struct ClauseFlaw {
     literals: Vec<BoolExpr>,
@@ -32,12 +31,16 @@ impl Flaw for ClauseFlaw {
             }
         }
 
-        if candidates.len() == 1 {
-            slv.add_resolver(&mut smt, &mut graph, phi, Box::new(ClauseResolver::new(candidates[0])))?;
-        } else {
-            for val_lit in candidates {
-                let rho = smt.new_lit();
-                slv.add_resolver(&mut smt, &mut graph, rho, Box::new(ClauseResolver::new(val_lit)))?;
+        match candidates.len() {
+            0 => return Err(SolverError::Inconsistent),
+            1 => {
+                slv.add_resolver(&mut smt, &mut graph, phi, Box::new(ClauseResolver::new(candidates[0])))?;
+            }
+            _ => {
+                for val_lit in candidates {
+                    let rho = smt.new_lit();
+                    slv.add_resolver(&mut smt, &mut graph, rho, Box::new(ClauseResolver::new(val_lit)))?;
+                }
             }
         }
         Ok(())

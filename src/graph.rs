@@ -59,16 +59,16 @@ impl Graph {
 
     /// Returns the ϕ literal of the given flaw.
     pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
-        self.flaw_phi[*flw_id]
+        self.flaw_phi[flw_id]
     }
 
     /// Returns the ρ literal of the given resolver.
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
-        self.resolver_rho[*res_id]
+        self.resolver_rho[res_id]
     }
 
     /// Returns the ρ literals of the given resolvers.
     pub(super) fn rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
-        res_ids.iter().map(|&r_id| self.resolver_rho[*r_id]).collect()
+        res_ids.iter().map(|&r_id| self.resolver_rho[r_id]).collect()
     }
 }
