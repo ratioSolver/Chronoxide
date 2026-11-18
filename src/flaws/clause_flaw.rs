@@ -1,6 +1,6 @@
 use crate::{
     SolverError, SolverState,
-    flaws::{Flaw, Resolver},
+    graph::{Flaw, Resolver},
 };
 use semitone::{Lit, ast::BoolExpr};
 use serde_json::{Value, json};

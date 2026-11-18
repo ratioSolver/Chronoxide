@@ -1,6 +1,6 @@
 use crate::{
-    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
-    graph::Graph,
+    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
+    graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
 use riddle::{

@@ -1,6 +1,6 @@
 use crate::{
     SolverError, SolverState,
-    flaws::{Flaw, Resolver},
+    graph::{Flaw, Resolver},
 };
 use riddle::env::ObjectId;
 use semitone::{Lit, ast::EnumExpr};
