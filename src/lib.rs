@@ -9,7 +9,7 @@ use riddle::{
     delegate_env, delegate_scope,
     env::{Atom, AtomId, BoolExpr, Env, Object, ObjectId, Slot, Var, to_cnf},
     language::{AtomKind, Disjunction, ResolutionConstraint},
-    scope::{Class, Field, Function, Predicate, Scope, Type},
+    scope::{Class, Field, Function, Predicate, Scope, Type, arith_type},
 };
 use semitone::{
     Lit, SeMiTONE, ast,
@@ -241,16 +241,73 @@ impl Core for SolverState {
     }
 
     fn sum(&self, sum: &[Slot]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let tp = arith_type(self, sum)?;
+        let sum = sum
+            .iter()
+            .map(|s| match s {
+                Slot::Primitive(p) => {
+                    if let Some(arith_var) = p.downcast::<ArithVar>() {
+                        Ok(arith_var.lin.clone())
+                    } else {
+                        Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
+                    }
+                }
+                _ => Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", s))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Add(sum)))))
     }
     fn opposite(&self, term: Slot) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        if let Slot::Primitive(p) = &term {
+            if let Some(bool_var) = p.downcast::<BoolVar>() {
+                Ok(Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), ast::BoolExpr::Not(Box::new(bool_var.lit.clone()))))))
+            } else if let Some(arith_var) = p.downcast::<ArithVar>() {
+                Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_var.var_type().clone(), ast::ArithExpr::Neg(Box::new(arith_var.lin.clone()))))))
+            } else {
+                Err(RiddleError::TypeError(format!("Expected a boolean variable, got {}", term)))
+            }
+        } else {
+            Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", term)))
+        }
     }
     fn mul(&self, mul: &[Slot]) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let tp = arith_type(self, mul)?;
+        let mul = mul
+            .iter()
+            .map(|s| match s {
+                Slot::Primitive(p) => {
+                    if let Some(arith_var) = p.downcast::<ArithVar>() {
+                        Ok(arith_var.lin.clone())
+                    } else {
+                        Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
+                    }
+                }
+                _ => Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", s))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Mul(mul)))))
     }
     fn div(&self, left: Slot, right: Slot) -> Result<Slot, RiddleError> {
-        unimplemented!()
+        let tp = arith_type(self, &[left.clone(), right.clone()])?;
+        let left_lin = if let Slot::Primitive(p) = &left {
+            if let Some(arith_var) = p.downcast::<ArithVar>() {
+                arith_var.lin.clone()
+            } else {
+                return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", left)));
+            }
+        } else {
+            return Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", left)));
+        };
+        let right_lin = if let Slot::Primitive(p) = &right {
+            if let Some(arith_var) = p.downcast::<ArithVar>() {
+                arith_var.lin.clone()
+            } else {
+                return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", right)));
+            }
+        } else {
+            return Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", right)));
+        };
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(left_lin), Box::new(right_lin))))))
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
