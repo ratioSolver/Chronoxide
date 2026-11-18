@@ -103,7 +103,15 @@ impl SolverState {
         let status = smt.get_lit_val(phi);
         let cost = smt.new_dl_var();
 
-        unimplemented!()
+        for &res_id in &causes {
+            let rho = graph.rho(res_id);
+            let res_cost = graph.resolver_cost_var(res_id);
+            // ρ → (cost(ρ) >= cost(ϕ))
+            let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, cost, rug::Rational::from(0)))?;
+            self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
+        }
+
+        Ok(graph.add_flaw(causes, phi, status, cost, flw))
     }
 
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, rho: Lit, res: Box<dyn Resolver>) -> Result<ResolverId, SolverError> {
@@ -114,15 +122,39 @@ impl SolverState {
         let status = smt.get_lit_val(rho);
         let cost = smt.new_dl_var();
 
-        unimplemented!()
+        let parent_cost_var = graph.flaw_cost_var(flaw_id);
+        // ρ → (cost(ϕ) >= cost(ρ) + intrinsic_cost(ρ))
+        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(parent_cost_var, cost, res.intrinsic_cost()))?;
+        self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
+
+        Ok(graph.add_resolver(rho, status, cost, res))
     }
 
     /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.
     fn expand_flaw(&self, flw_id: FlawId) -> Result<(), SolverError> {
-        let mut flaw = self.graph.borrow_mut().take_flaw(flw_id).expect("Flaw should exist in graph");
+        let phi = self.graph.borrow().phi(flw_id);
+        let flaw = self.graph.borrow_mut().take_flaw(flw_id).expect("Flaw should exist in graph");
         flaw.expand(self)?;
+        let resolvers = self.graph.borrow().flaw_resolvers(flw_id).to_vec();
 
-        unimplemented!()
+        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ) (the activation of the flaw implies the application of at least one of its resolvers)
+        let mut clause = Vec::with_capacity(resolvers.len() + 1);
+        clause.push(!phi);
+        for res_id in resolvers {
+            let rho = self.graph.borrow().rho(res_id);
+            clause.push(rho);
+            let resolver = self.graph.borrow_mut().take_resolver(res_id).expect("Resolver should exist in graph");
+            resolver.apply(self)?;
+            self.graph.borrow_mut().return_resolver(resolver);
+        }
+
+        let mut graph = self.graph.borrow_mut();
+        graph.return_flaw(flaw);
+
+        let mut smt = self.smt.borrow_mut();
+        self.add_clause(&mut smt, &mut graph, clause)?;
+
+        Ok(())
     }
 
     fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: impl AsRef<ast::BoolExpr>) -> Result<Lit, SolverError> {

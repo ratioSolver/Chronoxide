@@ -100,6 +100,8 @@ pub struct Graph {
     resolver_flaw: Vec<FlawId>,
     resolver_preconditions: Vec<Vec<FlawId>>,
 
+    trail: Vec<(FlawId, f64)>,
+
     flaw_q: VecDeque<FlawId>,
     agenda: HashSet<FlawId>,
 
@@ -129,6 +131,8 @@ impl Graph {
             resolver_cost_var: Vec::new(),
             resolver_flaw: Vec::new(),
             resolver_preconditions: Vec::new(),
+
+            trail: Vec::new(),
 
             flaw_q: VecDeque::new(),
             agenda: HashSet::new(),
@@ -234,6 +238,25 @@ impl Graph {
         self.flaw_cost[flw_id]
     }
 
+    /// Computes the estimated cost of the given flaw based on its resolvers and their preconditions.
+    fn compute_flaw_cost(&self, flw_id: FlawId) -> f64 {
+        if self.flaw_status[flw_id] == Some(false) {
+            f64::INFINITY
+        } else {
+            let mut min_cost = f64::INFINITY;
+
+            for &resolver_id in &self.flaw_resolvers[flw_id] {
+                let resolver_cost = self.compute_resolver_cost(resolver_id);
+                if resolver_cost < min_cost {
+                    min_cost = resolver_cost;
+                }
+            }
+
+            min_cost
+        }
+    }
+
+    /// Takes the flaw out of the graph for processing.
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
         self.c_flaw.replace((flw_id, self.flaw_phi[flw_id]));
         #[cfg(feature = "server")]
@@ -315,6 +338,21 @@ impl Graph {
         &self.resolver_preconditions[res_id]
     }
 
+    /// Computes the estimated cost of the given resolver based on its intrinsic cost and the costs of its preconditions.
+    fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {
+        if self.resolver_status[res_id] == Some(false) {
+            f64::INFINITY
+        } else {
+            #[cfg(feature = "h_add")]
+            let precondition_cost: f64 = self.resolver_preconditions[res_id].iter().map(|&f_id| self.h_flaw[f_id]).sum();
+            #[cfg(feature = "h_max")]
+            let precondition_cost: f64 = self.resolver_preconditions[res_id].iter().fold(0.0_f64, |acc, &f_id| acc.max(self.flaw_cost[f_id]));
+
+            self.resolvers[res_id].as_ref().expect("Resolver should exist").intrinsic_cost().to_f64() + precondition_cost
+        }
+    }
+
+    /// Takes the resolver out of the graph for processing.
     pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
         self.c_res.replace((res_id, self.resolver_rho[res_id]));
         #[cfg(feature = "server")]
@@ -322,10 +360,45 @@ impl Graph {
         self.resolvers[res_id].take()
     }
 
+    /// Returns the resolver to the graph after processing it.
     pub(super) fn return_resolver(&mut self, res: Box<dyn Resolver>) {
         let (res_id, _) = self.c_res.take().expect("A resolver must be currently being processed to return it");
         self.resolvers[res_id] = Some(res);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
+    }
+
+    pub(super) fn propagate_costs(&mut self, initial_flaws: &[FlawId]) {
+        assert!(self.c_flaw.is_none(), "Cannot propagate while a flaw is being processed");
+        assert!(self.c_res.is_none(), "Cannot propagate while a resolver is being processed");
+
+        let mut queue = VecDeque::new();
+        let mut in_queue = vec![false; self.flaws.len()];
+        for &f_id in initial_flaws {
+            queue.push_back(f_id);
+            in_queue[f_id] = true;
+        }
+
+        while let Some(f_id) = queue.pop_front() {
+            in_queue[f_id] = false;
+
+            let old_cost = self.flaw_cost[f_id];
+            let c_cost = self.compute_flaw_cost(f_id);
+
+            if c_cost != old_cost {
+                self.trail.push((f_id, old_cost));
+                self.flaw_cost[f_id] = c_cost;
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::FlawCostUpdate { flaw_id: f_id, cost: c_cost });
+
+                for &r_id in &self.flaw_required_by[f_id] {
+                    let parent_flaw_id = self.resolver_flaw[r_id];
+                    if !in_queue[parent_flaw_id] {
+                        queue.push_back(parent_flaw_id);
+                        in_queue[parent_flaw_id] = true;
+                    }
+                }
+            }
+        }
     }
 }
