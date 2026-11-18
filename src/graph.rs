@@ -62,6 +62,20 @@ impl Graph {
         self.flaw_phi[flw_id]
     }
 
+    pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
+        self.c_flaw.replace((flw_id, self.flaw_phi[flw_id]));
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
+        self.flaws[flw_id].take()
+    }
+
+    pub(super) fn return_flaw(&mut self, flw: Box<dyn Flaw>) {
+        let (flw_id, _) = self.c_flaw.take().expect("A flaw must be checked out when calling return_flaw");
+        self.flaws[flw_id] = Some(flw);
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
+    }
+
     /// Returns the ρ literal of the given resolver.
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
         self.resolver_rho[res_id]
@@ -70,5 +84,19 @@ impl Graph {
     /// Returns the ρ literals of the given resolvers.
     pub(super) fn rhos(&self, res_ids: &[ResolverId]) -> Vec<Lit> {
         res_ids.iter().map(|&r_id| self.resolver_rho[r_id]).collect()
+    }
+
+    pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
+        self.c_res.replace((res_id, self.resolver_rho[res_id]));
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(res_id)));
+        self.resolvers[res_id].take()
+    }
+
+    pub(super) fn return_resolver(&mut self, res: Box<dyn Resolver>) {
+        let (res_id, _) = self.c_res.take().expect("A resolver must be checked out when calling return_resolver");
+        self.resolvers[res_id] = Some(res);
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 }

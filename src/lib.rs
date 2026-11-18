@@ -117,6 +117,14 @@ impl SolverState {
         unimplemented!()
     }
 
+    /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.
+    fn expand_flaw(&self, flw_id: FlawId) -> Result<(), SolverError> {
+        let mut flaw = self.graph.borrow_mut().take_flaw(flw_id).expect("Flaw should exist in graph");
+        flaw.expand(self)?;
+
+        unimplemented!()
+    }
+
     fn track_expr(&self, smt: &mut SeMiTONE, graph: &mut Graph, expr: impl AsRef<ast::BoolExpr>) -> Result<Lit, SolverError> {
         loop {
             match smt.track_expr(&expr) {
