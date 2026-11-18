@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, enum_flaw::EnumFlaw},
+    flaws::{Flaw, FlawId, Resolver, ResolverId, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::Graph,
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -298,7 +298,10 @@ impl Core for SolverState {
         Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
     }
     fn new_disjunction(&self, disjunction: Disjunction) {
-        unimplemented!()
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let causes = graph.current_causes();
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(DisjunctionFlaw::new(disjunction))).expect("Failed to add DisjunctionFlaw to graph");
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {

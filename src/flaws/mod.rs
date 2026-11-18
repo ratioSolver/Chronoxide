@@ -7,6 +7,7 @@ use std::{
 
 pub(super) mod bool_flaw;
 pub(super) mod clause_flaw;
+pub(super) mod disjunction_flaw;
 pub(super) mod enum_flaw;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
