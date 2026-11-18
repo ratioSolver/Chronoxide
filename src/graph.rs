@@ -55,7 +55,7 @@ impl fmt::Display for ResolverId {
 
 pub trait Flaw {
     /// Expands this flaw by adding resolvers to the graph that can potentially solve it.
-    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError>;
+    fn expand(&self, slv: &SolverState) -> Result<(), SolverError>;
 
     /// Serializes the domain-specific payload of this flaw to JSON.
     fn to_json(&self) -> Value;
@@ -68,7 +68,7 @@ pub trait Resolver {
     }
 
     /// Applies this resolver, adding its constraints, sub-flaws, or causal links to the solver state.
-    fn apply(&mut self, _slv: &SolverState) -> Result<(), SolverError> {
+    fn apply(&self, _slv: &SolverState) -> Result<(), SolverError> {
         Ok(())
     }
 
@@ -179,6 +179,7 @@ impl Graph {
         }
         self.flaw_cost_var.push(cost_var);
         for &cause in &causes {
+            self.flaw_required_by[flw_id].push(cause);
             self.resolver_preconditions[cause].push(flw_id);
         }
         self.flaw_causes.push(causes);
@@ -188,12 +189,49 @@ impl Graph {
 
         self.lit_to_flaws.entry(phi).or_default().push(flw_id);
 
+        self.flaw_q.push_back(flw_id);
+
         flw_id
+    }
+
+    /// Returns the status of the given flaw, if known.
+    pub(super) fn flaw_status(&self, flw_id: FlawId) -> Option<bool> {
+        self.flaw_status[flw_id]
     }
 
     /// Returns the ϕ literal of the given flaw.
     pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
         self.flaw_phi[flw_id]
+    }
+
+    /// Returns the ϕ literals of the given flaws.
+    pub(super) fn phis(&self, flw_ids: &[FlawId]) -> Vec<Lit> {
+        flw_ids.iter().map(|&f_id| self.flaw_phi[f_id]).collect()
+    }
+
+    /// Returns the cost variable of the given flaw.
+    pub(super) fn flaw_cost_var(&self, flw_id: FlawId) -> DlVar {
+        self.flaw_cost_var[flw_id]
+    }
+
+    /// Returns the causes of the given flaw.
+    pub(super) fn flaw_causes(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_causes[flw_id]
+    }
+
+    /// Returns the resolvers that require the given flaw.
+    pub(super) fn flaw_required_by(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_required_by[flw_id]
+    }
+
+    /// Returns the resolvers that can solve the given flaw.
+    pub(super) fn flaw_resolvers(&self, flw_id: FlawId) -> &[ResolverId] {
+        &self.flaw_resolvers[flw_id]
+    }
+
+    /// Returns the estimated cost of the given flaw.
+    pub(super) fn flaw_cost(&self, flw_id: FlawId) -> f64 {
+        self.flaw_cost[flw_id]
     }
 
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
@@ -203,13 +241,15 @@ impl Graph {
         self.flaws[flw_id].take()
     }
 
+    /// Returns the flaw to the graph after processing it.
     pub(super) fn return_flaw(&mut self, flw: Box<dyn Flaw>) {
-        let (flw_id, _) = self.c_flaw.take().expect("A flaw must be checked out when calling return_flaw");
+        let (flw_id, _) = self.c_flaw.take().expect("A flaw must be currently being processed to return it");
         self.flaws[flw_id] = Some(flw);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
     }
 
+    /// Adds a new resolver to the graph, returning its ResolverId.
     pub fn add_resolver(&mut self, rho: Lit, status: Option<bool>, cost: DlVar, res: Box<dyn Resolver>) -> ResolverId {
         let (flaw_id, _) = self.c_flaw.expect("Cannot add a resolver when no flaw is currently being processed");
         let res_id = ResolverId(self.resolvers.len());
@@ -245,6 +285,11 @@ impl Graph {
         res_id
     }
 
+    /// Returns the status of the given resolver, if known.
+    pub(super) fn resolver_status(&self, res_id: ResolverId) -> Option<bool> {
+        self.resolver_status[res_id]
+    }
+
     /// Returns the ρ literal of the given resolver.
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
         self.resolver_rho[res_id]
@@ -255,6 +300,21 @@ impl Graph {
         res_ids.iter().map(|&r_id| self.resolver_rho[r_id]).collect()
     }
 
+    /// Returns the cost variable of the given resolver.
+    pub(super) fn resolver_cost_var(&self, res_id: ResolverId) -> DlVar {
+        self.resolver_cost_var[res_id]
+    }
+
+    /// Returns the flaw that the given resolver can solve.
+    pub(super) fn resolver_flaw(&self, res_id: ResolverId) -> FlawId {
+        self.resolver_flaw[res_id]
+    }
+
+    /// Returns the preconditions of the given resolver.
+    pub(super) fn resolver_preconditions(&self, res_id: ResolverId) -> &[FlawId] {
+        &self.resolver_preconditions[res_id]
+    }
+
     pub(super) fn take_resolver(&mut self, res_id: ResolverId) -> Option<Box<dyn Resolver>> {
         self.c_res.replace((res_id, self.resolver_rho[res_id]));
         #[cfg(feature = "server")]
@@ -263,7 +323,7 @@ impl Graph {
     }
 
     pub(super) fn return_resolver(&mut self, res: Box<dyn Resolver>) {
-        let (res_id, _) = self.c_res.take().expect("A resolver must be checked out when calling return_resolver");
+        let (res_id, _) = self.c_res.take().expect("A resolver must be currently being processed to return it");
         self.resolvers[res_id] = Some(res);
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));

@@ -17,7 +17,7 @@ impl BoolFlaw {
 }
 
 impl Flaw for BoolFlaw {
-    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+    fn expand(&self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         let (flw_id, phi) = graph.current_flaw().expect("No current flaw found");
@@ -67,7 +67,7 @@ impl BoolResolver {
 }
 
 impl Resolver for BoolResolver {
-    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
         let mut smt = slv.smt.borrow_mut();
         let mut graph = slv.graph.borrow_mut();
         let (_, rho) = graph.current_resolver().expect("No current resolver found");

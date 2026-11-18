@@ -23,7 +23,7 @@ impl DisjunctionFlaw {
 }
 
 impl Flaw for DisjunctionFlaw {
-    fn expand(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+    fn expand(&self, slv: &SolverState) -> Result<(), SolverError> {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         let (flw_id, _phi) = graph.current_flaw().expect("No current flaw found");
@@ -63,7 +63,7 @@ impl Resolver for DisjunctionResolver {
         self.cost.clone()
     }
 
-    fn apply(&mut self, slv: &SolverState) -> Result<(), SolverError> {
+    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
         for stmt in &self.disjunct {
             trace!("Executing disjunction disjunct: {}", stmt);
             if let Err(e) = execute(&self.scp, self.env.clone(), stmt) {
