@@ -78,6 +78,7 @@ impl SolverState {
 
                     if !self.graph.borrow().has_estimated_solution() {
                         trace!("Expanding graph...");
+                        self.cancel_until(0);
                         let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
                         self.expand_flaw(flw_id)?;
                     } else {
@@ -230,6 +231,14 @@ impl SolverState {
         self.notified_len.set(smt.current_trail_len());
         graph.cancel_until(bt_level, &vars_to_undo);
         smt.add_clause(lemma).is_ok()
+    }
+
+    fn cancel_until(&self, bt_level: usize) {
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let vars_to_undo = smt.cancel_until(bt_level);
+        self.notified_len.set(smt.current_trail_len());
+        graph.cancel_until(bt_level, &vars_to_undo);
     }
 
     fn to_json(&self) -> Value {
