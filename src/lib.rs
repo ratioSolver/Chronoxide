@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
+    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
 };
@@ -36,6 +36,8 @@ pub struct SolverState {
     smt: RefCell<SeMiTONE>,
     notified_len: Cell<usize>,
     graph: RefCell<Graph>,
+    atom_sigma: RefCell<Vec<Option<ResolverId>>>,
+    atom_flaw: RefCell<Vec<FlawId>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -50,6 +52,8 @@ impl SolverState {
             smt: RefCell::new(SeMiTONE::new()),
             notified_len: Cell::new(0),
             graph: RefCell::new(Graph::new(tx_event.clone())),
+            atom_sigma: RefCell::new(Vec::new()),
+            atom_flaw: RefCell::new(Vec::new()),
             tx_event,
         });
         slv
@@ -406,13 +410,33 @@ impl Core for SolverState {
     }
 
     fn new_object(&self, class: Rc<dyn Class>) -> ObjectId {
-        unimplemented!()
+        let obj = self.core.new_object(class.clone());
+        trace!("Created new object {} of class {}", obj, class.full_name());
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewObject { obj_id: obj, name: self.core.get_object_name(obj), class: class.full_name() });
+        obj
     }
     fn get_object(&self, id: ObjectId) -> Option<Rc<Object>> {
         self.core.get_object(id)
     }
     fn new_atom(&self, predicate: Rc<Predicate>, kind: AtomKind, args: HashMap<String, Slot>, resolution_constraint: ResolutionConstraint) -> Result<AtomId, RiddleError> {
-        unimplemented!()
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let atm = self.core.new_atom(predicate.clone(), kind, args, resolution_constraint)?;
+        trace!("Created new atom {} with predicate {}", atm, predicate.full_name());
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewAtom {
+            atom_id: atm,
+            predicate: predicate.full_name(),
+            kind,
+            args: to_json(&smt, self.core.get_atom(atm).expect("Atom should exist in core").as_ref()),
+            resolution_constraint,
+        });
+        self.atom_sigma.borrow_mut().push(None);
+        let causes = graph.current_causes();
+        let flaw = self.add_flaw(&mut smt, &mut graph, causes, Box::new(AtomFlaw::new(atm))).expect("Failed to add AtomFlaw to graph");
+        self.atom_flaw.borrow_mut().push(flaw);
+        Ok(atm)
     }
     fn get_atom(&self, id: AtomId) -> Option<Rc<Atom>> {
         self.core.get_atom(id)
