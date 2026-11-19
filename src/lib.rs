@@ -143,7 +143,7 @@ impl SolverState {
     }
 
     pub fn add_resolver(&self, smt: &mut SeMiTONE, graph: &mut Graph, rho: Lit, res: Box<dyn Resolver>) -> Result<ResolverId, SolverError> {
-        let (flaw_id, phi) = graph.current_flaw().ok_or(SolverError::runtime("No current flaw when adding resolver"))?;
+        let (flaw_id, phi) = graph.current_flaw().expect("No current flaw found");
         // ρ → ϕ (the activation of the resolver implies the activation of the flaw)
         self.add_clause(smt, graph, vec![!rho, phi])?;
 
@@ -156,6 +156,21 @@ impl SolverState {
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
 
         Ok(graph.add_resolver(rho, status, cost, res))
+    }
+
+    /// Adds a causal link from `flw_id` to the current resolver, wiring the ρ → ϕ clause
+    /// and the DL cost constraint into `smt`.
+    pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw_id: FlawId) -> Result<(), SolverError> {
+        let (rho, phi) = graph.add_causal_link(flw_id)?;
+        // ρ → ϕ (the activation of the resolver implies the activation of the flaw)
+        self.add_clause(smt, graph, vec![!rho, phi])?;
+
+        let (res_id, _) = graph.current_resolver().expect("No current resolver found");
+        let res_cost = graph.resolver_cost_var(res_id);
+        let flw_cost = graph.flaw_cost_var(flw_id);
+        // ρ → (cost(ρ) >= cost(ϕ))
+        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, flw_cost, rug::Rational::from(0)))?;
+        self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
 
     /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.

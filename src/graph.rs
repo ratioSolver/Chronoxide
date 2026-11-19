@@ -239,6 +239,11 @@ impl Graph {
         self.flaw_cost[flw_id]
     }
 
+    /// Returns whether the given flaw has been expanded (i.e., its resolvers have been added to the graph).
+    pub(super) fn flaw_expanded(&self, flw_id: FlawId) -> bool {
+        !self.flaw_q.contains(&flw_id)
+    }
+
     /// Computes the estimated cost of the given flaw based on its resolvers and their preconditions.
     fn compute_flaw_cost(&self, flw_id: FlawId) -> f64 {
         if self.flaw_status[flw_id] == Some(false) {
@@ -359,6 +364,21 @@ impl Graph {
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(res_id)));
         self.resolvers[res_id].take()
+    }
+
+    /// Adds a causal link from the given flaw to the current resolver.
+    pub(super) fn add_causal_link(&mut self, flw_id: FlawId) -> Result<(Lit, Lit), SolverError> {
+        let phi = self.flaw_phi[flw_id];
+        let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError(String::from("No current resolver to add causal link from")))?;
+        if !self.flaw_required_by[flw_id].contains(&res_id) {
+            self.flaw_required_by[flw_id].push(res_id);
+        }
+        self.resolver_preconditions[res_id].push(flw_id);
+
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::NewCausalLink { flaw_id: flw_id, resolver_id: res_id });
+
+        Ok((rho, phi))
     }
 
     /// Returns the resolver to the graph after processing it.
