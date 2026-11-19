@@ -309,8 +309,7 @@ impl Core for SolverState {
     }
 
     fn sum(&self, sum: &[Slot]) -> Result<Slot, RiddleError> {
-        let tp = arith_type(self, sum)?;
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Add(sum.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_type(self, sum)?, ast::ArithExpr::Add(sum.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
     }
     fn opposite(&self, term: Slot) -> Result<Slot, RiddleError> {
         if let Slot::Primitive(p) = &term {
@@ -326,12 +325,10 @@ impl Core for SolverState {
         }
     }
     fn mul(&self, mul: &[Slot]) -> Result<Slot, RiddleError> {
-        let tp = arith_type(self, mul)?;
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Mul(mul.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_type(self, mul)?, ast::ArithExpr::Mul(mul.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
     }
     fn div(&self, left: Slot, right: Slot) -> Result<Slot, RiddleError> {
-        let tp = arith_type(self, &[left.clone(), right.clone()])?;
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(extract_arith(&left)?), Box::new(extract_arith(&right)?))))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(arith_type(self, &[left.clone(), right.clone()])?, ast::ArithExpr::Div(Box::new(extract_arith(&left)?), Box::new(extract_arith(&right)?))))))
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
