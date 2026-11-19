@@ -5,6 +5,7 @@ use crate::{
     graph::{Flaw, FlawId, Resolver},
 };
 use riddle::{
+    RiddleError,
     core::Core,
     env::{Atom, AtomId, Env},
     language::{AtomKind, ResolutionConstraint},
@@ -119,6 +120,19 @@ impl GoalResolver {
 impl Resolver for GoalResolver {
     fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying GoalResolver for atom {}", self.atom);
+        let atom = slv.get_atom(self.atom).expect(&format!("Atom {} not found", self.atom));
+        if let Err(e) = atom.predicate().call(atom) {
+            return match e {
+                RiddleError::InconsistencyError(msg) => {
+                    trace!("GoalResolver inconsistency for atom {}: {}", self.atom, msg);
+                    let mut smt = slv.smt.borrow_mut();
+                    let mut graph = slv.graph.borrow_mut();
+                    let (_, rho) = graph.current_resolver().expect("No current resolver found");
+                    slv.add_clause(&mut smt, &mut graph, vec![!rho])
+                }
+                _ => Err(SolverError::RuntimeError(format!("Failed to apply GoalResolver for atom {}: {}", self.atom, e))),
+            };
+        }
 
         Ok(())
     }
@@ -181,7 +195,7 @@ impl Resolver for UnificationResolver {
         // ρ → eq_lit (if the current atom unifies, the unification equations must hold)
         slv.add_clause(&mut smt, &mut graph, vec![!rho, self.eq_lit])?;
         if let Some(sigma) = self.sigma {
-            // ρ → sigma (if the current atom unifies, the current atom's resolver must be activated)
+            // ρ → !sigma (if the current atom unifies, the current atom's resolver must be deactivated)
             slv.add_clause(&mut smt, &mut graph, vec![!rho, !sigma])?;
         }
 
