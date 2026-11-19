@@ -185,11 +185,10 @@ impl Graph {
         }
         self.flaw_cost_var.push(cost_var);
         for &cause in &causes {
-            self.flaw_required_by[flw_id].push(cause);
             self.resolver_preconditions[cause].push(flw_id);
         }
-        self.flaw_causes.push(causes);
-        self.flaw_required_by.push(Vec::new());
+        self.flaw_causes.push(causes.clone());
+        self.flaw_required_by.push(causes);
         self.flaw_resolvers.push(Vec::new());
         self.flaw_cost.push(f64::INFINITY);
 
@@ -346,7 +345,7 @@ impl Graph {
             f64::INFINITY
         } else {
             #[cfg(feature = "h_add")]
-            let precondition_cost: f64 = self.resolver_preconditions[res_id].iter().map(|&f_id| self.h_flaw[f_id]).sum();
+            let precondition_cost: f64 = self.resolver_preconditions[res_id].iter().map(|&f_id| self.flaw_cost[f_id]).sum();
             #[cfg(feature = "h_max")]
             let precondition_cost: f64 = self.resolver_preconditions[res_id].iter().fold(0.0_f64, |acc, &f_id| acc.max(self.flaw_cost[f_id]));
 
@@ -530,12 +529,13 @@ impl Graph {
     }
 
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
-        self.flaw_q.retain(|&f_id| self.flaw_status[f_id] != Some(false));
-
         let mut best_idx = None;
         let mut best_priority = -1;
 
         for (idx, &f_id) in self.flaw_q.iter().enumerate() {
+            if self.flaw_status[f_id] == Some(false) {
+                continue;
+            }
             let priority = if self.flaw_status[f_id] == Some(true) {
                 2
             } else if self.has_finite_cost_ancestor(f_id) {

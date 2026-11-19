@@ -72,6 +72,9 @@ impl SolverState {
                 Ok(_) => {
                     let new_literals = self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
                     self.graph.borrow_mut().propagate(&new_literals);
+                    self.notified_len.set(self.smt.borrow().current_trail_len());
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
 
                     if !self.graph.borrow().has_estimated_solution() {
                         trace!("Expanding graph...");
@@ -266,6 +269,7 @@ impl SolverState {
             "atoms": Value::Object(atoms_map),
             "flaws": Vec::<Value>::new(),
             "resolvers": Vec::<Value>::new(),
+            "timelines": Vec::<Value>::new(),
         })
     }
 }
@@ -306,20 +310,7 @@ impl Core for SolverState {
 
     fn sum(&self, sum: &[Slot]) -> Result<Slot, RiddleError> {
         let tp = arith_type(self, sum)?;
-        let sum = sum
-            .iter()
-            .map(|s| match s {
-                Slot::Primitive(p) => {
-                    if let Some(arith_var) = p.downcast::<ArithVar>() {
-                        Ok(arith_var.lin.clone())
-                    } else {
-                        Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
-                    }
-                }
-                _ => Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", s))),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Add(sum)))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Add(sum.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
     }
     fn opposite(&self, term: Slot) -> Result<Slot, RiddleError> {
         if let Slot::Primitive(p) = &term {
@@ -336,42 +327,11 @@ impl Core for SolverState {
     }
     fn mul(&self, mul: &[Slot]) -> Result<Slot, RiddleError> {
         let tp = arith_type(self, mul)?;
-        let mul = mul
-            .iter()
-            .map(|s| match s {
-                Slot::Primitive(p) => {
-                    if let Some(arith_var) = p.downcast::<ArithVar>() {
-                        Ok(arith_var.lin.clone())
-                    } else {
-                        Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", s)))
-                    }
-                }
-                _ => Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", s))),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Mul(mul)))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Mul(mul.iter().map(extract_arith).collect::<Result<Vec<_>, _>>()?)))))
     }
     fn div(&self, left: Slot, right: Slot) -> Result<Slot, RiddleError> {
         let tp = arith_type(self, &[left.clone(), right.clone()])?;
-        let left_lin = if let Slot::Primitive(p) = &left {
-            if let Some(arith_var) = p.downcast::<ArithVar>() {
-                arith_var.lin.clone()
-            } else {
-                return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", left)));
-            }
-        } else {
-            return Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", left)));
-        };
-        let right_lin = if let Slot::Primitive(p) = &right {
-            if let Some(arith_var) = p.downcast::<ArithVar>() {
-                arith_var.lin.clone()
-            } else {
-                return Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", right)));
-            }
-        } else {
-            return Err(RiddleError::TypeError(format!("Expected a primitive variable, got {}", right)));
-        };
-        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(left_lin), Box::new(right_lin))))))
+        Ok(Slot::Primitive(Rc::new(ArithVar::new(tp, ast::ArithExpr::Div(Box::new(extract_arith(&left)?), Box::new(extract_arith(&right)?))))))
     }
 
     fn assert(&self, term: Rc<BoolExpr>) -> bool {
@@ -571,6 +531,15 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         _ => return ast::BoolExpr::False,
     }
     unreachable!("Expected compatible types in equality");
+}
+
+fn extract_arith(slot: &Slot) -> Result<ast::ArithExpr, RiddleError> {
+    if let Slot::Primitive(p) = slot {
+        if let Some(arith_var) = p.downcast::<ArithVar>() {
+            return Ok(arith_var.lin.clone());
+        }
+    }
+    Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", slot)))
 }
 
 fn to_json(smt: &SeMiTONE, env: &dyn Env) -> Value {
