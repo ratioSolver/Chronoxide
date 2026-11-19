@@ -178,6 +178,13 @@ impl SolverState {
         let mut smt = self.smt.borrow_mut();
         self.add_clause(&mut smt, &mut graph, clause)?;
 
+        let current_len = smt.current_trail_len();
+        if current_len > self.notified_len.get() {
+            graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+        }
+        self.notified_len.set(current_len);
+        graph.propagate_costs(&[flw_id]);
+
         Ok(())
     }
 
