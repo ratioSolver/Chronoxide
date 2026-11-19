@@ -65,7 +65,10 @@ impl SolverState {
         loop {
             let prop_result = self.smt.borrow_mut().propagate();
             match prop_result {
-                Ok(_) => {}
+                Ok(_) => {
+                    let new_literals = self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
+                    self.graph.borrow_mut().propagate(&new_literals);
+                }
                 Err((bt_level, lemma)) => {
                     let mut smt = self.smt.borrow_mut();
                     let mut graph = self.graph.borrow_mut();
@@ -194,6 +197,7 @@ impl SolverState {
         }
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
+        graph.cancel_until(bt_level, &vars_to_undo);
         smt.add_clause(lemma).is_ok()
     }
 
