@@ -528,4 +528,97 @@ impl Graph {
         }
         true
     }
+
+    pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
+        self.flaw_q.retain(|&f_id| self.flaw_status[f_id] != Some(false));
+
+        let mut best_idx = None;
+        let mut best_priority = -1;
+
+        for (idx, &f_id) in self.flaw_q.iter().enumerate() {
+            let priority = if self.flaw_status[f_id] == Some(true) {
+                2
+            } else if self.has_finite_cost_ancestor(f_id) {
+                0
+            } else {
+                1
+            };
+
+            if priority > best_priority {
+                best_priority = priority;
+                best_idx = Some(idx);
+
+                if best_priority == 2 {
+                    break;
+                }
+            }
+        }
+
+        best_idx.and_then(|idx| self.flaw_q.remove(idx))
+    }
+
+    fn has_finite_cost_ancestor(&self, target: FlawId) -> bool {
+        let mut queue = Vec::new();
+        let mut visited = HashSet::new();
+
+        for &res_id in &self.flaw_causes[target] {
+            queue.push(self.resolver_flaw[res_id]);
+        }
+
+        while let Some(f_id) = queue.pop() {
+            if !visited.insert(f_id) {
+                continue;
+            }
+
+            if self.flaw_cost[f_id] < f64::INFINITY {
+                return true;
+            }
+
+            for &res_id in &self.flaw_causes[f_id] {
+                queue.push(self.resolver_flaw[res_id]);
+            }
+        }
+
+        false
+    }
+
+    pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
+        for &f_id in &self.flaw_q {
+            if self.flaw_status[f_id].is_none() {
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(f_id)));
+                return Some(!self.flaw_phi[f_id]);
+            }
+        }
+
+        if self.agenda.is_empty() {
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
+            #[cfg(feature = "server")]
+            let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
+            return None;
+        }
+
+        let best_flaw_id = self.agenda.iter().max_by(|&f1, &f2| self.flaw_cost[*f1].partial_cmp(&self.flaw_cost[*f2]).unwrap()).unwrap();
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(*best_flaw_id)));
+        let mut best_res_id = None;
+        let mut best_res_cost = f64::INFINITY;
+
+        for &r_id in &self.flaw_resolvers[*best_flaw_id] {
+            if self.resolver_status[r_id] == Some(false) {
+                continue;
+            }
+
+            let cost = self.compute_resolver_cost(r_id);
+            if cost < best_res_cost {
+                best_res_cost = cost;
+                best_res_id = Some(r_id);
+            }
+        }
+
+        #[cfg(feature = "server")]
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(best_res_id));
+        Some(self.resolver_rho[best_res_id.expect("There should be at least one resolver for the flaw")])
+    }
 }

@@ -72,6 +72,23 @@ impl SolverState {
                 Ok(_) => {
                     let new_literals = self.smt.borrow().get_trail_delta(self.notified_len.get()).to_vec();
                     self.graph.borrow_mut().propagate(&new_literals);
+
+                    if !self.graph.borrow().has_estimated_solution() {
+                        trace!("Expanding graph...");
+                        let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
+                        self.expand_flaw(flw_id)?;
+                    } else {
+                        trace!("Picking branching literal...");
+                        let decision = self.graph.borrow().pick_branching_literal();
+                        if let Some(decision_var) = decision {
+                            self.graph.borrow_mut().push();
+                            self.smt.borrow_mut().decide(decision_var);
+                        } else {
+                            trace!("No more decisions to make, checking timelines for new flaws...");
+                            trace!("No more decisions to make, solution found");
+                            break;
+                        }
+                    }
                 }
                 Err((bt_level, lemma)) => {
                     let mut smt = self.smt.borrow_mut();

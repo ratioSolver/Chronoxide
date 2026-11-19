@@ -1,0 +1,73 @@
+use chronoxide::Solver;
+use std::fs::read_to_string;
+use std::path::PathBuf;
+
+macro_rules! test_chronoxide {
+    ($name:ident, ok, [ $($path:expr),+ ]) => {
+        #[tokio::test]
+        async fn $name() {
+            let slv = Solver::new();
+
+            $(
+                let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                p.push($path);
+                assert!(slv.read(read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path))).await.is_ok(), "Failed to read RiDDle script from file: {}", $path);
+            )+
+
+            assert!(slv.solve().await.is_ok(), "Solver failed for test: {}", stringify!($name));
+        }
+    };
+
+    ($name:ident, err, [ $($path:expr),+ ]) => {
+        #[tokio::test]
+        async fn $name() {
+            let slv = Solver::new();
+            let mut read_failed = false;
+
+            $(
+                let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                p.push($path);
+                if slv.read(read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path))).await.is_err() {
+                    read_failed = true;
+                }
+            )+
+
+            if !read_failed {
+                assert!(slv.solve().await.is_err(), "Solver unexpectedly succeeded for test: {}", stringify!($name));
+            }
+        }
+    };
+}
+
+// test_chronoxide!(test_core_00, ok, ["tests/examples/core/example_00.rddl"]);
+// test_chronoxide!(test_core_01, ok, ["tests/examples/core/example_01.rddl"]);
+// test_chronoxide!(test_core_02, err, ["tests/examples/core/example_02.rddl"]);
+// test_chronoxide!(test_core_03, ok, ["tests/examples/core/example_03.rddl"]);
+// test_chronoxide!(test_core_04, ok, ["tests/examples/core/example_04.rddl"]);
+// test_chronoxide!(test_core_05, err, ["tests/examples/core/example_05.rddl"]);
+// test_chronoxide!(test_core_06, err, ["tests/examples/core/example_06.rddl"]);
+// test_chronoxide!(test_core_07, ok, ["tests/examples/core/example_07.rddl"]);
+// test_chronoxide!(test_core_08, ok, ["tests/examples/core/example_08.rddl"]);
+// test_chronoxide!(test_core_09, ok, ["tests/examples/core/example_09.rddl"]);
+// test_chronoxide!(test_core_10, ok, ["tests/examples/core/example_10.rddl"]);
+// test_chronoxide!(test_core_11, ok, ["tests/examples/core/example_11.rddl"]);
+// test_chronoxide!(test_core_12, ok, ["tests/examples/core/example_12.rddl"]);
+// test_chronoxide!(test_core_13, ok, ["tests/examples/core/example_13.rddl"]);
+
+// test_chronoxide!(test_sv_00, ok, ["tests/examples/types/sv/sv_0.rddl"]);
+// test_chronoxide!(test_sv_01, ok, ["tests/examples/types/sv/sv_1.rddl"]);
+// test_chronoxide!(test_sv_02, ok, ["tests/examples/types/sv/sv_2.rddl"]);
+// test_chronoxide!(test_sv_03, ok, ["tests/examples/types/sv/sv_3.rddl"]);
+
+// test_chronoxide!(test_rr_00, ok, ["tests/examples/types/rr/rr_0.rddl"]);
+// test_chronoxide!(test_rr_01, ok, ["tests/examples/types/rr/rr_1.rddl"]);
+// test_chronoxide!(test_rr_02, ok, ["tests/examples/types/rr/rr_2.rddl"]);
+// test_chronoxide!(test_rr_03, ok, ["tests/examples/types/rr/rr_3.rddl"]);
+
+// test_chronoxide!(test_cr_00, ok, ["tests/examples/types/cr/cr_0.rddl"]);
+// test_chronoxide!(test_cr_01, ok, ["tests/examples/types/cr/cr_1.rddl"]);
+// test_chronoxide!(test_cr_02, ok, ["tests/examples/types/cr/cr_2.rddl"]);
+// test_chronoxide!(test_cr_03, ok, ["tests/examples/types/cr/cr_3.rddl"]);
+
+// test_chronoxide!(test_logistics_00, ok, ["tests/examples/logistics/domain.rddl", "tests/examples/logistics/l_0.rddl"]);
+// test_chronoxide!(test_logistics_01, ok, ["tests/examples/logistics/domain.rddl", "tests/examples/logistics/l_1.rddl"]);
