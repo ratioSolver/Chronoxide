@@ -16,7 +16,7 @@ use semitone::{
     ast::{self, BoolExpr::And},
 };
 use serde_json::{Value, json};
-use tracing::trace;
+use tracing::{trace, warn};
 
 pub(crate) struct AtomFlaw {
     atom: AtomId,
@@ -239,7 +239,7 @@ fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>, predicate: Rc
                     queue.push(parent_pred);
                 }
                 Err(e) => {
-                    tracing::warn!("Unification warning: Failed to resolve parent {:?} - {}", parent_path, e);
+                    warn!("Unification warning: Failed to resolve parent {:?} - {}", parent_path, e);
                 }
             }
         }
