@@ -25,14 +25,14 @@
   "devDependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
     "@types/bootstrap": "^5.2.11",
-    "@types/node": "^26.6.5",
-    "jsdom": "^30.1.3",
+    "@types/node": "^26.6.6",
+    "jsdom": "^31.0.1",
     "typescript": "~7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.8"
   },
   "peerDependencies": {
     "@ratiosolver/flick": "^0.2.12",
-    "bootstrap": "^5.3.8",
+    "bootstrap": "^5.3.9",
     "snabbdom": "^3.6.4"
   },
   "publishConfig": {
