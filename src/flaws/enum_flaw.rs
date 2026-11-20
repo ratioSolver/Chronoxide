@@ -29,7 +29,7 @@ impl Flaw for EnumFlaw {
 
         let mut candidates = Vec::with_capacity(self.domain.len());
         for &val in &self.domain {
-            let val_lit = slv.track_expr(&mut smt, &mut graph, self.expr.eq(*val))?;
+            let val_lit = slv.track_expr(&mut smt, &mut graph, self.expr.eq(usize::from(val)))?;
             if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
                 candidates.push((val, val_lit));
             }

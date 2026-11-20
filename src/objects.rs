@@ -136,7 +136,7 @@ impl Env for EnumVar {
                         Slot::Primitive(p) => bool_expr(&p),
                         _ => None,
                     }?;
-                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(usize::from(inst))).ok()?;
                     let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }
@@ -149,7 +149,7 @@ impl Env for EnumVar {
                         Slot::Primitive(p) => p.downcast::<ArithVar>().map(|v| v.lin.clone()),
                         _ => None,
                     }?;
-                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(usize::from(inst))).ok()?;
                     let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }
@@ -158,18 +158,18 @@ impl Env for EnumVar {
             "string" => return None,
             _ => {
                 let tp_class = tp.as_class()?;
-                let domain = tp_class.instances().iter().map(|id| **id).collect::<Vec<_>>();
+                let domain = tp_class.instances().iter().map(|id| usize::from(*id)).collect::<Vec<_>>();
                 if domain.is_empty() {
                     return None;
                 }
                 let r = smt.new_enum(domain);
                 for (inst, slot) in inst_slots {
                     let val = match slot {
-                        Slot::ObjectRef(id) => EnumExpr::Const(*id),
+                        Slot::ObjectRef(id) => EnumExpr::Const(usize::from(id)),
                         Slot::Primitive(p) => p.downcast::<EnumVar>().map(|v| v.var.clone())?,
                         Slot::AtomRef(_) => return None,
                     };
-                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(*inst)).ok()?;
+                    let selected = slv.track_expr(&mut smt, &mut graph, &self.var.eq(usize::from(inst))).ok()?;
                     let same = slv.track_expr(&mut smt, &mut graph, &r.eq(&val)).ok()?;
                     slv.add_clause(&mut smt, &mut graph, vec![!selected, same]).ok()?;
                 }

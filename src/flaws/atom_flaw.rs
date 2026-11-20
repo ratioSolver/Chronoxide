@@ -56,12 +56,12 @@ impl Flaw for AtomFlaw {
                     continue;
                 }
                 trace!("Checking if {} can unify with {}", self.atom, target_atom);
-                let target_flaw = slv.atom_flaw.borrow().get(*target_atom).copied().ok_or(SolverError::RuntimeError(format!("Target atom {} does not have an associated flaw", target_atom)))?;
+                let target_flaw = slv.atom_flaw.borrow()[target_atom];
                 if !graph.flaw_expanded(target_flaw) {
                     trace!("Skipping unification with {} for atom {} because target flaw is not expanded", target_atom, self.atom);
                     continue;
                 }
-                let Some(target_sigma_res) = slv.atom_sigma.borrow().get(*target_atom).copied().flatten() else {
+                let Some(target_sigma_res) = slv.atom_sigma.borrow()[target_atom] else {
                     trace!("Skipping unification with {} for atom {} because target has no fact/goal resolver", target_atom, self.atom);
                     continue;
                 };
@@ -84,7 +84,7 @@ impl Flaw for AtomFlaw {
                 AtomKind::Fact => slv.add_resolver(&mut smt, &mut graph, rho, Box::new(FactResolver::new(self.atom)))?,
                 AtomKind::Goal => slv.add_resolver(&mut smt, &mut graph, rho, Box::new(GoalResolver::new(self.atom)))?,
             };
-            slv.atom_sigma.borrow_mut()[*self.atom] = Some(res_id);
+            slv.atom_sigma.borrow_mut()[self.atom] = Some(res_id);
             Some(rho)
         } else {
             None

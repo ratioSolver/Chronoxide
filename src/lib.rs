@@ -2,6 +2,7 @@ use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
+    timelines::{Timeline, state_variable::StateVariable},
 };
 use riddle::{
     RiddleError,
@@ -29,6 +30,7 @@ use tracing::{info, trace};
 mod flaws;
 mod graph;
 mod objects;
+mod timelines;
 
 pub struct SolverState {
     core: Rc<CommonCore>,
@@ -38,6 +40,7 @@ pub struct SolverState {
     graph: RefCell<Graph>,
     atom_sigma: RefCell<Vec<Option<ResolverId>>>,
     atom_flaw: RefCell<Vec<FlawId>>,
+    timelines: RefCell<Vec<Rc<dyn Timeline>>>,
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -54,9 +57,16 @@ impl SolverState {
             graph: RefCell::new(Graph::new(tx_event.clone())),
             atom_sigma: RefCell::new(Vec::new()),
             atom_flaw: RefCell::new(Vec::new()),
+            timelines: RefCell::new(Vec::new()),
             tx_event,
         });
+        slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
         slv
+    }
+
+    pub fn add_timeline(&self, timeline: Rc<dyn Timeline>) {
+        self.core.add_type(timeline.clone());
+        self.timelines.borrow_mut().push(timeline);
     }
 
     fn read(&self, script: &str) -> Result<(), SolverError> {
@@ -402,7 +412,7 @@ impl Core for SolverState {
 
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
-        let var = smt.new_enum(instances.iter().map(|&id| *id));
+        let var = smt.new_enum(instances.iter().map(|&id| usize::from(id)));
         let causes = graph.current_causes();
         self.add_flaw(&mut smt, &mut graph, causes, Box::new(EnumFlaw::new(var.clone(), instances.to_vec()))).expect("Failed to add EnumFlaw to graph");
         Ok(Slot::Primitive(Rc::new(EnumVar::new(self.slv.clone(), tp, var))))
@@ -538,12 +548,12 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.downcast::<EnumVar>() {
-                return left.var.eq(**right);
+                return left.var.eq(usize::from(*right));
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.downcast::<EnumVar>() {
-                return right.var.eq(**left);
+                return right.var.eq(usize::from(*left));
             }
         }
         (Slot::ObjectRef(left), Slot::ObjectRef(right)) => {
