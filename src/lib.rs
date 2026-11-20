@@ -2,7 +2,7 @@ use crate::{
     flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
-    timelines::{Timeline, reusable_resource::ReusableResource, state_variable::StateVariable},
+    timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource, state_variable::StateVariable},
 };
 use riddle::{
     RiddleError,
@@ -62,6 +62,7 @@ impl SolverState {
         });
         slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
         slv.add_timeline(ReusableResource::new(Rc::downgrade(&slv) as _));
+        slv.add_timeline(ConsumableResource::new(Rc::downgrade(&slv) as _));
         slv
     }
 
@@ -298,13 +299,21 @@ impl SolverState {
 
         drop(smt);
 
+        let mut timelines_map = serde_json::Map::new();
+        for timeline in self.timelines.borrow().iter() {
+            let timeline_json = timeline.to_json(self);
+            if let Value::Object(map) = timeline_json {
+                timelines_map.extend(map);
+            }
+        }
+
         json!({
             "env": env,
             "objects": Value::Object(objects_map),
             "atoms": Value::Object(atoms_map),
             "flaws": Vec::<Value>::new(),
             "resolvers": Vec::<Value>::new(),
-            "timelines": Vec::<Value>::new(),
+            "timelines": Value::Object(timelines_map),
         })
     }
 }

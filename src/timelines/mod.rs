@@ -11,6 +11,7 @@ use riddle::{
 use semitone::ast::ArithExpr;
 use serde_json::Value;
 
+pub(super) mod consumable_resource;
 pub(super) mod reusable_resource;
 pub(super) mod state_variable;
 

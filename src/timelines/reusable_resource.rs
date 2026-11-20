@@ -1,4 +1,3 @@
-use axum::routing::get;
 use riddle::{
     core::Core,
     delegate_scope,
