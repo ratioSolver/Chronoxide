@@ -11,6 +11,7 @@ use riddle::{
 use semitone::ast::ArithExpr;
 use serde_json::Value;
 
+pub(super) mod reusable_resource;
 pub(super) mod state_variable;
 
 type FlawWithCauses = (Box<dyn Flaw>, Vec<ResolverId>);

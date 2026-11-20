@@ -62,16 +62,15 @@ impl StateVariable {
                     if smt.get_lit_val(graph.rho(sigma_res)) != Some(true) {
                         continue;
                     }
-                    let atom = slv.get_atom(atom_id).expect("Atom should exist");
-                    match atom.get("tau") {
-                        Some(Slot::ObjectRef(sv)) => {
-                            atoms_by_instance.entry(sv).or_default().push(atom.id());
+                    match get_tau(slv, atom_id) {
+                        Slot::ObjectRef(sv) => {
+                            atoms_by_instance.entry(sv).or_default().push(atom_id);
                         }
-                        Some(Slot::Primitive(var)) => {
+                        Slot::Primitive(var) => {
                             if let Some(enum_var) = var.downcast::<EnumVar>()
                                 && let Some(sv) = smt.get_enum_val(&enum_var.var)
                             {
-                                atoms_by_instance.entry(ObjectId::from(sv)).or_default().push(atom.id());
+                                atoms_by_instance.entry(ObjectId::from(sv)).or_default().push(atom_id);
                             }
                         }
                         _ => unreachable!("Atom should have a 'tau' field"),
@@ -254,7 +253,7 @@ impl Flaw for Peak {
         let mut graph = slv.graph.borrow_mut();
         let mut smt = slv.smt.borrow_mut();
         let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
-        trace!("Expanding Peak flaw {} between atoms {} and {}", flw_id, self.a, self.b);
+        trace!("Expanding Peak flaw {} with atoms {} and {}", flw_id, self.a, self.b);
 
         let mut candidates: Vec<Box<dyn Resolver>> = Vec::with_capacity(3);
 
