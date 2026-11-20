@@ -8,7 +8,7 @@ use crate::{
 use riddle::{
     core::Core,
     delegate_scope,
-    env::{AtomId, Env, ObjectId, Slot},
+    env::{AtomId, ObjectId, Slot},
     language::ConstructorDef,
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
 };
