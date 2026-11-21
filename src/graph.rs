@@ -445,18 +445,30 @@ impl Graph {
         assert!(self.c_flaw.is_none(), "Cannot propagate while a flaw is being processed");
         assert!(self.c_res.is_none(), "Cannot propagate while a resolver is being processed");
 
+        let n_flaws = self.flaws.len();
         let mut queue = VecDeque::new();
-        let mut in_queue = vec![false; self.flaws.len()];
+        let mut in_queue = vec![false; n_flaws];
+        let mut updates = vec![0usize; n_flaws];
+
         for &f_id in initial_flaws {
-            queue.push_back(f_id);
-            in_queue[f_id] = true;
+            if !in_queue[f_id] {
+                queue.push_back(f_id);
+                in_queue[f_id] = true;
+            }
         }
 
         while let Some(f_id) = queue.pop_front() {
             in_queue[f_id] = false;
 
             let old_cost = self.flaw_cost[f_id];
-            let c_cost = self.compute_flaw_cost(f_id);
+            let mut c_cost = self.compute_flaw_cost(f_id);
+
+            if c_cost != old_cost {
+                updates[f_id] += 1;
+                if updates[f_id] > n_flaws {
+                    c_cost = f64::INFINITY;
+                }
+            }
 
             if c_cost != old_cost {
                 self.trail.push((f_id, old_cost));

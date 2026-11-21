@@ -241,7 +241,7 @@ impl Timeline for ReusableResource {
             }
 
             json[instance_id.to_string()] = json!({
-                "type": "StateVariable",
+                "type": "ReusableResource",
                 "intervals": intervals,
             });
         }

@@ -1,33 +1,50 @@
 use chronoxide::Solver;
 use std::fs::read_to_string;
 use std::path::PathBuf;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+fn init_tracing() {
+    INIT.call_once(|| {
+        let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_test_writer().try_init();
+    });
+}
 
 macro_rules! test_chronoxide {
     ($name:ident, ok, [ $($path:expr),+ ]) => {
         #[tokio::test]
         async fn $name() {
+            init_tracing();
             let slv = Solver::new();
 
             $(
                 let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
                 p.push($path);
-                assert!(slv.read(read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path))).await.is_ok(), "Failed to read RiDDle script from file: {}", $path);
+                let script = read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path));
+                if let Err(e) = slv.read(script).await {
+                    panic!("Failed to read RiDDle script from file {}: {}", $path, e);
+                }
             )+
 
-            assert!(slv.solve().await.is_ok(), "Solver failed for test: {}", stringify!($name));
+            if let Err(e) = slv.solve().await {
+                panic!("Solver failed for test {}: {}", stringify!($name), e);
+            }
         }
     };
 
     ($name:ident, err, [ $($path:expr),+ ]) => {
         #[tokio::test]
         async fn $name() {
+            init_tracing();
             let slv = Solver::new();
             let mut read_failed = false;
 
             $(
                 let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
                 p.push($path);
-                if slv.read(read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path))).await.is_err() {
+                let script = read_to_string(&p).unwrap_or_else(|_| panic!("Failed to read file: {}", $path));
+                if slv.read(script).await.is_err() {
                     read_failed = true;
                 }
             )+

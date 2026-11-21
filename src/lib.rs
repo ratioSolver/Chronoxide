@@ -560,7 +560,7 @@ fn expr_to_bool(expr: impl AsRef<BoolExpr>) -> ast::BoolExpr {
         }
         BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
         BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
-        BoolExpr::Not { term, .. } => ast::BoolExpr::Not(Box::new(expr_to_bool(term))),
+        BoolExpr::Not { term, .. } => !expr_to_bool(term),
     }
 }
 
@@ -573,6 +573,8 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
                 return left.lin.eq(&right.lin);
             } else if let (Some(left), Some(right)) = (left.downcast::<EnumVar>(), right.downcast::<EnumVar>()) {
                 return left.var.eq(&right.var);
+            } else if let (Some(left), Some(right)) = (left.downcast::<StringVar>(), right.downcast::<StringVar>()) {
+                return if left.value == right.value { ast::BoolExpr::True } else { ast::BoolExpr::False };
             }
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
