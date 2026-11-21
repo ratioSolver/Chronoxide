@@ -101,6 +101,25 @@ impl SolverState {
                             self.smt.borrow_mut().decide(decision_var);
                         } else {
                             trace!("No more decisions to make, checking timelines for new flaws...");
+                            let mut extracted_flaws = Vec::new();
+                            for timeline in self.timelines.borrow().iter() {
+                                extracted_flaws.extend(timeline.extract_flaws(self)?);
+                            }
+                            if !extracted_flaws.is_empty() {
+                                trace!("Extracted {} new flaws from timelines", extracted_flaws.len());
+                                let mut smt = self.smt.borrow_mut();
+                                let mut graph = self.graph.borrow_mut();
+                                for (flaw, causes) in extracted_flaws {
+                                    self.add_flaw(&mut smt, &mut graph, causes, flaw)?;
+                                }
+                                let current_len = smt.current_trail_len();
+                                if current_len > self.notified_len.get() {
+                                    graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+                                }
+                                self.notified_len.set(current_len);
+                                continue;
+                            }
+
                             trace!("No more decisions to make, solution found");
                             break;
                         }
