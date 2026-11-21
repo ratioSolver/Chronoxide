@@ -30,7 +30,7 @@ impl AtomFlaw {
 
 impl Flaw for AtomFlaw {
     fn expand(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let atom = slv.get_atom(self.atom).expect(&format!("Atom {} not found", self.atom));
+        let atom = slv.get_atom(self.atom).unwrap_or_else(|| panic!("Atom {} not found", self.atom));
         let predicate = atom.predicate();
 
         let mut graph = slv.graph.borrow_mut();
@@ -66,7 +66,7 @@ impl Flaw for AtomFlaw {
                     continue;
                 };
                 let target_sigma = graph.rho(target_sigma_res);
-                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).expect(&format!("Target atom {} not found", target_atom)).clone(), predicate.clone());
+                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone(), predicate.clone());
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
 
                 if smt.probe(&[phi, target_sigma, eq_lit]).map_err(|_| SolverError::Inconsistent)? {
@@ -120,7 +120,7 @@ impl GoalResolver {
 impl Resolver for GoalResolver {
     fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
         trace!("Applying GoalResolver for atom {}", self.atom);
-        let atom = slv.get_atom(self.atom).expect(&format!("Atom {} not found", self.atom));
+        let atom = slv.get_atom(self.atom).unwrap_or_else(|| panic!("Atom {} not found", self.atom));
         if let Err(e) = atom.predicate().call(atom) {
             return match e {
                 RiddleError::InconsistencyError(msg) => {

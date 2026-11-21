@@ -329,7 +329,7 @@ impl Timeline for ConsumableResource {
             for &atom_id in productions.iter().chain(consumptions.iter()) {
                 let (start, end) = get_interval_vars(slv, atom_id);
                 let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
-                amounts.insert(atom_id, smt.get_arith_val(&get_amount(slv, atom_id)).expect("Amount should have a value"));
+                amounts.insert(atom_id, smt.get_arith_val(get_amount(slv, atom_id)).expect("Amount should have a value"));
                 durations.insert(atom_id, end.clone() - start.clone());
                 starting_atoms.entry(start.clone()).or_default().push(atom_id);
                 ending_atoms.entry(end.clone()).or_default().push(atom_id);

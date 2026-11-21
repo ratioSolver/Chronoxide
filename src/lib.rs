@@ -596,10 +596,10 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
 }
 
 fn extract_arith(slot: &Slot) -> Result<ast::ArithExpr, RiddleError> {
-    if let Slot::Primitive(p) = slot {
-        if let Some(arith_var) = p.downcast::<ArithVar>() {
-            return Ok(arith_var.lin.clone());
-        }
+    if let Slot::Primitive(p) = slot
+        && let Some(arith_var) = p.downcast::<ArithVar>()
+    {
+        return Ok(arith_var.lin.clone());
     }
     Err(RiddleError::TypeError(format!("Expected an arithmetic variable, got {}", slot)))
 }
