@@ -370,9 +370,8 @@ impl Graph {
     pub(super) fn add_causal_link(&mut self, flw_id: FlawId) -> Result<(Lit, Lit), SolverError> {
         let phi = self.flaw_phi[flw_id];
         let (res_id, rho) = self.c_res.ok_or(SolverError::RuntimeError(String::from("No current resolver to add causal link from")))?;
-        if !self.flaw_required_by[flw_id].contains(&res_id) {
-            self.flaw_required_by[flw_id].push(res_id);
-        }
+        assert!(!self.flaw_required_by[flw_id].contains(&res_id), "Duplicate causal link between {} and {}", res_id, flw_id);
+        self.flaw_required_by[flw_id].push(res_id);
         self.resolver_preconditions[res_id].push(flw_id);
 
         #[cfg(feature = "server")]
