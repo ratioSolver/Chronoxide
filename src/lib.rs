@@ -560,7 +560,7 @@ fn expr_to_bool(expr: impl AsRef<BoolExpr>) -> ast::BoolExpr {
         }
         BoolExpr::Or { terms, .. } => ast::BoolExpr::Or(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
         BoolExpr::And { terms, .. } => ast::BoolExpr::And(terms.iter().map(expr_to_bool).collect::<Vec<_>>()),
-        BoolExpr::Not { term, .. } => !expr_to_bool(term),
+        BoolExpr::Not { term, .. } => ast::BoolExpr::Not(Box::new(expr_to_bool(term))),
     }
 }
 
