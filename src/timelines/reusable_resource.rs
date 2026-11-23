@@ -1,6 +1,12 @@
+use crate::{
+    SolverError, SolverState,
+    graph::{Flaw, Resolver},
+    inf_rat_to_json,
+    objects::{ArithVar, EnumVar},
+    timelines::{FlawWithCauses, Timeline, get_amount, get_interval_vars, get_tau},
+};
 use riddle::{
     core::Core,
-    delegate_scope,
     env::{AtomId, Env, ObjectId, Slot},
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
@@ -13,14 +19,6 @@ use std::{
     rc::{Rc, Weak},
 };
 use tracing::trace;
-
-use crate::{
-    SolverError, SolverState,
-    graph::{Flaw, Resolver},
-    inf_rat_to_json,
-    objects::{ArithVar, EnumVar},
-    timelines::{FlawWithCauses, Timeline, get_amount, get_interval_vars, get_tau},
-};
 
 pub(crate) struct ReusableResource {
     scope: Rc<CommonScope>,
@@ -250,7 +248,51 @@ impl Timeline for ReusableResource {
     }
 }
 
-delegate_scope!(ReusableResource, scope);
+impl Scope for ReusableResource {
+    fn core(&self) -> Rc<dyn Core> {
+        self.scope.core()
+    }
+
+    fn scope(&self) -> Option<Rc<dyn Scope>> {
+        self.scope.scope()
+    }
+
+    fn as_class(self: Rc<Self>) -> Option<Rc<dyn Class>> {
+        Some(self)
+    }
+
+    fn fields(&self) -> Vec<Rc<Field>> {
+        self.scope.fields()
+    }
+
+    fn get_field(&self, name: &str) -> Option<Rc<Field>> {
+        self.scope.get_field(name)
+    }
+
+    fn functions(&self) -> Vec<Rc<Function>> {
+        self.scope.functions()
+    }
+
+    fn get_function(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Function>> {
+        self.scope.get_function(name, types)
+    }
+
+    fn types(&self) -> Vec<Rc<dyn Type>> {
+        self.scope.types()
+    }
+
+    fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
+        self.scope.get_type(name)
+    }
+
+    fn predicates(&self) -> Vec<Rc<Predicate>> {
+        self.scope.predicates()
+    }
+
+    fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
+        self.scope.get_predicate(name)
+    }
+}
 
 impl Type for ReusableResource {
     fn name(&self) -> &str {

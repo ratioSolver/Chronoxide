@@ -60,6 +60,9 @@ impl SolverState {
             timelines: RefCell::new(Vec::new()),
             tx_event,
         });
+        if slv.read(include_str!("init.rddl")).is_err() {
+            panic!("Failed to initialize solver");
+        }
         slv.add_timeline(StateVariable::new(Rc::downgrade(&slv) as _));
         slv.add_timeline(ReusableResource::new(Rc::downgrade(&slv) as _));
         slv.add_timeline(ConsumableResource::new(Rc::downgrade(&slv) as _));

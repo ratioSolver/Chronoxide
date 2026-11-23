@@ -1,13 +1,12 @@
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt,
-    rc::{Rc, Weak},
+use crate::{
+    SolverError, SolverState,
+    graph::{Flaw, Resolver},
+    inf_rat_to_json,
+    objects::{ArithVar, EnumVar},
+    timelines::{FlawWithCauses, Timeline, get_amount, get_interval_vars, get_tau},
 };
-
 use riddle::{
     core::Core,
-    delegate_scope,
     env::{AtomId, Env, ObjectId, Slot},
     language::{ClassDef, ConstructorDef, Expr, PredicateDef, Statement},
     scope::{Class, CommonScope, Constructor, Field, Function, Predicate, Scope, Type},
@@ -18,15 +17,13 @@ use semitone::{
     rational::{InfRational, Rational},
 };
 use serde_json::{Value, json};
-use tracing::trace;
-
-use crate::{
-    SolverError, SolverState,
-    graph::{Flaw, Resolver},
-    inf_rat_to_json,
-    objects::{ArithVar, EnumVar},
-    timelines::{FlawWithCauses, Timeline, get_amount, get_interval_vars, get_tau},
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fmt,
+    rc::{Rc, Weak},
 };
+use tracing::trace;
 
 pub(crate) struct ConsumableResource {
     scope: Rc<CommonScope>,
@@ -157,7 +154,51 @@ impl ConsumableResource {
     }
 }
 
-delegate_scope!(ConsumableResource, scope);
+impl Scope for ConsumableResource {
+    fn core(&self) -> Rc<dyn Core> {
+        self.scope.core()
+    }
+
+    fn scope(&self) -> Option<Rc<dyn Scope>> {
+        self.scope.scope()
+    }
+
+    fn as_class(self: Rc<Self>) -> Option<Rc<dyn Class>> {
+        Some(self)
+    }
+
+    fn fields(&self) -> Vec<Rc<Field>> {
+        self.scope.fields()
+    }
+
+    fn get_field(&self, name: &str) -> Option<Rc<Field>> {
+        self.scope.get_field(name)
+    }
+
+    fn functions(&self) -> Vec<Rc<Function>> {
+        self.scope.functions()
+    }
+
+    fn get_function(&self, name: &str, types: &[Rc<dyn Type>]) -> Option<Rc<Function>> {
+        self.scope.get_function(name, types)
+    }
+
+    fn types(&self) -> Vec<Rc<dyn Type>> {
+        self.scope.types()
+    }
+
+    fn get_type(&self, name: &str) -> Option<Rc<dyn Type>> {
+        self.scope.get_type(name)
+    }
+
+    fn predicates(&self) -> Vec<Rc<Predicate>> {
+        self.scope.predicates()
+    }
+
+    fn get_predicate(&self, name: &str) -> Option<Rc<Predicate>> {
+        self.scope.get_predicate(name)
+    }
+}
 
 impl Type for ConsumableResource {
     fn name(&self) -> &str {
@@ -183,7 +224,7 @@ impl Class for ConsumableResource {
     }
 
     fn get_constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
-        if args.is_empty() { Some(self.constructors.borrow()[0].clone()) } else { None }
+        if args.len() == 2 && args.iter().all(|a| a.name() == "real") { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 
     fn instances(&self) -> Vec<ObjectId> {
