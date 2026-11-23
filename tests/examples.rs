@@ -88,3 +88,4 @@ test_chronoxide!(test_cr_03, ok, ["tests/examples/types/cr/cr_3.rddl"]);
 
 test_chronoxide!(test_logistics_00, ok, ["tests/examples/logistics/domain.rddl", "tests/examples/logistics/l_0.rddl"]);
 test_chronoxide!(test_logistics_01, ok, ["tests/examples/logistics/domain.rddl", "tests/examples/logistics/l_1.rddl"]);
+test_chronoxide!(test_logistics_02, ok, ["tests/examples/logistics/domain.rddl", "tests/examples/logistics/l_2.rddl"]);
