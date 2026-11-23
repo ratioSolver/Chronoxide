@@ -69,16 +69,39 @@ impl Flaw for AtomFlaw {
                     continue;
                 }
                 let target_sigma = graph.rho(target_sigma_res);
+                if smt.get_lit_val(target_sigma) == Some(false) {
+                    trace!("Skipping unification with {} for atom {} because target resolver is false", target_atom, self.atom);
+                    continue;
+                }
                 let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone(), predicate.clone());
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
 
+                if smt.get_lit_val(phi) == Some(false) {
+                    // ϕ is already false (as a consequence of `track_expr`), no need to continue checking candidates
+                    valid_unifications.clear();
+                    break;
+                }
+                if smt.get_lit_val(target_sigma) == Some(false) || smt.get_lit_val(eq_lit) == Some(false) {
+                    trace!("Skipping unification with {} for atom {} due to false literal at level 0", target_atom, self.atom);
+                    continue;
+                }
                 if smt.probe(&[phi, target_sigma, eq_lit]).map_err(|_| SolverError::Inconsistent)? {
                     trace!("{} can unify with {}", self.atom, target_atom);
                     valid_unifications.push((target_atom, target_sigma, target_flaw, eq_lit));
                 } else {
                     trace!("Skipping unification with {} for atom {} due to unsatisfiable unification equations", target_atom, self.atom);
                 }
+                if smt.get_lit_val(phi) == Some(false) {
+                    // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
+                    valid_unifications.clear();
+                    break;
+                }
             }
+        }
+
+        if smt.get_lit_val(phi) == Some(false) {
+            // ϕ is already false, no need to continue checking candidates
+            return Ok(());
         }
 
         let can_expand = atom.resolution_constraint() != ResolutionConstraint::MustUnify;

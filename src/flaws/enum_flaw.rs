@@ -30,13 +30,31 @@ impl Flaw for EnumFlaw {
         let mut candidates = Vec::with_capacity(self.domain.len());
         for &val in &self.domain {
             let val_lit = slv.track_expr(&mut smt, &mut graph, self.expr.eq(usize::from(val)))?;
+            if smt.get_lit_val(phi) == Some(false) {
+                // ϕ is already false (as a consequence of `track_expr`), no need to continue checking candidates
+                candidates.clear();
+                break;
+            }
+            if smt.get_lit_val(val_lit) == Some(false) {
+                continue;
+            }
             if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
                 candidates.push((val, val_lit));
+            }
+            if smt.get_lit_val(phi) == Some(false) {
+                // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
+                candidates.clear();
+                break;
             }
         }
 
         match candidates.len() {
-            0 => return Err(SolverError::Inconsistent),
+            0 => {
+                if phi == Lit::TRUE {
+                    // ϕ is true, but no candidates are valid, so the problem has no solution
+                    return Err(SolverError::Inconsistent);
+                }
+            }
             1 => {
                 let (val, val_lit) = candidates[0];
                 slv.add_resolver(&mut smt, &mut graph, phi, Box::new(EnumResolver::new(val, val_lit)))?;

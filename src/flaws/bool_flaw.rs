@@ -23,16 +23,32 @@ impl Flaw for BoolFlaw {
         let (flw_id, phi) = graph.current_flaw().expect("No current flaw found");
         trace!("Expanding BoolFlaw {} with expr: {}", flw_id, self.expr);
 
-        let lit = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
         let mut candidates = Vec::with_capacity(2);
-        for val_lit in [lit, !lit] {
-            if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
-                candidates.push(val_lit);
+        if smt.get_lit_val(phi) != Some(false) {
+            let lit = slv.track_expr(&mut smt, &mut graph, &self.expr)?;
+            if smt.get_lit_val(phi) != Some(false) {
+                for val_lit in [lit, !lit] {
+                    if smt.get_lit_val(val_lit) == Some(false) {
+                        continue;
+                    }
+                    if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
+                        candidates.push(val_lit);
+                    }
+                    if smt.get_lit_val(phi) == Some(false) {
+                        // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
+                        candidates.clear();
+                        break;
+                    }
+                }
             }
         }
 
         match candidates.len() {
-            0 => return Err(SolverError::Inconsistent),
+            0 => {
+                if phi == Lit::TRUE {
+                    return Err(SolverError::Inconsistent);
+                }
+            }
             1 => {
                 slv.add_resolver(&mut smt, &mut graph, phi, Box::new(BoolResolver::new(candidates[0])))?;
             }
