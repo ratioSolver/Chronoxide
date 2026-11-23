@@ -1,5 +1,3 @@
-use std::{collections::HashSet, rc::Rc};
-
 use crate::{
     SolverError, SolverState, eq_to_bool,
     graph::{Flaw, FlawId, Resolver},
@@ -9,14 +7,14 @@ use riddle::{
     core::Core,
     env::{Atom, AtomId, Env},
     language::{AtomKind, ResolutionConstraint},
-    scope::{Predicate, get_predicate_by_path},
 };
 use semitone::{
     Lit,
     ast::{self, BoolExpr::And},
 };
 use serde_json::{Value, json};
-use tracing::{trace, warn};
+use std::rc::Rc;
+use tracing::trace;
 
 pub(crate) struct AtomFlaw {
     atom: AtomId,
@@ -73,7 +71,7 @@ impl Flaw for AtomFlaw {
                     trace!("Skipping unification with {} for atom {} because target resolver is false", target_atom, self.atom);
                     continue;
                 }
-                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone(), predicate.clone());
+                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone());
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
 
                 if smt.get_lit_val(phi) == Some(false) {
@@ -240,36 +238,16 @@ impl Resolver for UnificationResolver {
     }
 }
 
-fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>, predicate: Rc<Predicate>) -> Vec<ast::BoolExpr> {
+fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>) -> Vec<ast::BoolExpr> {
     let mut eqs = Vec::new();
-    let mut queue = vec![predicate];
-    let mut visited = HashSet::new();
 
-    while let Some(curr_pred) = queue.pop() {
-        let ptr = Rc::as_ptr(&curr_pred) as usize;
-        if !visited.insert(ptr) {
-            continue;
-        }
-
-        for (_types, arg_name) in curr_pred.args() {
-            if let (Some(slot_a), Some(slot_b)) = (atom_a.get(arg_name), atom_b.get(arg_name)) {
-                let expr = eq_to_bool(&slot_a, &slot_b);
-                if expr == ast::BoolExpr::False {
-                    return vec![ast::BoolExpr::False];
-                } else {
-                    eqs.push(expr);
-                }
-            }
-        }
-
-        for parent_path in curr_pred.parents() {
-            match get_predicate_by_path(curr_pred.as_ref(), parent_path) {
-                Ok(parent_pred) => {
-                    queue.push(parent_pred);
-                }
-                Err(e) => {
-                    warn!("Unification warning: Failed to resolve parent {:?} - {}", parent_path, e);
-                }
+    for (name, slot_a) in atom_a.get_slots() {
+        if let Some(slot_b) = atom_b.get(&name) {
+            let expr = eq_to_bool(&slot_a, &slot_b);
+            if expr == ast::BoolExpr::False {
+                return vec![ast::BoolExpr::False];
+            } else {
+                eqs.push(expr);
             }
         }
     }
