@@ -390,15 +390,38 @@ impl Graph {
 
     pub(super) fn propagate(&mut self, lits: &[Lit]) {
         let mut affected_flaws = Vec::new();
-        // Update flaw status based on the new literals and add them to the agenda if they are now active and have no active resolvers.
+        // 1. Update resolver status first so newly activated flaws with an already-active resolver are not spuriously added to the agenda.
+        for &lit in lits {
+            if let Some(res_ids) = self.lit_to_resolvers.get(&lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[res_id] = Some(true);
+                    let flaw_id = self.resolver_flaw[res_id];
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
+                    if self.agenda.remove(&flaw_id) {
+                        trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                        #[cfg(feature = "server")]
+                        let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id });
+                    }
+                }
+            }
+            if let Some(res_ids) = self.lit_to_resolvers.get(&!lit) {
+                for &res_id in res_ids {
+                    self.resolver_status[res_id] = Some(false);
+                    #[cfg(feature = "server")]
+                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(false) });
+                    affected_flaws.push(self.resolver_flaw[res_id]);
+                }
+            }
+        }
+        // 2. Update flaw status and synchronize the agenda.
         for &lit in lits {
             if let Some(flw_ids) = self.lit_to_flaws.get(&lit) {
                 for &flw_id in flw_ids {
                     self.flaw_status[flw_id] = Some(true);
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(true) });
-                    if !self.flaw_resolvers[flw_id].iter().any(|&r| self.resolver_status[r] == Some(true)) {
-                        self.agenda.insert(flw_id);
+                    if !self.flaw_resolvers[flw_id].iter().any(|&r| self.resolver_status[r] == Some(true)) && self.agenda.insert(flw_id) {
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                         #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
@@ -410,30 +433,12 @@ impl Graph {
                     self.flaw_status[flw_id] = Some(false);
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: Some(false) });
+                    if self.agenda.remove(&flw_id) {
+                        trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                        #[cfg(feature = "server")]
+                        let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flw_id });
+                    }
                     affected_flaws.push(flw_id);
-                }
-            }
-        }
-        // Update resolver status based on the new literals and remove flaws from the agenda if they are now solved.
-        for &lit in lits {
-            if let Some(res_ids) = self.lit_to_resolvers.get(&lit) {
-                for &res_id in res_ids {
-                    self.resolver_status[res_id] = Some(true);
-                    let flaw_id = self.resolver_flaw[res_id];
-                    #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(true) });
-                    self.agenda.remove(&flaw_id);
-                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
-                    #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id });
-                }
-            }
-            if let Some(res_ids) = self.lit_to_resolvers.get(&!lit) {
-                for &res_id in res_ids {
-                    self.resolver_status[res_id] = Some(false);
-                    #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: Some(false) });
-                    affected_flaws.push(self.resolver_flaw[res_id]);
                 }
             }
         }
@@ -511,10 +516,11 @@ impl Graph {
                     self.flaw_status[flw_id] = None;
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::FlawStatusUpdate { flaw_id: flw_id, status: None });
-                    self.agenda.remove(&flw_id);
-                    trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
-                    #[cfg(feature = "server")]
-                    let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flw_id });
+                    if self.agenda.remove(&flw_id) {
+                        trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
+                        #[cfg(feature = "server")]
+                        let _ = self.tx_event.send(SolverEvent::SolvedFlaw { flaw_id: flw_id });
+                    }
                 }
             }
             if let Some(flw_ids) = self.lit_to_flaws.get(&!lit) {
@@ -532,8 +538,7 @@ impl Graph {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::ResolverStatusUpdate { resolver_id: res_id, status: None });
                     let flw_id = self.resolver_flaw[res_id];
-                    if self.flaw_status[flw_id] == Some(true) && !self.flaw_resolvers[flw_id].iter().any(|&r| self.resolver_status[r] == Some(true)) {
-                        self.agenda.insert(flw_id);
+                    if self.flaw_status[flw_id] == Some(true) && !self.flaw_resolvers[flw_id].iter().any(|&r| self.resolver_status[r] == Some(true)) && self.agenda.insert(flw_id) {
                         trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
                         #[cfg(feature = "server")]
                         let _ = self.tx_event.send(SolverEvent::ToSolveFlaw { flaw_id: flw_id });
@@ -650,6 +655,8 @@ impl Graph {
             return None;
         }
 
+        debug_assert!(self.agenda.iter().all(|&f_id| self.flaw_status[f_id] == Some(true)), "Agenda contains flaws that are not active: {}", self.agenda.iter().filter(|&&f_id| self.flaw_status[f_id] != Some(true)).map(|&f_id| f_id.to_string()).collect::<Vec<_>>().join(", "));
+
         let best_flaw_id = self.agenda.iter().max_by(|&f1, &f2| self.flaw_cost[*f1].partial_cmp(&self.flaw_cost[*f2]).unwrap()).unwrap();
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(*best_flaw_id)));
@@ -662,7 +669,7 @@ impl Graph {
             }
 
             let cost = self.compute_resolver_cost(r_id);
-            if cost < best_res_cost {
+            if best_res_id.is_none() || cost < best_res_cost {
                 best_res_cost = cost;
                 best_res_id = Some(r_id);
             }
