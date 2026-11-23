@@ -234,23 +234,35 @@ function edge_style(status: solver.Status) {
 }
 
 function flaw_name(slv: solver.Solver, flaw: solver.Flaw): string {
+  const id = flaw.get_id();
   const data = flaw.get_data();
-  if (data.kind === 'atom' && typeof data.atom === 'string')
-    return `${flaw.get_id()} ${slv.get_atom(data.atom)!.to_string()}`;
-  if (data.kind === 'enum' && typeof data.var === 'string')
-    return `${flaw.get_id()} ${data.var}`;
-  if (data.kind === 'residual')
-    return `${flaw.get_id()} (${data.target_flaw} \\ ${data.excluded_resolver})`;
-  return flaw.get_id();
+
+  switch (data.kind) {
+    case 'atom':
+      return typeof data.atom === 'string' ? `${id} ${slv.get_atom(data.atom)!.to_string()}` : id;
+    case 'enum':
+      return typeof data.var === 'string' ? `${id} ${data.var}` : id;
+    case 'residual':
+      return `${id} (${data.target_flaw} \\ ${data.excluded_resolver})`;
+    default:
+      return id;
+  }
 }
 
 function resolver_name(slv: solver.Solver, resolver: solver.Resolver): string {
+  const id = resolver.get_id();
   const data = resolver.get_data();
-  if (data.kind === 'unification')
-    return `${resolver.get_id()} unify`;
-  if (data.kind === 'residual')
-    return `${resolver.get_id()} ↳ ${data.original_resolver}`;
-  if (typeof data.val === 'number')
-    return `${resolver.get_id()} ${solver.value_to_string(slv, { type: 'object_ref', id: 'obj-' + data.val })}`;
-  return resolver.get_id();
+
+  switch (data.kind) {
+    case 'unification':
+      return `${id} unify`;
+    case 'residual':
+      return `${id} ↳ ${data.original_resolver}`;
+    case 'atom':
+      return typeof data.val === 'string' ? `${id} ${slv.get_atom(data.val)!.to_string()}` : id;
+    case 'enum':
+      return typeof data.val === 'string' ? `${id} ${solver.value_to_string(slv, { type: 'object_ref', id: data.val })}` : id;
+    default:
+      return 'val' in data ? `${id} ${data.val}` : id;
+  }
 }

@@ -81,6 +81,7 @@ impl Resolver for EnumResolver {
 
     fn to_json(&self) -> Value {
         json!({
+            "kind": "enum",
             "val": self.val.to_string(),
         })
     }
