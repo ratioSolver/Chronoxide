@@ -588,6 +588,26 @@ impl Graph {
         best_idx.and_then(|idx| self.flaw_q.remove(idx))
     }
 
+    /// Returns true if `anc` is a causal ancestor of `flw` along `flaw_causes`.
+    pub(super) fn is_ancestor(&self, anc: ResolverId, flw: FlawId) -> bool {
+        let mut queue = VecDeque::from([flw]);
+        let mut visited = HashSet::new();
+
+        while let Some(f_id) = queue.pop_front() {
+            if !visited.insert(f_id) {
+                continue;
+            }
+            for &c_res in &self.flaw_causes[f_id] {
+                if c_res == anc {
+                    return true;
+                }
+                queue.push_back(self.resolver_flaw[c_res]);
+            }
+        }
+
+        false
+    }
+
     fn has_finite_cost_ancestor(&self, target: FlawId) -> bool {
         let mut queue = Vec::new();
         let mut visited = HashSet::new();

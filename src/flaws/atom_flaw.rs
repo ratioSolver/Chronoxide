@@ -65,6 +65,9 @@ impl Flaw for AtomFlaw {
                     trace!("Skipping unification with {} for atom {} because target has no fact/goal resolver", target_atom, self.atom);
                     continue;
                 };
+                if graph.is_ancestor(target_sigma_res, flw_id) {
+                    continue;
+                }
                 let target_sigma = graph.rho(target_sigma_res);
                 let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone(), predicate.clone());
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
@@ -78,22 +81,21 @@ impl Flaw for AtomFlaw {
             }
         }
 
-        let sigma = if atom.resolution_constraint() != ResolutionConstraint::MustUnify {
-            let rho = if valid_unifications.is_empty() { phi } else { smt.new_lit() };
+        let can_expand = atom.resolution_constraint() != ResolutionConstraint::MustUnify;
+        let total_resolvers = valid_unifications.len() + usize::from(can_expand);
+        let sigma = can_expand.then(|| if total_resolvers == 1 { phi } else { smt.new_lit() });
+
+        for (target_atom, target_sigma, target_flaw, eq_lit) in valid_unifications {
+            let rho = if total_resolvers == 1 { phi } else { smt.new_lit() };
+            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(UnificationResolver::new(self.atom, sigma, target_atom, target_sigma, target_flaw, eq_lit)))?;
+        }
+
+        if let Some(rho) = sigma {
             let res_id = match atom.kind() {
                 AtomKind::Fact => slv.add_resolver(&mut smt, &mut graph, rho, Box::new(FactResolver::new(self.atom)))?,
                 AtomKind::Goal => slv.add_resolver(&mut smt, &mut graph, rho, Box::new(GoalResolver::new(self.atom)))?,
             };
             slv.atom_sigma.borrow_mut()[self.atom] = Some(res_id);
-            Some(rho)
-        } else {
-            None
-        };
-
-        let total_resolvers = valid_unifications.len() + usize::from(sigma.is_some());
-        for (target_atom, target_sigma, target_flaw, eq_lit) in valid_unifications {
-            let rho = if total_resolvers == 1 { phi } else { smt.new_lit() };
-            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(UnificationResolver::new(self.atom, sigma, target_atom, target_sigma, target_flaw, eq_lit)))?;
         }
 
         Ok(())
@@ -156,6 +158,10 @@ impl FactResolver {
 }
 
 impl Resolver for FactResolver {
+    fn intrinsic_cost(&self) -> rug::Rational {
+        rug::Rational::from(0)
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "kind": "fact",
