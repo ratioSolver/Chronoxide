@@ -196,15 +196,23 @@ impl Timeline for ReusableResource {
         let mut json = json!({});
 
         for instance_id in self.instances.borrow().iter() {
+            let capacity_var = match slv.get_object(*instance_id).expect("Instance should exist").get("capacity") {
+                Some(Slot::Primitive(var)) => var.downcast::<ArithVar>().map(|v| v.lin.clone()).expect("Instance should have a 'capacity' field"),
+                _ => unreachable!("Instance should have a 'capacity' field"),
+            };
+            let capacity = smt.get_arith_val(&capacity_var).expect("Capacity should have a value");
+
             let atoms = atoms_by_instance.get(instance_id).map(Vec::as_slice).unwrap_or(&[]);
 
             let mut starting_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
             let mut ending_atoms: BTreeMap<InfRational, Vec<AtomId>> = BTreeMap::new();
             let mut pulses: BTreeSet<InfRational> = BTreeSet::new();
+            let mut amounts: HashMap<AtomId, InfRational> = HashMap::new();
 
             for &atom_id in atoms {
                 let (start, end) = get_interval_vars(slv, atom_id);
                 let (start, end) = (smt.get_arith_val(&start).expect("Start time should have a value"), smt.get_arith_val(&end).expect("End time should have a value"));
+                amounts.insert(atom_id, smt.get_arith_val(&get_amount(slv, atom_id)).expect("Amount should have a value"));
                 starting_atoms.entry(start.clone()).or_default().push(atom_id);
                 ending_atoms.entry(end.clone()).or_default().push(atom_id);
                 pulses.insert(start);
@@ -214,23 +222,27 @@ impl Timeline for ReusableResource {
             let mut intervals = Vec::new();
             let mut active_atoms: BTreeSet<AtomId> = BTreeSet::new();
             let mut last_pulse: Option<InfRational> = None;
+            let mut amount = InfRational::zero();
 
             for pulse in pulses {
                 if let Some(prev_pulse) = &last_pulse {
                     intervals.push(json!({
                         "start": inf_rat_to_json(prev_pulse),
                         "end": inf_rat_to_json(&pulse),
+                        "amount": inf_rat_to_json(&amount),
                         "atoms": active_atoms.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
                     }));
                 }
 
                 if let Some(ending) = ending_atoms.get(&pulse) {
                     for atom_id in ending {
+                        amount -= amounts[atom_id].clone();
                         active_atoms.remove(atom_id);
                     }
                 }
                 if let Some(starting) = starting_atoms.get(&pulse) {
                     for atom_id in starting {
+                        amount += amounts[atom_id].clone();
                         active_atoms.insert(*atom_id);
                     }
                 }
@@ -240,6 +252,7 @@ impl Timeline for ReusableResource {
 
             json[instance_id.to_string()] = json!({
                 "type": "ReusableResource",
+                "capacity": inf_rat_to_json(&capacity),
                 "intervals": intervals,
             });
         }
@@ -318,7 +331,7 @@ impl Class for ReusableResource {
     }
 
     fn get_constructor(&self, args: &[Rc<dyn Type>]) -> Option<Rc<Constructor>> {
-        if args.is_empty() { Some(self.constructors.borrow()[0].clone()) } else { None }
+        if args.len() == 1 && args[0].name() == "real" { Some(self.constructors.borrow()[0].clone()) } else { None }
     }
 
     fn instances(&self) -> Vec<ObjectId> {

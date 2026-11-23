@@ -71,15 +71,15 @@ test_chronoxide!(test_core_11, ok, ["tests/examples/core/example_11.rddl"]);
 test_chronoxide!(test_core_12, ok, ["tests/examples/core/example_12.rddl"]);
 test_chronoxide!(test_core_13, ok, ["tests/examples/core/example_13.rddl"]);
 
-// test_chronoxide!(test_sv_00, ok, ["tests/examples/types/sv/sv_0.rddl"]);
-// test_chronoxide!(test_sv_01, ok, ["tests/examples/types/sv/sv_1.rddl"]);
-// test_chronoxide!(test_sv_02, ok, ["tests/examples/types/sv/sv_2.rddl"]);
-// test_chronoxide!(test_sv_03, ok, ["tests/examples/types/sv/sv_3.rddl"]);
+test_chronoxide!(test_sv_00, ok, ["tests/examples/types/sv/sv_0.rddl"]);
+test_chronoxide!(test_sv_01, ok, ["tests/examples/types/sv/sv_1.rddl"]);
+test_chronoxide!(test_sv_02, ok, ["tests/examples/types/sv/sv_2.rddl"]);
+test_chronoxide!(test_sv_03, ok, ["tests/examples/types/sv/sv_3.rddl"]);
 
-// test_chronoxide!(test_rr_00, ok, ["tests/examples/types/rr/rr_0.rddl"]);
-// test_chronoxide!(test_rr_01, ok, ["tests/examples/types/rr/rr_1.rddl"]);
-// test_chronoxide!(test_rr_02, ok, ["tests/examples/types/rr/rr_2.rddl"]);
-// test_chronoxide!(test_rr_03, ok, ["tests/examples/types/rr/rr_3.rddl"]);
+test_chronoxide!(test_rr_00, ok, ["tests/examples/types/rr/rr_0.rddl"]);
+test_chronoxide!(test_rr_01, ok, ["tests/examples/types/rr/rr_1.rddl"]);
+test_chronoxide!(test_rr_02, ok, ["tests/examples/types/rr/rr_2.rddl"]);
+test_chronoxide!(test_rr_03, ok, ["tests/examples/types/rr/rr_3.rddl"]);
 
 // test_chronoxide!(test_cr_00, ok, ["tests/examples/types/cr/cr_0.rddl"]);
 // test_chronoxide!(test_cr_01, ok, ["tests/examples/types/cr/cr_1.rddl"]);
