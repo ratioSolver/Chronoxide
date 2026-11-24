@@ -1,3 +1,8 @@
+#[cfg(all(feature = "h_add", feature = "h_max"))]
+compile_error!("Features 'h_add' and 'h_max' are mutually exclusive. Please enable only one of them.");
+#[cfg(not(any(feature = "h_add", feature = "h_max")))]
+compile_error!("Please enable one of the features 'h_add' or 'h_max'.");
+
 use crate::{SolverError, SolverEvent, SolverState};
 use semitone::{DlVar, Lit};
 use serde_json::Value;
