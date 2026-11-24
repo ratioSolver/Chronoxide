@@ -204,6 +204,10 @@ impl Graph {
         flw_id
     }
 
+    pub(super) fn flaw(&self, flw_id: FlawId) -> Option<&dyn Flaw> {
+        self.flaws[flw_id].as_deref()
+    }
+
     /// Returns the status of the given flaw, if known.
     pub(super) fn flaw_status(&self, flw_id: FlawId) -> Option<bool> {
         self.flaw_status[flw_id]
@@ -317,6 +321,10 @@ impl Graph {
         self.lit_to_resolvers.entry(rho).or_default().push(res_id);
 
         res_id
+    }
+
+    pub(super) fn resolver(&self, res_id: ResolverId) -> Option<&dyn Resolver> {
+        self.resolvers[res_id].as_deref()
     }
 
     /// Returns the status of the given resolver, if known.
