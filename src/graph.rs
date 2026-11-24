@@ -641,9 +641,11 @@ impl Graph {
     pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
         for &f_id in &self.flaw_q {
             if self.flaw_status[f_id].is_none() {
+                let lit = !self.flaw_phi[f_id];
+                trace!("Branching on unexpanded flaw {}: {}", f_id, lit);
                 #[cfg(feature = "server")]
                 let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(f_id)));
-                return Some(!self.flaw_phi[f_id]);
+                return Some(lit);
             }
         }
 
@@ -657,13 +659,13 @@ impl Graph {
 
         debug_assert!(self.agenda.iter().all(|&f_id| self.flaw_status[f_id] == Some(true)), "Agenda contains flaws that are not active: {}", self.agenda.iter().filter(|&&f_id| self.flaw_status[f_id] != Some(true)).map(|&f_id| f_id.to_string()).collect::<Vec<_>>().join(", "));
 
-        let best_flaw_id = self.agenda.iter().max_by(|&f1, &f2| self.flaw_cost[*f1].partial_cmp(&self.flaw_cost[*f2]).unwrap()).unwrap();
+        let best_flaw_id = *self.agenda.iter().max_by(|&f1, &f2| self.flaw_cost[*f1].partial_cmp(&self.flaw_cost[*f2]).unwrap()).unwrap();
         #[cfg(feature = "server")]
-        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(*best_flaw_id)));
+        let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(best_flaw_id)));
         let mut best_res_id = None;
         let mut best_res_cost = f64::INFINITY;
 
-        for &r_id in &self.flaw_resolvers[*best_flaw_id] {
+        for &r_id in &self.flaw_resolvers[best_flaw_id] {
             if self.resolver_status[r_id] == Some(false) {
                 continue;
             }
@@ -675,8 +677,11 @@ impl Graph {
             }
         }
 
+        let best_res_id = best_res_id.expect("There should be at least one resolver for the flaw");
+        let lit = self.resolver_rho[best_res_id];
+        trace!("Branching on flaw {} (cost={}) with resolver {} ({}, cost={})", best_flaw_id, self.flaw_cost[best_flaw_id], best_res_id, lit, best_res_cost);
         #[cfg(feature = "server")]
-        let _ = self.tx_event.send(SolverEvent::CurrentResolver(best_res_id));
-        Some(self.resolver_rho[best_res_id.expect("There should be at least one resolver for the flaw")])
+        let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(best_res_id)));
+        Some(lit)
     }
 }

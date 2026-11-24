@@ -12,7 +12,7 @@ license-file = "LICENSE.txt"
 default = ["server", "h_max"]
 h_max = []
 h_add = []
-server = ["dep:axum", "dep:tower-http"]
+server = ["dep:axum", "dep:tower-http", "dep:tracing-subscriber"]
 
 [lib]
 name = "chronoxide"
@@ -24,13 +24,15 @@ required-features = ["server"]
 
 [dependencies]
 rug = "1.30.0"
-semitone = "0.0.37"
+semitone = "0.0.39"
 riddle-lang = "0.2.31"
 axum = { version = "0.8.9", features = ["ws"], optional = true }
 tower-http = { version = "0.7.1", features = ["fs"], optional = true }
 tokio = { version = "1.54.1", features = ["full"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = [
+    "env-filter",
+], optional = true }
 serde_json = "1.0.154"
 
 [dev-dependencies]
