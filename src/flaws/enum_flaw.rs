@@ -1,10 +1,10 @@
 use crate::{
     SolverError, SolverState,
     flaws::{LitResolver, add_lit_candidates},
-    graph::{Flaw, Resolver},
+    graph::Flaw,
 };
 use riddle::env::ObjectId;
-use semitone::{Lit, ast::EnumExpr};
+use semitone::ast::EnumExpr;
 use serde_json::{Value, json};
 use tracing::trace;
 

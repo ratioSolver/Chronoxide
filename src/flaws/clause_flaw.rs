@@ -1,9 +1,9 @@
 use crate::{
     SolverError, SolverState,
     flaws::{LitResolver, add_lit_candidates},
-    graph::{Flaw, Resolver},
+    graph::Flaw,
 };
-use semitone::{Lit, ast::BoolExpr};
+use semitone::ast::BoolExpr;
 use serde_json::{Value, json};
 use tracing::trace;
 
