@@ -111,6 +111,9 @@ pub struct Graph {
     trail_lim: Vec<usize>,
     agenda: HashSet<FlawId>,
 
+    split_pairs: HashSet<(ResolverId, FlawId)>,
+    is_residual: Vec<bool>,
+
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -143,6 +146,9 @@ impl Graph {
             flaw_q: VecDeque::new(),
             trail_lim: Vec::new(),
             agenda: HashSet::new(),
+
+            split_pairs: HashSet::new(),
+            is_residual: Vec::new(),
 
             tx_event,
         }
@@ -196,6 +202,7 @@ impl Graph {
         self.flaw_required_by.push(causes);
         self.flaw_resolvers.push(Vec::new());
         self.flaw_cost.push(f64::INFINITY);
+        self.is_residual.push(false);
 
         self.lit_to_flaws.entry(phi).or_default().push(flw_id);
 
@@ -273,6 +280,9 @@ impl Graph {
 
     /// Takes the flaw out of the graph for processing.
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
+        if let Some(pos) = self.flaw_q.iter().position(|&id| id == flw_id) {
+            self.flaw_q.remove(pos);
+        }
         self.c_flaw.replace((flw_id, self.flaw_phi[flw_id]));
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
@@ -649,6 +659,61 @@ impl Graph {
         }
 
         false
+    }
+
+    pub(super) fn mark_residual(&mut self, flw_id: FlawId) {
+        self.is_residual[flw_id] = true;
+    }
+
+    pub(super) fn can_split(&self, r1: ResolverId, f2: FlawId) -> bool {
+        !self.is_residual[f2] && !self.split_pairs.contains(&(r1, f2)) && self.resolver_flaw[r1] != f2
+    }
+
+    pub(super) fn record_split(&mut self, r1: ResolverId, f2: FlawId) {
+        self.split_pairs.insert((r1, f2));
+    }
+
+    /// Extracts the sequence of undecided resolvers selected by the current heuristic estimate
+    /// to satisfy all active flaws in `agenda`.
+    pub(super) fn estimated_plan(&self) -> Vec<ResolverId> {
+        let mut plan = Vec::new();
+        let mut visited_flaws = HashSet::new();
+        let mut queue: VecDeque<FlawId> = self.agenda.iter().copied().collect();
+
+        while let Some(f_id) = queue.pop_front() {
+            if !visited_flaws.insert(f_id) || self.flaw_status[f_id] == Some(false) {
+                continue;
+            }
+            if self.flaw_resolvers[f_id].iter().any(|&r| self.resolver_status[r] == Some(true)) {
+                continue;
+            }
+
+            let mut best_res = None;
+            let mut best_cost = f64::INFINITY;
+            for &r_id in &self.flaw_resolvers[f_id] {
+                if self.resolver_status[r_id] == Some(false) {
+                    continue;
+                }
+                let cost = self.compute_resolver_cost(r_id);
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_res = Some(r_id);
+                }
+            }
+
+            if let Some(r_id) = best_res {
+                if self.resolver_status[r_id].is_none() {
+                    plan.push(r_id);
+                }
+                for &pre_f in &self.resolver_preconditions[r_id] {
+                    if !visited_flaws.contains(&pre_f) {
+                        queue.push_back(pre_f);
+                    }
+                }
+            }
+        }
+
+        plan
     }
 
     pub(super) fn pick_branching_literal(&self) -> Option<Lit> {

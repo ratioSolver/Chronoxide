@@ -32,7 +32,7 @@ impl Flaw for DisjunctionFlaw {
         for (disjunct, cost) in &self.disjunction.disjuncts {
             let rho = smt.new_lit();
             trace!("Adding disjunction resolver for: {}", disjunct.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "));
-            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(DisjunctionResolver::new(expr_to_cost(cost), self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec())))?;
+            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(DisjunctionResolver::new(expr_to_cost(cost)?, self.disjunction.scp.clone(), self.disjunction.env.clone(), disjunct.to_vec())))?;
         }
 
         Ok(())
@@ -84,14 +84,33 @@ impl Resolver for DisjunctionResolver {
     }
 }
 
-fn expr_to_cost(expr: &Expr) -> rug::Rational {
-    match expr {
-        Expr::Int(val) => rug::Rational::from_str(val).expect("Failed to parse integer as Rational"),
-        Expr::Real(num, den) => rug::Rational::from_str(&format!("{}/{}", num, den)).expect("Failed to parse real number as Rational"),
-        Expr::Sum { terms } => terms.iter().map(expr_to_cost).sum(),
-        Expr::Opposite { term } => -expr_to_cost(term),
-        Expr::Mul { factors } => factors.iter().map(expr_to_cost).product(),
-        Expr::Div { left, right } => expr_to_cost(left) / expr_to_cost(right),
-        _ => unreachable!("Unexpected expression type for cost calculation"),
-    }
+fn expr_to_cost(expr: &Expr) -> Result<rug::Rational, SolverError> {
+    let err = |m: String| SolverError::RuntimeError(m);
+    Ok(match expr {
+        Expr::Int(val) => rug::Rational::from_str(val).map_err(|e| err(format!("Invalid integer cost '{val}': {e}")))?,
+        Expr::Real(num, den) => rug::Rational::from_str(&format!("{num}/{den}")).map_err(|e| err(format!("Invalid real cost {num}/{den}: {e}")))?,
+        Expr::Sum { terms } => {
+            let mut acc = rug::Rational::from(0);
+            for t in terms {
+                acc += expr_to_cost(t)?;
+            }
+            acc
+        }
+        Expr::Opposite { term } => -expr_to_cost(term)?,
+        Expr::Mul { factors } => {
+            let mut acc = rug::Rational::from(1);
+            for f in factors {
+                acc *= expr_to_cost(f)?;
+            }
+            acc
+        }
+        Expr::Div { left, right } => {
+            let den = expr_to_cost(right)?;
+            if den == 0 {
+                return Err(err(String::from("Division by zero in disjunct cost")));
+            }
+            expr_to_cost(left)? / den
+        }
+        other => return Err(err(format!("Unsupported expression in disjunct cost: {other:?}"))),
+    })
 }

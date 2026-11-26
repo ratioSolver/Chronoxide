@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
+    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw, residual_flaw::ResidualFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource, state_variable::StateVariable},
@@ -97,6 +97,9 @@ impl SolverState {
                         let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
                         self.expand_flaw(flw_id)?;
                     } else {
+                        if self.smt.borrow().decision_level() == 0 && self.refine_causal_graph()? {
+                            continue;
+                        }
                         trace!("Picking branching literal...");
                         let decision = self.graph.borrow().pick_branching_literal();
                         if let Some(decision_var) = decision {
@@ -288,6 +291,142 @@ impl SolverState {
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         graph.cancel_until(bt_level, &vars_to_undo);
+    }
+
+    /// Probes the current heuristic relaxed plan at level 0. If a mutex conflict is found
+    /// between two resolvers in the plan, splits the causal graph via a `ResidualFlaw`
+    /// and returns `Ok(true)` so heuristic costs can be recomputed before branching.
+    fn refine_causal_graph(&self) -> Result<bool, SolverError> {
+        let plan = self.graph.borrow().estimated_plan();
+        if plan.len() < 2 {
+            return Ok(false);
+        }
+
+        let lits: Vec<Lit> = {
+            let graph = self.graph.borrow();
+            plan.iter().map(|&r| graph.rho(r)).collect()
+        };
+
+        // 1. Check joint consistency of the whole relaxed plan in one probe call.
+        let probe_res = self.smt.borrow_mut().probe(&lits);
+
+        match probe_res {
+            Ok(true) => {
+                // Propagate any unit clauses learned during probing
+                let smt = self.smt.borrow();
+                let mut graph = self.graph.borrow_mut();
+                let current_len = smt.current_trail_len();
+                if current_len > self.notified_len.get() {
+                    graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+                    self.notified_len.set(current_len);
+                }
+                return Ok(false);
+            }
+            Err((bt_level, lemma)) => {
+                if !self.backtrack_and_learn(&mut self.smt.borrow_mut(), &mut self.graph.borrow_mut(), bt_level, lemma) {
+                    return Err(SolverError::Inconsistent);
+                }
+                return Ok(true);
+            }
+            Ok(false) => {}
+        }
+
+        // Sync any literals unit-propagated by the clauses learned inside `probe`.
+        {
+            let smt = self.smt.borrow();
+            let mut graph = self.graph.borrow_mut();
+            let current_len = smt.current_trail_len();
+            if current_len > self.notified_len.get() {
+                graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+                self.notified_len.set(current_len);
+                if !graph.has_estimated_solution() {
+                    return Ok(true);
+                }
+            }
+        }
+
+        // 2. Isolate the first conflicting prefix `plan[..=k]` and find a pairwise mutex `(r1, r2)`.
+        let mut conflict_idx = None;
+        for k in 1..plan.len() {
+            let mut smt = self.smt.borrow_mut();
+            match smt.probe(&lits[..=k]) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    conflict_idx = Some(k);
+                    break;
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(&mut smt, &mut self.graph.borrow_mut(), bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                    return Ok(true);
+                }
+            }
+        }
+
+        let Some(k) = conflict_idx else {
+            return Ok(false);
+        };
+        let r2 = plan[k];
+
+        let mut mutex_r1 = None;
+        for i in (0..k).rev() {
+            let mut smt = self.smt.borrow_mut();
+            match smt.probe(&[lits[i], lits[k]]) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    mutex_r1 = Some(plan[i]);
+                    break;
+                }
+                Err((bt_level, lemma)) => {
+                    if !self.backtrack_and_learn(&mut smt, &mut self.graph.borrow_mut(), bt_level, lemma) {
+                        return Err(SolverError::Inconsistent);
+                    }
+                    return Ok(true);
+                }
+            }
+        }
+
+        let Some(r1) = mutex_r1 else {
+            return Ok(false);
+        };
+
+        // 3. Choose orientation (r_anchor, r_excluded on f_target) and create ResidualFlaw.
+        let split_choice = {
+            let graph = self.graph.borrow();
+            let f1 = graph.resolver_flaw(r1);
+            let f2 = graph.resolver_flaw(r2);
+            if graph.can_split(r1, f2) {
+                Some((r1, f2, r2))
+            } else if graph.can_split(r2, f1) {
+                Some((r2, f1, r1))
+            } else {
+                None
+            }
+        };
+
+        let Some((r_anchor, f_target, r_excluded)) = split_choice else {
+            return Ok(false);
+        };
+
+        let allowed: Vec<ResolverId> = {
+            let graph = self.graph.borrow();
+            graph.flaw_resolvers(f_target).iter().copied().filter(|&r| r != r_excluded && graph.resolver_status(r) != Some(false)).collect()
+        };
+
+        trace!("Splitting causal graph: resolver {} excludes {} on flaw {}", r_anchor, r_excluded, f_target);
+        let res_flaw_id = {
+            let mut graph = self.graph.borrow_mut();
+            graph.record_split(r_anchor, f_target);
+            let id = self.add_flaw(&mut self.smt.borrow_mut(), &mut graph, vec![r_anchor], Box::new(ResidualFlaw::new(f_target, r_excluded, allowed)))?;
+            graph.mark_residual(id);
+            id
+        };
+
+        self.expand_flaw(res_flaw_id)?;
+        let anchor_flaw = self.graph.borrow().resolver_flaw(r_anchor);
+        self.graph.borrow_mut().propagate_costs(&[anchor_flaw]);
+        Ok(true)
     }
 
     fn to_json(&self) -> Value {
