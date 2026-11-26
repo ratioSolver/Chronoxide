@@ -111,9 +111,6 @@ pub struct Graph {
     trail_lim: Vec<usize>,
     agenda: HashSet<FlawId>,
 
-    split_pairs: HashSet<(ResolverId, FlawId)>,
-    is_residual: Vec<bool>,
-
     tx_event: broadcast::Sender<SolverEvent>,
 }
 
@@ -146,9 +143,6 @@ impl Graph {
             flaw_q: VecDeque::new(),
             trail_lim: Vec::new(),
             agenda: HashSet::new(),
-
-            split_pairs: HashSet::new(),
-            is_residual: Vec::new(),
 
             tx_event,
         }
@@ -202,7 +196,6 @@ impl Graph {
         self.flaw_required_by.push(causes);
         self.flaw_resolvers.push(Vec::new());
         self.flaw_cost.push(f64::INFINITY);
-        self.is_residual.push(false);
 
         self.lit_to_flaws.entry(phi).or_default().push(flw_id);
 
@@ -211,23 +204,9 @@ impl Graph {
         flw_id
     }
 
-    pub(super) fn flaw(&self, flw_id: FlawId) -> Option<&dyn Flaw> {
-        self.flaws[flw_id].as_deref()
-    }
-
-    /// Returns the status of the given flaw, if known.
-    pub(super) fn flaw_status(&self, flw_id: FlawId) -> Option<bool> {
-        self.flaw_status[flw_id]
-    }
-
     /// Returns the ϕ literal of the given flaw.
     pub(super) fn phi(&self, flw_id: FlawId) -> Lit {
         self.flaw_phi[flw_id]
-    }
-
-    /// Returns the ϕ literals of the given flaws.
-    pub(super) fn phis(&self, flw_ids: &[FlawId]) -> Vec<Lit> {
-        flw_ids.iter().map(|&f_id| self.flaw_phi[f_id]).collect()
     }
 
     /// Returns the cost variable of the given flaw.
@@ -235,24 +214,9 @@ impl Graph {
         self.flaw_cost_var[flw_id]
     }
 
-    /// Returns the causes of the given flaw.
-    pub(super) fn flaw_causes(&self, flw_id: FlawId) -> &[ResolverId] {
-        &self.flaw_causes[flw_id]
-    }
-
-    /// Returns the resolvers that require the given flaw.
-    pub(super) fn flaw_required_by(&self, flw_id: FlawId) -> &[ResolverId] {
-        &self.flaw_required_by[flw_id]
-    }
-
     /// Returns the resolvers that can solve the given flaw.
     pub(super) fn flaw_resolvers(&self, flw_id: FlawId) -> &[ResolverId] {
         &self.flaw_resolvers[flw_id]
-    }
-
-    /// Returns the estimated cost of the given flaw.
-    pub(super) fn flaw_cost(&self, flw_id: FlawId) -> f64 {
-        self.flaw_cost[flw_id]
     }
 
     /// Returns whether the given flaw has been expanded (i.e., its resolvers have been added to the graph).
@@ -333,15 +297,6 @@ impl Graph {
         res_id
     }
 
-    pub(super) fn resolver(&self, res_id: ResolverId) -> Option<&dyn Resolver> {
-        self.resolvers[res_id].as_deref()
-    }
-
-    /// Returns the status of the given resolver, if known.
-    pub(super) fn resolver_status(&self, res_id: ResolverId) -> Option<bool> {
-        self.resolver_status[res_id]
-    }
-
     /// Returns the ρ literal of the given resolver.
     pub(super) fn rho(&self, res_id: ResolverId) -> Lit {
         self.resolver_rho[res_id]
@@ -355,16 +310,6 @@ impl Graph {
     /// Returns the cost variable of the given resolver.
     pub(super) fn resolver_cost_var(&self, res_id: ResolverId) -> DlVar {
         self.resolver_cost_var[res_id]
-    }
-
-    /// Returns the flaw that the given resolver can solve.
-    pub(super) fn resolver_flaw(&self, res_id: ResolverId) -> FlawId {
-        self.resolver_flaw[res_id]
-    }
-
-    /// Returns the preconditions of the given resolver.
-    pub(super) fn resolver_preconditions(&self, res_id: ResolverId) -> &[FlawId] {
-        &self.resolver_preconditions[res_id]
     }
 
     /// Computes the estimated cost of the given resolver based on its intrinsic cost and the costs of its preconditions.
@@ -587,24 +532,9 @@ impl Graph {
         true
     }
 
-    /// Computes the causal depth of `flw_id` (number of ancestor flaws along `flaw_causes`).
-    fn causal_depth(&self, mut flw_id: FlawId) -> usize {
-        let mut depth = 0;
-        while let Some(&cause_res) = self.flaw_causes[flw_id].first() {
-            depth += 1;
-            flw_id = self.resolver_flaw[cause_res];
-        }
-        depth
-    }
-
-    /// Returns the shallowest active, unexpanded flaw currently in `agenda` with infinite cost, if any.
-    pub(super) fn unexpanded_agenda_flaw(&self) -> Option<FlawId> {
-        self.agenda.iter().copied().filter(|&f_id| self.flaw_status[f_id] == Some(true) && self.flaw_cost[f_id] == f64::INFINITY && !self.flaw_expanded(f_id)).min_by_key(|&f_id| (self.causal_depth(f_id), f_id))
-    }
-
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
         let mut best_idx = None;
-        let mut best_key = None;
+        let mut best_priority = 0;
 
         for (idx, &f_id) in self.flaw_q.iter().enumerate() {
             if self.flaw_status[f_id] == Some(false) {
@@ -618,9 +548,8 @@ impl Graph {
                 1
             };
 
-            let key = (std::cmp::Reverse(priority), self.causal_depth(f_id), f_id);
-            if best_key.is_none_or(|bk| key < bk) {
-                best_key = Some(key);
+            if best_idx.is_none() || priority > best_priority {
+                best_priority = priority;
                 best_idx = Some(idx);
             }
         }
@@ -673,108 +602,17 @@ impl Graph {
         false
     }
 
-    pub(super) fn mark_residual(&mut self, flw_id: FlawId) {
-        self.is_residual[flw_id] = true;
-    }
-
-    /// Returns true if `target` is reachable from `start` following `flaw -> resolver -> precondition`.
-    pub(super) fn reaches_flaw(&self, start: FlawId, target: FlawId) -> bool {
-        let mut queue = VecDeque::from([start]);
-        let mut visited = HashSet::new();
-
-        while let Some(f_id) = queue.pop_front() {
-            if f_id == target {
-                return true;
-            }
-            if !visited.insert(f_id) {
-                continue;
-            }
-            for &r_id in &self.flaw_resolvers[f_id] {
-                if self.resolver_status[r_id] == Some(false) {
-                    continue;
-                }
-                for &pre_f in &self.resolver_preconditions[r_id] {
-                    if !visited.contains(&pre_f) {
-                        queue.push_back(pre_f);
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    pub(super) fn can_split(&self, r1: ResolverId, f2: FlawId) -> bool {
-        let anchor_flaw = self.resolver_flaw[r1];
-        !self.is_residual[f2] && !self.split_pairs.contains(&(r1, f2)) && anchor_flaw != f2 && !self.reaches_flaw(f2, anchor_flaw)
-    }
-
-    pub(super) fn record_split(&mut self, r1: ResolverId, f2: FlawId) {
-        self.split_pairs.insert((r1, f2));
-    }
-
-    /// Collects the ρ literals of `res_id` and its causal ancestors along `flaw_causes`.
-    pub(super) fn resolver_chain_lits(&self, mut res_id: ResolverId) -> Vec<Lit> {
-        let mut lits = vec![self.resolver_rho[res_id]];
-        let mut visited = HashSet::new();
-        while visited.insert(res_id) {
-            let flw_id = self.resolver_flaw[res_id];
-            if let Some(&cause_res) = self.flaw_causes[flw_id].first() {
-                lits.push(self.resolver_rho[cause_res]);
-                res_id = cause_res;
-            } else {
-                break;
-            }
-        }
-        lits.sort_unstable();
-        lits.dedup();
-        lits
-    }
-
-    /// Extracts the sequence of undecided resolvers selected by the current heuristic estimate
-    /// to satisfy all active flaws in `agenda`.
-    pub(super) fn estimated_plan(&self) -> Vec<ResolverId> {
-        let mut plan = Vec::new();
-        let mut visited_flaws = HashSet::new();
-        let mut queue: VecDeque<FlawId> = self.agenda.iter().copied().collect();
-
-        while let Some(f_id) = queue.pop_front() {
-            if !visited_flaws.insert(f_id) || self.flaw_status[f_id] == Some(false) {
-                continue;
-            }
-            if self.flaw_resolvers[f_id].iter().any(|&r| self.resolver_status[r] == Some(true)) {
-                continue;
-            }
-
-            let mut best_res = None;
-            let mut best_cost = f64::INFINITY;
-            for &r_id in &self.flaw_resolvers[f_id] {
-                if self.resolver_status[r_id] == Some(false) {
-                    continue;
-                }
-                let cost = self.compute_resolver_cost(r_id);
-                if cost < best_cost {
-                    best_cost = cost;
-                    best_res = Some(r_id);
-                }
-            }
-
-            if let Some(r_id) = best_res {
-                if self.resolver_status[r_id].is_none() {
-                    plan.push(r_id);
-                }
-                for &pre_f in &self.resolver_preconditions[r_id] {
-                    if !visited_flaws.contains(&pre_f) {
-                        queue.push_back(pre_f);
-                    }
-                }
-            }
-        }
-
-        plan
-    }
-
     pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
+        for &f_id in &self.flaw_q {
+            if self.flaw_status[f_id].is_none() {
+                let lit = !self.flaw_phi[f_id];
+                trace!("Branching on unexpanded flaw {}: {}", f_id, lit);
+                #[cfg(feature = "server")]
+                let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(f_id)));
+                return Some(lit);
+            }
+        }
+
         if self.agenda.is_empty() {
             #[cfg(feature = "server")]
             let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));

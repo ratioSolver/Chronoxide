@@ -9,7 +9,6 @@ pub(super) mod atom_flaw;
 pub(super) mod clause_flaw;
 pub(super) mod disjunction_flaw;
 pub(super) mod enum_flaw;
-pub(super) mod residual_flaw;
 
 /// Adds one resolver per candidate. With 0 candidates and ϕ = ⊤ the problem is inconsistent;
 /// with a single candidate the resolver reuses ϕ as its literal.

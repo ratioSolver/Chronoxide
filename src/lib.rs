@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{atom_flaw::AtomFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw, residual_flaw::ResidualFlaw},
+    flaws::{atom_flaw::AtomFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource, state_variable::StateVariable},
@@ -19,7 +19,7 @@ use semitone::{
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     error, fmt,
     rc::{Rc, Weak},
     str::FromStr,
@@ -38,7 +38,6 @@ pub struct SolverState {
     smt: RefCell<SeMiTONE>,
     notified_len: Cell<usize>,
     graph: RefCell<Graph>,
-    guided_decisions: RefCell<VecDeque<Lit>>,
     atom_sigma: RefCell<Vec<Option<ResolverId>>>,
     atom_flaw: RefCell<Vec<FlawId>>,
     timelines: RefCell<Vec<Rc<dyn Timeline>>>,
@@ -56,7 +55,6 @@ impl SolverState {
             smt: RefCell::new(SeMiTONE::new()),
             notified_len: Cell::new(0),
             graph: RefCell::new(Graph::new(tx_event.clone())),
-            guided_decisions: RefCell::new(VecDeque::new()),
             atom_sigma: RefCell::new(Vec::new()),
             atom_flaw: RefCell::new(Vec::new()),
             timelines: RefCell::new(Vec::new()),
@@ -95,16 +93,12 @@ impl SolverState {
 
                     if !self.graph.borrow().has_estimated_solution() {
                         trace!("Expanding graph...");
-                        let frontier_flaw = self.graph.borrow().unexpanded_agenda_flaw();
                         self.cancel_until(0);
-                        let flw_id = frontier_flaw.or_else(|| self.graph.borrow_mut().pop_flaw()).ok_or(SolverError::Inconsistent)?;
+                        let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
                         self.expand_flaw(flw_id)?;
                     } else {
-                        if self.smt.borrow().decision_level() == 0 && self.refine_causal_graph()? {
-                            continue;
-                        }
                         trace!("Picking branching literal...");
-                        let decision = self.pop_guided_decision().or_else(|| self.graph.borrow().pick_branching_literal());
+                        let decision = self.graph.borrow().pick_branching_literal();
                         if let Some(decision_var) = decision {
                             self.graph.borrow_mut().push();
                             self.smt.borrow_mut().decide(decision_var);
@@ -282,7 +276,6 @@ impl SolverState {
         if smt.decision_level() == 0 {
             return false;
         }
-        self.guided_decisions.borrow_mut().clear();
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         graph.cancel_until(bt_level, &vars_to_undo);
@@ -290,186 +283,11 @@ impl SolverState {
     }
 
     fn cancel_until(&self, bt_level: usize) {
-        self.guided_decisions.borrow_mut().clear();
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         graph.cancel_until(bt_level, &vars_to_undo);
-    }
-
-    fn pop_guided_decision(&self) -> Option<Lit> {
-        let mut queue = self.guided_decisions.borrow_mut();
-        let smt = self.smt.borrow();
-        while let Some(lit) = queue.pop_front() {
-            match smt.get_lit_val(lit) {
-                None => {
-                    trace!("Picking guided decision: {}", lit);
-                    return Some(lit);
-                }
-                Some(true) => continue,
-                Some(false) => {
-                    queue.clear();
-                    return None;
-                }
-            }
-        }
-        None
-    }
-
-    /// Probes the current heuristic relaxed plan at level 0. If a mutex conflict is found
-    /// between two resolvers in the plan, splits the causal graph via a `ResidualFlaw`
-    /// and returns `Ok(true)` so heuristic costs can be recomputed before branching.
-    fn refine_causal_graph(&self) -> Result<bool, SolverError> {
-        let plan = self.graph.borrow().estimated_plan();
-        if plan.len() < 2 {
-            return Ok(false);
-        }
-
-        let lits: Vec<Lit> = {
-            let graph = self.graph.borrow();
-            plan.iter().map(|&r| graph.rho(r)).collect()
-        };
-
-        // 1. Check joint consistency of the whole relaxed plan in one probe call.
-        let probe_res = self.smt.borrow_mut().probe(&lits);
-
-        match probe_res {
-            Ok(true) => {
-                // Propagate any unit clauses learned during probing
-                let smt = self.smt.borrow();
-                let mut graph = self.graph.borrow_mut();
-                let current_len = smt.current_trail_len();
-                if current_len > self.notified_len.get() {
-                    graph.propagate(smt.get_trail_delta(self.notified_len.get()));
-                    self.notified_len.set(current_len);
-                }
-                let mut queue = self.guided_decisions.borrow_mut();
-                queue.clear();
-                for &lit in &lits {
-                    if smt.get_lit_val(lit).is_none() {
-                        queue.push_back(lit);
-                    }
-                }
-                return Ok(false);
-            }
-            Err((bt_level, lemma)) => {
-                if !self.backtrack_and_learn(&mut self.smt.borrow_mut(), &mut self.graph.borrow_mut(), bt_level, lemma) {
-                    return Err(SolverError::Inconsistent);
-                }
-                return Ok(true);
-            }
-            Ok(false) => {}
-        }
-
-        // Sync any literals unit-propagated by the clauses learned inside `probe`.
-        {
-            let smt = self.smt.borrow();
-            let mut graph = self.graph.borrow_mut();
-            let current_len = smt.current_trail_len();
-            if current_len > self.notified_len.get() {
-                graph.propagate(smt.get_trail_delta(self.notified_len.get()));
-                self.notified_len.set(current_len);
-                if !graph.has_estimated_solution() {
-                    return Ok(true);
-                }
-            }
-        }
-
-        // 2. Scan conflicting pairs `(plan[i], plan[k])` (including their causal ancestors) until one produces a cycle-free split that strictly increases a flaw's minimum cost.
-        for k in 1..plan.len() {
-            let r2 = plan[k];
-            let r2_chain = self.graph.borrow().resolver_chain_lits(r2);
-            for i in (0..k).rev() {
-                let r1 = plan[i];
-                let mut pair_lits = self.graph.borrow().resolver_chain_lits(r1);
-                pair_lits.extend_from_slice(&r2_chain);
-                pair_lits.sort_unstable();
-                pair_lits.dedup();
-
-                match self.smt.borrow_mut().probe(&pair_lits) {
-                    Ok(true) => continue,
-                    Ok(false) => {}
-                    Err((bt_level, lemma)) => {
-                        if !self.backtrack_and_learn(&mut self.smt.borrow_mut(), &mut self.graph.borrow_mut(), bt_level, lemma) {
-                            return Err(SolverError::Inconsistent);
-                        }
-                        return Ok(true);
-                    }
-                }
-
-                let (f1, f2) = {
-                    let graph = self.graph.borrow();
-                    (graph.resolver_flaw(r1), graph.resolver_flaw(r2))
-                };
-
-                for (r_anchor, f_target, r_excluded) in [(r1, f2, r2), (r2, f1, r1)] {
-                    let (anchor_chain, current_cost, candidates) = {
-                        let graph = self.graph.borrow();
-                        if !graph.can_split(r_anchor, f_target) {
-                            continue;
-                        }
-                        let anchor_chain = graph.resolver_chain_lits(r_anchor);
-                        let current_cost = graph.flaw_cost(f_target);
-                        let candidates: Vec<(ResolverId, Vec<Lit>, f64)> = graph.flaw_resolvers(f_target).iter().copied().filter(|&r| r != r_excluded && graph.resolver_status(r) != Some(false)).map(|r| (r, graph.resolver_chain_lits(r), graph.compute_resolver_cost(r))).collect();
-                        (anchor_chain, current_cost, candidates)
-                    };
-
-                    let mut compatible = Vec::with_capacity(candidates.len());
-                    let mut min_compatible_cost = f64::INFINITY;
-                    for (orig_res_id, mut cand_lits, res_cost) in candidates {
-                        cand_lits.extend_from_slice(&anchor_chain);
-                        cand_lits.sort_unstable();
-                        cand_lits.dedup();
-                        match self.smt.borrow_mut().probe(&cand_lits) {
-                            Ok(true) => {
-                                compatible.push(orig_res_id);
-                                if res_cost < min_compatible_cost {
-                                    min_compatible_cost = res_cost;
-                                }
-                            }
-                            Ok(false) => {}
-                            Err((bt_level, lemma)) => {
-                                if !self.backtrack_and_learn(&mut self.smt.borrow_mut(), &mut self.graph.borrow_mut(), bt_level, lemma) {
-                                    return Err(SolverError::Inconsistent);
-                                }
-                                return Ok(true);
-                            }
-                        }
-                    }
-
-                    if min_compatible_cost <= current_cost {
-                        continue;
-                    }
-
-                    trace!("Splitting causal graph: resolver {} excludes {} on flaw {} (cost {} -> {})", r_anchor, r_excluded, f_target, current_cost, min_compatible_cost);
-                    let res_flaw_id = {
-                        let mut graph = self.graph.borrow_mut();
-                        graph.record_split(r_anchor, f_target);
-                        let id = self.add_flaw(&mut self.smt.borrow_mut(), &mut graph, vec![r_anchor], Box::new(ResidualFlaw::new(f_target, r_excluded, compatible)))?;
-                        graph.mark_residual(id);
-                        id
-                    };
-
-                    self.expand_flaw(res_flaw_id)?;
-                    let anchor_flaw = self.graph.borrow().resolver_flaw(r_anchor);
-                    self.graph.borrow_mut().propagate_costs(&[anchor_flaw]);
-                    return Ok(true);
-                }
-            }
-        }
-
-        let unexpanded_in_plan = {
-            let graph = self.graph.borrow();
-            plan.iter().flat_map(|&r| graph.resolver_preconditions(r).iter().copied()).find(|&f| !graph.flaw_expanded(f))
-        };
-        if let Some(flw_id) = unexpanded_in_plan {
-            trace!("Expanding unexpanded flaw {} required by relaxed plan...", flw_id);
-            self.expand_flaw(flw_id)?;
-            return Ok(true);
-        }
-
-        Ok(false)
     }
 
     fn to_json(&self) -> Value {
