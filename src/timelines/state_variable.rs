@@ -1,6 +1,7 @@
 use crate::{
     SolverError, SolverState,
-    graph::{Flaw, Resolver},
+    flaws::{LitResolver, add_lit_candidates},
+    graph::Flaw,
     inf_rat_to_json,
     objects::EnumVar,
     timelines::{FlawWithCauses, Timeline, get_interval_vars, get_tau},
@@ -311,7 +312,7 @@ impl Flaw for Peak {
         let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding Peak flaw {} with atoms {} and {}", flw_id, self.a, self.b);
 
-        let mut candidates: Vec<Box<dyn Resolver>> = Vec::with_capacity(3);
+        let mut candidates: Vec<(Lit, &'static str)> = Vec::with_capacity(3);
 
         let a_tau = get_tau(slv, self.a);
         let b_tau = get_tau(slv, self.b);
@@ -334,7 +335,7 @@ impl Flaw for Peak {
         if let Some(expr) = displace_expr {
             let displace = slv.track_expr(&mut smt, &mut graph, expr)?;
             if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
-                candidates.push(Box::new(Displace::new(displace)));
+                candidates.push((displace, "displace"));
             }
         }
 
@@ -343,78 +344,20 @@ impl Flaw for Peak {
 
         let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
         if smt.probe(&[phi, a_before_b]).map_err(|_| SolverError::Inconsistent)? {
-            candidates.push(Box::new(Order::new(a_before_b)));
+            candidates.push((a_before_b, "order"));
         }
         let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
         if smt.probe(&[phi, b_before_a]).map_err(|_| SolverError::Inconsistent)? {
-            candidates.push(Box::new(Order::new(b_before_a)));
+            candidates.push((b_before_a, "order"));
         }
 
-        let single = candidates.len() == 1;
-        for res in candidates {
-            let rho = if single { phi } else { smt.new_lit() };
-            slv.add_resolver(&mut smt, &mut graph, rho, res)?;
-        }
-
-        Ok(())
+        add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, kind| Box::new(LitResolver::new(lit, json!({ "kind": kind }))))
     }
 
     fn to_json(&self) -> Value {
         json!({
             "kind": "peak",
             "atoms": [self.a.to_string(), self.b.to_string()],
-        })
-    }
-}
-
-struct Order {
-    lit: Lit,
-}
-
-impl Order {
-    fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for Order {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "order"
-        })
-    }
-}
-
-struct Displace {
-    lit: Lit,
-}
-
-impl Displace {
-    fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for Displace {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "displace"
         })
     }
 }

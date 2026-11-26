@@ -13,7 +13,6 @@ use semitone::{
     ast::{self, BoolExpr::And},
 };
 use serde_json::{Value, json};
-use std::rc::Rc;
 use tracing::trace;
 
 pub(crate) struct AtomFlaw {
@@ -71,7 +70,7 @@ impl Flaw for AtomFlaw {
                     trace!("Skipping unification with {} for atom {} because target resolver is false", target_atom, self.atom);
                     continue;
                 }
-                let unif_eqs = build_unification_equations(atom.clone(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).clone());
+                let unif_eqs = build_unification_equations(atom.as_ref(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).as_ref());
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
 
                 if smt.get_lit_val(phi) == Some(false) {
@@ -238,7 +237,7 @@ impl Resolver for UnificationResolver {
     }
 }
 
-fn build_unification_equations(atom_a: Rc<Atom>, atom_b: Rc<Atom>) -> Vec<ast::BoolExpr> {
+fn build_unification_equations(atom_a: &Atom, atom_b: &Atom) -> Vec<ast::BoolExpr> {
     let mut eqs = Vec::new();
 
     for (name, slot_a) in atom_a.get_slots() {

@@ -1,6 +1,7 @@
 use crate::{
     SolverError, SolverState,
-    graph::{Flaw, Resolver},
+    flaws::{LitResolver, add_lit_candidates},
+    graph::Flaw,
     inf_rat_to_json,
     objects::{ArithVar, EnumVar},
     timelines::{FlawWithCauses, Timeline, get_amount, get_interval_vars, get_tau},
@@ -477,7 +478,7 @@ impl Flaw for LevelFlaw {
         let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding {} flaw {} with atoms {}", self.kind, flw_id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
 
-        let mut candidates: Vec<Box<dyn Resolver>> = Vec::new();
+        let mut candidates: Vec<(Lit, &'static str)> = Vec::new();
 
         for &atom_id in &self.past {
             let tau = {
@@ -488,7 +489,7 @@ impl Flaw for LevelFlaw {
                 let var = var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !var.eq(usize::from(self.instance)))?;
                 if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push(Box::new(Displace::new(displace)));
+                    candidates.push((displace, "displace"));
                 }
             }
         }
@@ -499,7 +500,7 @@ impl Flaw for LevelFlaw {
                 let (past_start, _) = get_interval_vars(slv, past_id);
                 let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
                 if smt.probe(&[phi, order]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push(Box::new(Order::new(order)));
+                    candidates.push((order, "order"));
                 }
             }
         }
@@ -509,25 +510,19 @@ impl Flaw for LevelFlaw {
                 let amount = ArithExpr::Add(self.past.iter().map(|&atom_id| get_amount(slv, atom_id)).collect());
                 let over_capacity = slv.track_expr(&mut smt, &mut graph, amount.le(self.capacity.clone()))?;
                 if smt.probe(&[phi, over_capacity]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push(Box::new(Compress::new(over_capacity)));
+                    candidates.push((over_capacity, "compress"));
                 }
             }
             Kind::Underflow => {
                 let amount = ArithExpr::Add(self.past.iter().map(|&atom_id| get_amount(slv, atom_id)).collect());
                 let under_zero = slv.track_expr(&mut smt, &mut graph, amount.ge(ArithExpr::Const(rug::Rational::from(0))))?;
                 if smt.probe(&[phi, under_zero]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push(Box::new(Compress::new(under_zero)));
+                    candidates.push((under_zero, "compress"));
                 }
             }
         }
 
-        let single = candidates.len() == 1;
-        for res in candidates {
-            let rho = if single { phi } else { smt.new_lit() };
-            slv.add_resolver(&mut smt, &mut graph, rho, res)?;
-        }
-
-        Ok(())
+        add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, kind| Box::new(LitResolver::new(lit, json!({ "kind": kind }))))
     }
 
     fn to_json(&self) -> Value {
@@ -535,84 +530,6 @@ impl Flaw for LevelFlaw {
             "kind" : self.kind.to_string(),
             "past": self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
             "future": self.future.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
-        })
-    }
-}
-
-struct Order {
-    lit: Lit,
-}
-
-impl Order {
-    fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for Order {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "order"
-        })
-    }
-}
-
-struct Displace {
-    lit: Lit,
-}
-
-impl Displace {
-    fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for Displace {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "displace"
-        })
-    }
-}
-
-struct Compress {
-    lit: Lit,
-}
-
-impl Compress {
-    fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for Compress {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "displace"
         })
     }
 }

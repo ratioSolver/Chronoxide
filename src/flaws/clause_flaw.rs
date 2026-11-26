@@ -1,5 +1,6 @@
 use crate::{
     SolverError, SolverState,
+    flaws::{LitResolver, add_lit_candidates},
     graph::{Flaw, Resolver},
 };
 use semitone::{Lit, ast::BoolExpr};
@@ -36,7 +37,7 @@ impl Flaw for ClauseFlaw {
                     continue;
                 }
                 if smt.probe(&[phi, lit]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push(lit);
+                    candidates.push((lit, ()));
                 }
                 if smt.get_lit_val(phi) == Some(false) {
                     // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
@@ -46,54 +47,12 @@ impl Flaw for ClauseFlaw {
             }
         }
 
-        match candidates.len() {
-            0 => {
-                if phi == Lit::TRUE {
-                    return Err(SolverError::Inconsistent);
-                }
-            }
-            1 => {
-                slv.add_resolver(&mut smt, &mut graph, phi, Box::new(ClauseResolver::new(candidates[0])))?;
-            }
-            _ => {
-                for val_lit in candidates {
-                    let rho = smt.new_lit();
-                    slv.add_resolver(&mut smt, &mut graph, rho, Box::new(ClauseResolver::new(val_lit)))?;
-                }
-            }
-        }
-        Ok(())
+        add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, ()| Box::new(LitResolver::new(lit, json!({ "kind": "clause", "val": lit.to_string() }))))
     }
 
     fn to_json(&self) -> Value {
         json!({
             "kind": "clause",
-        })
-    }
-}
-
-struct ClauseResolver {
-    lit: Lit,
-}
-
-impl ClauseResolver {
-    pub(crate) fn new(lit: Lit) -> Self {
-        Self { lit }
-    }
-}
-
-impl Resolver for ClauseResolver {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "val": self.lit.to_string(),
         })
     }
 }

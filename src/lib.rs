@@ -1,5 +1,5 @@
 use crate::{
-    flaws::{atom_flaw::AtomFlaw, bool_flaw::BoolFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw, residual_flaw::ResidualFlaw},
+    flaws::{atom_flaw::AtomFlaw, clause_flaw::ClauseFlaw, disjunction_flaw::DisjunctionFlaw, enum_flaw::EnumFlaw, residual_flaw::ResidualFlaw},
     graph::{Flaw, FlawId, Graph, Resolver, ResolverId},
     objects::{ArithVar, BoolVar, EnumVar, StringVar},
     timelines::{Timeline, consumable_resource::ConsumableResource, reusable_resource::ReusableResource, state_variable::StateVariable},
@@ -491,7 +491,7 @@ impl Core for SolverState {
         let mut graph = self.graph.borrow_mut();
         let var = smt.new_bool();
         let causes = graph.current_causes();
-        self.add_flaw(&mut smt, &mut graph, causes, Box::new(BoolFlaw::new(var.clone()))).expect("Failed to add BoolFlaw to graph");
+        self.add_flaw(&mut smt, &mut graph, causes, Box::new(ClauseFlaw::new(vec![var.clone(), !var.clone()]))).expect("Failed to add ClauseFlaw to graph");
         Slot::Primitive(Rc::new(BoolVar::new(self.bool_type(), var)))
     }
     fn new_int(&self, value: &str) -> Slot {

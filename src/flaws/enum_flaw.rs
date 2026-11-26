@@ -1,5 +1,6 @@
 use crate::{
     SolverError, SolverState,
+    flaws::{LitResolver, add_lit_candidates},
     graph::{Flaw, Resolver},
 };
 use riddle::env::ObjectId;
@@ -39,7 +40,7 @@ impl Flaw for EnumFlaw {
                 continue;
             }
             if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
-                candidates.push((val, val_lit));
+                candidates.push((val_lit, val));
             }
             if smt.get_lit_val(phi) == Some(false) {
                 // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
@@ -48,59 +49,13 @@ impl Flaw for EnumFlaw {
             }
         }
 
-        match candidates.len() {
-            0 => {
-                if phi == Lit::TRUE {
-                    // ϕ is true, but no candidates are valid, so the problem has no solution
-                    return Err(SolverError::Inconsistent);
-                }
-            }
-            1 => {
-                let (val, val_lit) = candidates[0];
-                slv.add_resolver(&mut smt, &mut graph, phi, Box::new(EnumResolver::new(val, val_lit)))?;
-            }
-            _ => {
-                for (val, val_lit) in candidates {
-                    let rho = smt.new_lit();
-                    slv.add_resolver(&mut smt, &mut graph, rho, Box::new(EnumResolver::new(val, val_lit)))?;
-                }
-            }
-        }
-        Ok(())
+        add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, val| Box::new(LitResolver::new(lit, json!({ "kind": "enum", "val": val.to_string() }))))
     }
 
     fn to_json(&self) -> Value {
         json!({
             "kind": "enum",
             "var": self.expr.to_string(),
-        })
-    }
-}
-
-struct EnumResolver {
-    val: ObjectId,
-    lit: Lit,
-}
-
-impl EnumResolver {
-    fn new(val: ObjectId, lit: Lit) -> Self {
-        Self { val, lit }
-    }
-}
-
-impl Resolver for EnumResolver {
-    fn apply(&self, slv: &SolverState) -> Result<(), SolverError> {
-        let mut smt = slv.smt.borrow_mut();
-        let mut graph = slv.graph.borrow_mut();
-        let (_, rho) = graph.current_resolver().expect("No current resolver found");
-        // ρ → lit
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.lit])
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "kind": "enum",
-            "val": self.val.to_string(),
         })
     }
 }
