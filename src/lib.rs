@@ -391,42 +391,65 @@ impl SolverState {
             return Ok(false);
         };
 
-        // 3. Choose orientation (r_anchor, r_excluded on f_target) and create ResidualFlaw.
-        let split_choice = {
+        // 3. Choose orientation (r_anchor, r_excluded on f_target) only if it avoids cycles and strictly increases the minimum cost of `f_target` under `r_anchor`.
+        let (f1, f2) = {
             let graph = self.graph.borrow();
-            let f1 = graph.resolver_flaw(r1);
-            let f2 = graph.resolver_flaw(r2);
-            if graph.can_split(r1, f2) {
-                Some((r1, f2, r2))
-            } else if graph.can_split(r2, f1) {
-                Some((r2, f1, r1))
-            } else {
-                None
+            (graph.resolver_flaw(r1), graph.resolver_flaw(r2))
+        };
+
+        for (r_anchor, f_target, r_excluded) in [(r1, f2, r2), (r2, f1, r1)] {
+            let (rho_anchor, current_cost, candidates) = {
+                let graph = self.graph.borrow();
+                if !graph.can_split(r_anchor, f_target) {
+                    continue;
+                }
+                let rho_anchor = graph.rho(r_anchor);
+                let current_cost = graph.flaw_cost(f_target);
+                let candidates: Vec<(ResolverId, Lit, f64)> = graph.flaw_resolvers(f_target).iter().copied().filter(|&r| r != r_excluded && graph.resolver_status(r) != Some(false)).map(|r| (r, graph.rho(r), graph.compute_resolver_cost(r))).collect();
+                (rho_anchor, current_cost, candidates)
+            };
+
+            let mut compatible = Vec::with_capacity(candidates.len());
+            let mut min_compatible_cost = f64::INFINITY;
+            for (orig_res_id, orig_rho, res_cost) in candidates {
+                let probe_res = self.smt.borrow_mut().probe(&[rho_anchor, orig_rho]);
+                match probe_res {
+                    Ok(true) => {
+                        compatible.push(orig_res_id);
+                        if res_cost < min_compatible_cost {
+                            min_compatible_cost = res_cost;
+                        }
+                    }
+                    Ok(false) => {}
+                    Err((bt_level, lemma)) => {
+                        if !self.backtrack_and_learn(&mut self.smt.borrow_mut(), &mut self.graph.borrow_mut(), bt_level, lemma) {
+                            return Err(SolverError::Inconsistent);
+                        }
+                        return Ok(true);
+                    }
+                }
             }
-        };
 
-        let Some((r_anchor, f_target, r_excluded)) = split_choice else {
-            return Ok(false);
-        };
+            if min_compatible_cost <= current_cost {
+                continue;
+            }
 
-        let allowed: Vec<ResolverId> = {
-            let graph = self.graph.borrow();
-            graph.flaw_resolvers(f_target).iter().copied().filter(|&r| r != r_excluded && graph.resolver_status(r) != Some(false)).collect()
-        };
+            trace!("Splitting causal graph: resolver {} excludes {} on flaw {} (cost {} -> {})", r_anchor, r_excluded, f_target, current_cost, min_compatible_cost);
+            let res_flaw_id = {
+                let mut graph = self.graph.borrow_mut();
+                graph.record_split(r_anchor, f_target);
+                let id = self.add_flaw(&mut self.smt.borrow_mut(), &mut graph, vec![r_anchor], Box::new(ResidualFlaw::new(f_target, r_excluded, compatible)))?;
+                graph.mark_residual(id);
+                id
+            };
 
-        trace!("Splitting causal graph: resolver {} excludes {} on flaw {}", r_anchor, r_excluded, f_target);
-        let res_flaw_id = {
-            let mut graph = self.graph.borrow_mut();
-            graph.record_split(r_anchor, f_target);
-            let id = self.add_flaw(&mut self.smt.borrow_mut(), &mut graph, vec![r_anchor], Box::new(ResidualFlaw::new(f_target, r_excluded, allowed)))?;
-            graph.mark_residual(id);
-            id
-        };
+            self.expand_flaw(res_flaw_id)?;
+            let anchor_flaw = self.graph.borrow().resolver_flaw(r_anchor);
+            self.graph.borrow_mut().propagate_costs(&[anchor_flaw]);
+            return Ok(true);
+        }
 
-        self.expand_flaw(res_flaw_id)?;
-        let anchor_flaw = self.graph.borrow().resolver_flaw(r_anchor);
-        self.graph.borrow_mut().propagate_costs(&[anchor_flaw]);
-        Ok(true)
+        Ok(false)
     }
 
     fn to_json(&self) -> Value {

@@ -368,7 +368,7 @@ impl Graph {
     }
 
     /// Computes the estimated cost of the given resolver based on its intrinsic cost and the costs of its preconditions.
-    fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {
+    pub(super) fn compute_resolver_cost(&self, res_id: ResolverId) -> f64 {
         if self.resolver_status[res_id] == Some(false) {
             f64::INFINITY
         } else {
@@ -665,8 +665,36 @@ impl Graph {
         self.is_residual[flw_id] = true;
     }
 
+    /// Returns true if `target` is reachable from `start` following `flaw -> resolver -> precondition`.
+    pub(super) fn reaches_flaw(&self, start: FlawId, target: FlawId) -> bool {
+        let mut queue = VecDeque::from([start]);
+        let mut visited = HashSet::new();
+
+        while let Some(f_id) = queue.pop_front() {
+            if f_id == target {
+                return true;
+            }
+            if !visited.insert(f_id) {
+                continue;
+            }
+            for &r_id in &self.flaw_resolvers[f_id] {
+                if self.resolver_status[r_id] == Some(false) {
+                    continue;
+                }
+                for &pre_f in &self.resolver_preconditions[r_id] {
+                    if !visited.contains(&pre_f) {
+                        queue.push_back(pre_f);
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     pub(super) fn can_split(&self, r1: ResolverId, f2: FlawId) -> bool {
-        !self.is_residual[f2] && !self.split_pairs.contains(&(r1, f2)) && self.resolver_flaw[r1] != f2
+        let anchor_flaw = self.resolver_flaw[r1];
+        !self.is_residual[f2] && !self.split_pairs.contains(&(r1, f2)) && anchor_flaw != f2 && !self.reaches_flaw(f2, anchor_flaw)
     }
 
     pub(super) fn record_split(&mut self, r1: ResolverId, f2: FlawId) {
