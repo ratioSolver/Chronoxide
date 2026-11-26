@@ -587,9 +587,24 @@ impl Graph {
         true
     }
 
+    /// Computes the causal depth of `flw_id` (number of ancestor flaws along `flaw_causes`).
+    fn causal_depth(&self, mut flw_id: FlawId) -> usize {
+        let mut depth = 0;
+        while let Some(&cause_res) = self.flaw_causes[flw_id].first() {
+            depth += 1;
+            flw_id = self.resolver_flaw[cause_res];
+        }
+        depth
+    }
+
+    /// Returns the shallowest active, unexpanded flaw currently in `agenda` with infinite cost, if any.
+    pub(super) fn unexpanded_agenda_flaw(&self) -> Option<FlawId> {
+        self.agenda.iter().copied().filter(|&f_id| self.flaw_status[f_id] == Some(true) && self.flaw_cost[f_id] == f64::INFINITY && !self.flaw_expanded(f_id)).min_by_key(|&f_id| (self.causal_depth(f_id), f_id))
+    }
+
     pub(super) fn pop_flaw(&mut self) -> Option<FlawId> {
         let mut best_idx = None;
-        let mut best_priority = -1;
+        let mut best_key = None;
 
         for (idx, &f_id) in self.flaw_q.iter().enumerate() {
             if self.flaw_status[f_id] == Some(false) {
@@ -603,13 +618,10 @@ impl Graph {
                 1
             };
 
-            if priority > best_priority {
-                best_priority = priority;
+            let key = (std::cmp::Reverse(priority), self.causal_depth(f_id), f_id);
+            if best_key.is_none_or(|bk| key < bk) {
+                best_key = Some(key);
                 best_idx = Some(idx);
-
-                if best_priority == 2 {
-                    break;
-                }
             }
         }
 
@@ -701,6 +713,24 @@ impl Graph {
         self.split_pairs.insert((r1, f2));
     }
 
+    /// Collects the ρ literals of `res_id` and its causal ancestors along `flaw_causes`.
+    pub(super) fn resolver_chain_lits(&self, mut res_id: ResolverId) -> Vec<Lit> {
+        let mut lits = vec![self.resolver_rho[res_id]];
+        let mut visited = HashSet::new();
+        while visited.insert(res_id) {
+            let flw_id = self.resolver_flaw[res_id];
+            if let Some(&cause_res) = self.flaw_causes[flw_id].first() {
+                lits.push(self.resolver_rho[cause_res]);
+                res_id = cause_res;
+            } else {
+                break;
+            }
+        }
+        lits.sort_unstable();
+        lits.dedup();
+        lits
+    }
+
     /// Extracts the sequence of undecided resolvers selected by the current heuristic estimate
     /// to satisfy all active flaws in `agenda`.
     pub(super) fn estimated_plan(&self) -> Vec<ResolverId> {
@@ -745,16 +775,6 @@ impl Graph {
     }
 
     pub(super) fn pick_branching_literal(&self) -> Option<Lit> {
-        for &f_id in &self.flaw_q {
-            if self.flaw_status[f_id].is_none() {
-                let lit = !self.flaw_phi[f_id];
-                trace!("Branching on unexpanded flaw {}: {}", f_id, lit);
-                #[cfg(feature = "server")]
-                let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(f_id)));
-                return Some(lit);
-            }
-        }
-
         if self.agenda.is_empty() {
             #[cfg(feature = "server")]
             let _ = self.tx_event.send(SolverEvent::CurrentFlaw(None));
