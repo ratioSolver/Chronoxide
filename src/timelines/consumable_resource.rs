@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt,
+    fmt, iter,
     rc::{Rc, Weak},
 };
 use tracing::trace;
@@ -313,13 +313,14 @@ impl Timeline for ConsumableResource {
                         let past: BTreeSet<AtomId> = started.intersection(culprits).copied().collect();
                         if !past.is_empty() && reported.insert((kind, past.clone())) {
                             let future: BTreeSet<AtomId> = others.iter().copied().filter(|a| ends[a] > *pulse).collect();
+                            let settled: BTreeSet<AtomId> = others.iter().copied().filter(|a| ends[a] <= *pulse).collect();
 
                             let mut causes = Vec::new();
-                            for &atom_id in past.iter().chain(future.iter()) {
+                            for &atom_id in past.iter().chain(future.iter()).chain(settled.iter()) {
                                 let r_a = atom_sigma[atom_id].expect("Active atom on timeline should have a Fact/Goal resolver");
                                 causes.push(r_a);
                             }
-                            flaws.push((Box::new(LevelFlaw::new(kind, *instance_id, capacity_var.clone(), past, future)), causes));
+                            flaws.push((Box::new(LevelFlaw::new(kind, *instance_id, capacity_var.clone(), initial_amount_var.clone(), past, future, settled)), causes));
                         }
                     }
                 }
@@ -461,13 +462,15 @@ struct LevelFlaw {
     kind: Kind,
     instance: ObjectId,
     capacity: ArithExpr,
+    initial_amount: ArithExpr,
     past: BTreeSet<AtomId>,
     future: BTreeSet<AtomId>,
+    settled: BTreeSet<AtomId>,
 }
 
 impl LevelFlaw {
-    fn new(kind: Kind, instance: ObjectId, capacity: ArithExpr, past: BTreeSet<AtomId>, future: BTreeSet<AtomId>) -> Self {
-        Self { kind, instance, capacity, past, future }
+    fn new(kind: Kind, instance: ObjectId, capacity: ArithExpr, initial_amount: ArithExpr, past: BTreeSet<AtomId>, future: BTreeSet<AtomId>, settled: BTreeSet<AtomId>) -> Self {
+        Self { kind, instance, capacity, initial_amount, past, future, settled }
     }
 }
 
@@ -498,28 +501,28 @@ impl Flaw for LevelFlaw {
             let (_, future_end) = get_interval_vars(slv, future_id);
             for &past_id in &self.past {
                 let (past_start, _) = get_interval_vars(slv, past_id);
-                let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start.clone()))?;
+                let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start))?;
                 if smt.probe(&[phi, order]).map_err(|_| SolverError::Inconsistent)? {
                     candidates.push((order, "order"));
                 }
             }
         }
 
-        match self.kind {
-            Kind::Overflow => {
-                let amount = ArithExpr::Add(self.past.iter().map(|&atom_id| get_amount(slv, atom_id)).collect());
-                let over_capacity = slv.track_expr(&mut smt, &mut graph, amount.le(self.capacity.clone()))?;
-                if smt.probe(&[phi, over_capacity]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push((over_capacity, "compress"));
-                }
-            }
-            Kind::Underflow => {
-                let amount = ArithExpr::Add(self.past.iter().map(|&atom_id| get_amount(slv, atom_id)).collect());
-                let under_zero = slv.track_expr(&mut smt, &mut graph, amount.ge(ArithExpr::Const(rug::Rational::from(0))))?;
-                if smt.probe(&[phi, under_zero]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push((under_zero, "compress"));
-                }
-            }
+        // Compress: sufficient condition for the level to stay within [0, capacity] at the flaw's pulse
+        let amounts = |ids: &BTreeSet<AtomId>| ids.iter().map(|&id| get_amount(slv, id)).collect::<Vec<_>>();
+        let (lhs, rhs) = match self.kind {
+            // initial + Σ started productions ≤ capacity + Σ settled consumptions
+            Kind::Overflow => (ArithExpr::Add(iter::once(self.initial_amount.clone()).chain(amounts(&self.past)).collect()), ArithExpr::Add(iter::once(self.capacity.clone()).chain(amounts(&self.settled)).collect())),
+            // Σ started consumptions ≤ initial + Σ settled productions
+            Kind::Underflow => (ArithExpr::Add(amounts(&self.past)), ArithExpr::Add(iter::once(self.initial_amount.clone()).chain(amounts(&self.settled)).collect())),
+        };
+        let compress = slv.track_expr(&mut smt, &mut graph, lhs.le(rhs))?;
+        if smt.probe(&[phi, compress]).map_err(|_| SolverError::Inconsistent)? {
+            candidates.push((compress, "compress"));
+        }
+
+        if smt.get_lit_val(phi) == Some(false) {
+            return Ok(());
         }
 
         add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, kind| Box::new(LitResolver::new(lit, json!({ "kind": kind }))))
@@ -527,9 +530,10 @@ impl Flaw for LevelFlaw {
 
     fn to_json(&self) -> Value {
         json!({
-            "kind" : self.kind.to_string(),
+            "kind": self.kind.to_string(),
             "past": self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
             "future": self.future.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            "settled": self.settled.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
         })
     }
 }
