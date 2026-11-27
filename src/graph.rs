@@ -131,7 +131,6 @@ pub struct Graph {
 
     lit_to_flaws: HashMap<Lit, Vec<FlawId>>,
     flaw_status: Vec<Option<bool>>,
-    flaw_expanded: Vec<bool>,
     flaw_phi: Vec<Lit>,
     flaw_cost_var: Vec<DlVar>,
     flaw_causes: Vec<Vec<ResolverId>>,
@@ -157,7 +156,8 @@ pub struct Graph {
     resolver_impliers: Vec<Vec<ResolverId>>,
     /// Symmetric, downward-closed resolver mutex relation (structural + learned).
     res_mutex: Vec<BitSet>,
-    /// Cache of agenda resolver pairs already probed at level 0.
+    /// Caches of resolvers and resolver pairs already probed at level 0.
+    probed_resolvers: HashSet<ResolverId>,
     probed_pairs: HashSet<(ResolverId, ResolverId)>,
 
     flaw_q: VecDeque<FlawId>,
@@ -176,7 +176,6 @@ impl Graph {
 
             lit_to_flaws: HashMap::new(),
             flaw_status: Vec::new(),
-            flaw_expanded: Vec::new(),
             flaw_phi: Vec::new(),
             flaw_cost_var: Vec::new(),
             flaw_causes: Vec::new(),
@@ -195,6 +194,7 @@ impl Graph {
             resolver_linked_to: Vec::new(),
             resolver_impliers: Vec::new(),
             res_mutex: Vec::new(),
+            probed_resolvers: HashSet::new(),
             probed_pairs: HashSet::new(),
 
             flaw_q: VecDeque::new(),
@@ -343,7 +343,6 @@ impl Graph {
         self.flaws.push(Some(flw));
         self.flaw_phi.push(phi);
         self.flaw_status.push(status);
-        self.flaw_expanded.push(false);
         if status == Some(true) {
             self.agenda.insert(flw_id);
             trace!("Agenda size: {}, {{{}}}", self.agenda.len(), self.agenda.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
@@ -354,9 +353,9 @@ impl Graph {
         self.flaw_resolvers.push(Vec::new());
         self.flaw_pair_cost.push(vec![f64::INFINITY; flw_id.0 + 1]);
 
-        match *causes.as_slice() {
-            [r] => self.resolver_preconditions[r].push(flw_id),
-            [r1, r2] => self.pair_preconditions.entry(Self::norm_res_pair(r1, r2)).or_default().push(flw_id),
+        match causes.as_slice() {
+            &[r] => self.resolver_preconditions[r].push(flw_id),
+            &[r1, r2] => self.pair_preconditions.entry(Self::norm_res_pair(r1, r2)).or_default().push(flw_id),
             _ => {}
         }
 
@@ -385,18 +384,17 @@ impl Graph {
     }
 
     pub(super) fn flaw_expanded(&self, flw_id: FlawId) -> bool {
-        self.flaw_expanded[flw_id]
+        !self.flaw_q.contains(&flw_id)
     }
 
-    pub(super) fn has_active_unexpanded_flaw(&self) -> bool {
-        self.agenda.iter().any(|&f_id| !self.flaw_expanded[f_id])
+    pub(super) fn pick_active_unexpanded_flaw(&self) -> Option<FlawId> {
+        self.flaw_q.iter().copied().find(|&f| self.flaw_status[f] == Some(true))
     }
 
     pub(super) fn take_flaw(&mut self, flw_id: FlawId) -> Option<Box<dyn Flaw>> {
         if let Some(pos) = self.flaw_q.iter().position(|&id| id == flw_id) {
             self.flaw_q.remove(pos);
         }
-        self.flaw_expanded[flw_id] = true;
         self.c_flaw.replace((flw_id, self.flaw_phi[flw_id]));
         #[cfg(feature = "server")]
         let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
@@ -516,24 +514,76 @@ impl Graph {
         let _ = self.tx_event.send(SolverEvent::CurrentResolver(None));
     }
 
-    /// Collects unprobed, non-mutex resolver pairs across distinct flaws currently in `agenda`.
-    pub(super) fn agenda_resolver_pairs(&self) -> Vec<(ResolverId, ResolverId)> {
+    /// Alive resolvers with finite h^2 cost not yet unary-probed at level 0.
+    pub(super) fn finite_unprobed_resolvers(&mut self) -> Vec<ResolverId> {
+        self.ensure_h2();
+        let mut out = Vec::new();
+        for r_idx in 0..self.resolvers.len() {
+            let r = ResolverId(r_idx);
+            let f = self.resolver_flaw[r];
+            if self.resolver_status[r].is_some() || self.flaw_status[f] == Some(false) || !self.is_resolver_alive(r) || self.probed_resolvers.contains(&r) {
+                continue;
+            }
+            let (eff, _) = self.effective_resolver(r);
+            if self.resolver_prec_cost(eff) < f64::INFINITY {
+                out.push(r);
+            }
+        }
+        out
+    }
+
+    pub(super) fn mark_probed_resolver(&mut self, r: ResolverId) -> bool {
+        self.probed_resolvers.insert(r)
+    }
+
+    /// Unprobed, non-mutex finite-cost resolver pairs across:
+    /// 1) distinct flaws in `agenda`, and
+    /// 2) sibling preconditions of any alive finite-cost resolver.
+    pub(super) fn finite_unprobed_pairs(&mut self) -> Vec<(ResolverId, ResolverId)> {
+        self.ensure_h2();
+        let mut flaw_pairs: HashSet<(FlawId, FlawId)> = HashSet::new();
+
         let agenda: Vec<FlawId> = self.agenda.iter().copied().collect();
-        let mut pairs = Vec::new();
         for (i, &f1) in agenda.iter().enumerate() {
             for &f2 in &agenda[(i + 1)..] {
-                for &r1 in &self.flaw_resolvers[f1] {
-                    if !self.is_resolver_alive(r1) {
+                flaw_pairs.insert(Self::norm_pair(f1, f2));
+            }
+        }
+
+        for r_idx in 0..self.resolvers.len() {
+            let r = ResolverId(r_idx);
+            let f = self.resolver_flaw[r];
+            if self.flaw_status[f] == Some(false) || !self.is_resolver_alive(r) || self.resolver_linked_to[r].is_some() {
+                continue;
+            }
+            let precs = &self.resolver_preconditions[r];
+            if precs.len() < 2 || self.resolver_prec_cost(r) == f64::INFINITY {
+                continue;
+            }
+            for (i, &p1) in precs.iter().enumerate() {
+                for &p2 in &precs[(i + 1)..] {
+                    flaw_pairs.insert(Self::norm_pair(p1, p2));
+                }
+            }
+        }
+
+        let mut pairs = Vec::new();
+        let mut seen = HashSet::new();
+        for (f1, f2) in flaw_pairs {
+            for &r1 in &self.flaw_resolvers[f1] {
+                if !self.is_resolver_alive(r1) || self.resolver_prec_cost(self.effective_resolver(r1).0) == f64::INFINITY {
+                    continue;
+                }
+                for &r2 in &self.flaw_resolvers[f2] {
+                    if !self.is_resolver_alive(r2) || self.is_res_mutex(r1, r2) || self.resolver_prec_cost(self.effective_resolver(r2).0) == f64::INFINITY {
                         continue;
                     }
-                    for &r2 in &self.flaw_resolvers[f2] {
-                        if !self.is_resolver_alive(r2) || self.is_res_mutex(r1, r2) {
-                            continue;
-                        }
-                        let key = Self::norm_res_pair(r1, r2);
-                        if !self.probed_pairs.contains(&key) {
-                            pairs.push(key);
-                        }
+                    if self.resolver_status[r1] == Some(true) && self.resolver_status[r2] == Some(true) {
+                        continue;
+                    }
+                    let key = Self::norm_res_pair(r1, r2);
+                    if !self.probed_pairs.contains(&key) && seen.insert(key) {
+                        pairs.push(key);
                     }
                 }
             }
@@ -645,7 +695,7 @@ impl Graph {
         let mut alive: Vec<(ResolverId, FlawId, ResolverId, f64)> = Vec::new();
         for f_idx in 0..self.flaws.len() {
             let f = FlawId(f_idx);
-            if !self.flaw_expanded[f] || self.flaw_status[f] == Some(false) {
+            if self.flaw_resolvers[f].is_empty() || self.flaw_status[f] == Some(false) {
                 continue;
             }
             let r_list = &self.flaw_resolvers[f];
@@ -689,6 +739,9 @@ impl Graph {
                         continue;
                     }
                     let (r2, f2, _, _) = alive[j];
+                    if f1 == f2 {
+                        continue;
+                    }
                     let cur = self.pair_cost(f1, f2);
                     let c = self.resolver_pair_cost(r1, r2, p1, p2, cur);
                     if c < cur {
@@ -857,6 +910,30 @@ impl Graph {
         }
 
         best_idx.and_then(|idx| self.flaw_q.remove(idx))
+    }
+
+    /// Returns all flaws in `flaw_q` touched by the current bounded-search failure
+    /// (negated frontier decisions + the frontier flaw forced to `true`).
+    pub(super) fn conflict_frontier_flaws(&self) -> Vec<FlawId> {
+        self.flaw_q.iter().copied().filter(|&f| self.flaw_status[f].is_some()).collect()
+    }
+
+    /// Pops one flaw via `pop_flaw()` together with all other queued flaws sharing the same `phi`.
+    pub(super) fn pop_flaw_group(&mut self) -> Vec<FlawId> {
+        let Some(first) = self.pop_flaw() else {
+            return Vec::new();
+        };
+        let phi = self.flaw_phi[first];
+        let mut group = vec![first];
+        let mut i = 0;
+        while i < self.flaw_q.len() {
+            if self.flaw_phi[self.flaw_q[i]] == phi && self.flaw_status[self.flaw_q[i]] != Some(false) {
+                group.push(self.flaw_q.remove(i).unwrap());
+            } else {
+                i += 1;
+            }
+        }
+        group
     }
 
     /// Returns true if `anc` is a causal ancestor of `flw` along `flaw_causes`.

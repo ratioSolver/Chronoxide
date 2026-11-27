@@ -92,18 +92,38 @@ impl SolverState {
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
 
                     let lvl = self.smt.borrow().decision_level();
-                    let need_expansion = {
-                        let mut graph = self.graph.borrow_mut();
-                        (lvl == 0 && !graph.has_estimated_solution()) || graph.has_active_unexpanded_flaw()
-                    };
+                    let active_unexpanded = self.graph.borrow().pick_active_unexpanded_flaw().is_some();
 
-                    if need_expansion {
-                        trace!("Expanding graph...");
+                    if active_unexpanded && lvl > 0 {
+                        trace!("Bounded search hit frontier, expanding conflict frontier...");
+                        let frontier = self.graph.borrow().conflict_frontier_flaws();
                         self.cancel_until(0);
-                        let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
-                        self.expand_flaw(flw_id)?;
+                        for flw_id in frontier {
+                            let should_expand = {
+                                let graph = self.graph.borrow();
+                                !graph.flaw_expanded(flw_id) && graph.flaw_status(flw_id) != Some(false)
+                            };
+                            if should_expand {
+                                self.expand_flaw(flw_id)?;
+                            }
+                        }
+                    } else if active_unexpanded || (lvl == 0 && !self.graph.borrow_mut().has_estimated_solution()) {
+                        trace!("Expanding graph...");
+                        let group = self.graph.borrow_mut().pop_flaw_group();
+                        if group.is_empty() {
+                            return Err(SolverError::Inconsistent);
+                        }
+                        for flw_id in group {
+                            let should_expand = {
+                                let graph = self.graph.borrow();
+                                !graph.flaw_expanded(flw_id) && graph.flaw_status(flw_id) != Some(false)
+                            };
+                            if should_expand {
+                                self.expand_flaw(flw_id)?;
+                            }
+                        }
                     } else {
-                        if lvl == 0 && self.probe_agenda_mutexes()? {
+                        if lvl == 0 && self.probe_level0_mutexes()? {
                             continue;
                         }
 
@@ -162,36 +182,49 @@ impl SolverState {
         Ok(())
     }
 
-    /// Probes unprobed resolver pairs across flaws in `agenda` at level 0.
+    /// Probes unprobed finite-cost resolvers (unary) and finite-cost agenda/sibling pairs (binary) at level 0.
     /// Returns `true` if any new theory mutex or level-0 propagation occurred.
-    fn probe_agenda_mutexes(&self) -> Result<bool, SolverError> {
-        let pairs = self.graph.borrow().agenda_resolver_pairs();
-        if pairs.is_empty() {
-            return Ok(false);
-        }
-
+    fn probe_level0_mutexes(&self) -> Result<bool, SolverError> {
         let mut smt = self.smt.borrow_mut();
         let mut graph = self.graph.borrow_mut();
         let mut learned = false;
 
-        for (r1, r2) in pairs {
-            if graph.is_res_mutex(r1, r2) || graph.resolver_status(r1) == Some(false) || graph.resolver_status(r2) == Some(false) {
+        for r in graph.finite_unprobed_resolvers() {
+            let rho = graph.rho(r);
+            if graph.resolver_status(r) == Some(false) || smt.get_lit_val(rho) == Some(false) || !graph.mark_probed_resolver(r) {
                 continue;
             }
-            if !graph.mark_probed(r1, r2) {
-                continue;
-            }
-            let rho1 = graph.rho(r1);
-            let rho2 = graph.rho(r2);
-            match smt.probe(&[rho1, rho2]) {
+            match smt.probe(&[rho]) {
                 Ok(true) => {}
                 Ok(false) => {
-                    trace!("Theory mutex detected via agenda probe: {} and {}", r1, r2);
-                    graph.add_res_mutex(r1, r2);
-                    self.add_clause(&mut smt, &mut graph, vec![!rho1, !rho2])?;
+                    trace!("Inconsistent resolver detected via level-0 probe: {}", r);
+                    self.add_clause(&mut smt, &mut graph, vec![!rho])?;
                     learned = true;
                 }
                 Err(_) => return Err(SolverError::Inconsistent),
+            }
+        }
+
+        if !learned {
+            for (r1, r2) in graph.finite_unprobed_pairs() {
+                let rho1 = graph.rho(r1);
+                let rho2 = graph.rho(r2);
+                if rho1 == rho2 || graph.is_res_mutex(r1, r2) || graph.resolver_status(r1) == Some(false) || graph.resolver_status(r2) == Some(false) || smt.get_lit_val(rho1) == Some(false) || smt.get_lit_val(rho2) == Some(false) {
+                    continue;
+                }
+                if !graph.mark_probed(r1, r2) {
+                    continue;
+                }
+                match smt.probe(&[rho1, rho2]) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        trace!("Theory mutex detected via level-0 probe: {} and {}", r1, r2);
+                        graph.add_res_mutex(r1, r2);
+                        self.add_clause(&mut smt, &mut graph, vec![!rho1, !rho2])?;
+                        learned = true;
+                    }
+                    Err(_) => return Err(SolverError::Inconsistent),
+                }
             }
         }
 
@@ -215,12 +248,14 @@ impl SolverState {
 
         let phi = match cause_lits.as_slice() {
             [] => Lit::TRUE,
-            &[lit] => lit,
+            &[lit] => lit, // ϕ = ρ if there's only one cause
             _ => {
                 let phi = smt.new_lit();
+                // (ρ₁ ∧ ... ∧ ρₙ) → ϕ (the activation of all causes implies the activation of the flaw)
                 let mut clause: Vec<Lit> = cause_lits.iter().map(|&r| !r).collect();
                 clause.push(phi);
                 self.add_clause(smt, graph, clause)?;
+                // ϕ → ρᵢ for each cause ρᵢ (the flaw's activation implies the application of all of its causes)
                 for &rho in &cause_lits {
                     self.add_clause(smt, graph, vec![!phi, rho])?;
                 }
@@ -234,6 +269,7 @@ impl SolverState {
         for &res_id in &causes {
             let rho = graph.rho(res_id);
             let res_cost = graph.resolver_cost_var(res_id);
+            // ρ → (cost(ρ) >= cost(ϕ))
             let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, cost, rug::Rational::from(0)))?;
             self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
         }
@@ -257,27 +293,30 @@ impl SolverState {
         Ok(graph.add_resolver(rho, status, cost, res))
     }
 
-    /// Adds a causal link from `flw_id` to the current resolver, wiring the ρ → ϕ clause
+    /// Adds a causal link from the current resolver to `target_res`, wiring the ρ → ρ_target clause
     /// and the DL cost constraint into `smt`.
     pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, target_res: ResolverId) -> Result<(), SolverError> {
         let (rho, target_rho) = graph.add_causal_link(target_res)?;
+        // ρ → target_ρ (if the current resolver is active, the target resolver must be active)
         self.add_clause(smt, graph, vec![!rho, target_rho])?;
 
         let (res_id, _) = graph.current_resolver().expect("No current resolver found");
         let res_cost = graph.resolver_cost_var(res_id);
         let target_cost = graph.resolver_cost_var(target_res);
         let target_intrinsic = graph.resolver_intrinsic_cost(target_res);
+        // ρ → (cost(ρ) >= cost(target_ρ) + intrinsic_cost(target_ρ))
         let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, target_cost, target_intrinsic))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
 
-    /// Expands `flw_id`, applies its resolvers, adds the closure clause, and propagates heuristic costs.
+    /// Expands `flw_id`, applies its resolvers, and adds the closure and pairwise AMO clauses.
     fn expand_flaw(&self, flw_id: FlawId) -> Result<(), SolverError> {
         let phi = self.graph.borrow().phi(flw_id);
         let flaw = self.graph.borrow_mut().take_flaw(flw_id).expect("Flaw should exist in graph");
         flaw.expand(self)?;
         let resolvers = self.graph.borrow().flaw_resolvers(flw_id).to_vec();
 
+        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ)
         let mut clause = Vec::with_capacity(resolvers.len() + 1);
         let mut rhos = Vec::with_capacity(resolvers.len());
         clause.push(!phi);
@@ -296,6 +335,7 @@ impl SolverState {
         let mut smt = self.smt.borrow_mut();
         self.add_clause(&mut smt, &mut graph, clause)?;
 
+        // Pairwise AMO between sibling resolvers: ¬ρᵢ ∨ ¬ρⱼ
         for i in 0..rhos.len() {
             for j in (i + 1)..rhos.len() {
                 self.add_clause(&mut smt, &mut graph, vec![!rhos[i], !rhos[j]])?;
@@ -655,11 +695,17 @@ fn eq_to_bool(left: &Slot, right: &Slot) -> ast::BoolExpr {
         }
         (Slot::Primitive(left), Slot::ObjectRef(right)) => {
             if let Some(left) = left.downcast::<EnumVar>() {
+                if left.var_type().as_class().is_some_and(|c| !c.instances().contains(right)) {
+                    return ast::BoolExpr::False;
+                }
                 return left.var.eq(usize::from(*right));
             }
         }
         (Slot::ObjectRef(left), Slot::Primitive(right)) => {
             if let Some(right) = right.downcast::<EnumVar>() {
+                if right.var_type().as_class().is_some_and(|c| !c.instances().contains(left)) {
+                    return ast::BoolExpr::False;
+                }
                 return right.var.eq(usize::from(*left));
             }
         }
