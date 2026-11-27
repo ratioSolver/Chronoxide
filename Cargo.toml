@@ -9,8 +9,11 @@ repository = "https://github.com/ratioSolver/Chronoxide"
 license-file = "LICENSE.txt"
 
 [features]
-default = ["server"]
+default = ["server", "h2"]
 server = ["dep:axum", "dep:tower-http", "dep:tracing-subscriber"]
+h_max = []
+h_add = []
+h2 = []
 
 [lib]
 name = "chronoxide"
