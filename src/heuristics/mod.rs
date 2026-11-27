@@ -70,7 +70,7 @@ pub(crate) fn finite_probe_resolvers<H: Heuristic>(h: &H, graph: &CausalGraph, m
         if search.res_val(r).is_some() || !search.is_resolver_alive(graph, r) {
             continue;
         }
-        if !graph.is_phi_fully_expanded(graph.flaw(data.flaw).phi) {
+        if !graph.is_expanded(data.flaw) {
             continue;
         }
         if h.is_resolver_finite(graph, mutex, search, r) {
@@ -114,7 +114,7 @@ pub(crate) fn finite_probe_pairs<H: Heuristic>(h: &H, graph: &CausalGraph, mutex
     let mut seen = HashSet::new();
 
     for (f1, f2) in flaw_pairs {
-        if !graph.is_phi_fully_expanded(graph.flaw(f1).phi) || !graph.is_phi_fully_expanded(graph.flaw(f2).phi) {
+        if !graph.is_expanded(f1) || !graph.is_expanded(f2) {
             continue;
         }
         for &r1 in &graph.flaw(f1).resolvers {

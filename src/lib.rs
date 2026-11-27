@@ -59,6 +59,11 @@ impl ProbeCache {
     }
 }
 
+enum Decision {
+    Frontier(Lit),
+    Agenda(Lit),
+}
+
 struct Planner {
     graph: CausalGraph,
     mutex: MutexTable,
@@ -192,10 +197,21 @@ impl SolverState {
 
             // 4. Branch on an unassigned frontier literal or an active agenda flaw.
             trace!("Picking branching literal...");
-            let decision = self.pick_branching_literal();
-            if let Some(decision_lit) = decision {
-                self.smt.borrow_mut().decide(decision_lit);
-                continue;
+            match self.pick_branching_literal() {
+                Some(Decision::Frontier(phi)) => {
+                    let new_lvl = {
+                        let mut smt = self.smt.borrow_mut();
+                        smt.decide(!phi);
+                        smt.decision_level()
+                    };
+                    self.planner.borrow_mut().search.on_frontier_decision(new_lvl, phi);
+                    continue;
+                }
+                Some(Decision::Agenda(rho)) => {
+                    self.smt.borrow_mut().decide(rho);
+                    continue;
+                }
+                None => {}
             }
 
             // 5. No open flaws left: check timelines for resource/state-variable conflicts.
@@ -237,6 +253,7 @@ impl SolverState {
         {
             let mut smt = self.smt.borrow_mut();
             let mut planner = self.planner.borrow_mut();
+            trace!("Running unary level-0 probes ({} candidates)...", unary_candidates.len());
             for r in unary_candidates {
                 let rho = planner.graph.resolver(r).rho;
                 if smt.get_lit_val(rho).is_some() || !planner.probes.mark_unary(rho) {
@@ -267,6 +284,7 @@ impl SolverState {
         {
             let mut smt = self.smt.borrow_mut();
             let mut planner = self.planner.borrow_mut();
+            trace!("Running binary level-0 probes ({} candidates)...", binary_candidates.len());
             for (r1, r2) in binary_candidates {
                 let rho1 = planner.graph.resolver(r1).rho;
                 let rho2 = planner.graph.resolver(r2).rho;
@@ -293,15 +311,14 @@ impl SolverState {
         Ok(learned)
     }
 
-    fn pick_branching_literal(&self) -> Option<Lit> {
+    fn pick_branching_literal(&self) -> Option<Decision> {
         let p = self.planner.borrow();
 
         if let Some((flw_id, phi)) = p.search.next_unassigned_frontier_phi(&p.graph) {
-            let lit = !phi;
-            trace!("Branching on unexpanded flaw {}: {}", flw_id, lit);
+            trace!("Branching on unexpanded flaw {}: {}", flw_id, !phi);
             #[cfg(feature = "server")]
             let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
-            return Some(lit);
+            return Some(Decision::Frontier(phi));
         }
 
         if let Some((flw_id, res_id)) = p.heuristic.pick_branch(&p.graph, &p.mutex, &p.search) {
@@ -312,7 +329,7 @@ impl SolverState {
                 let _ = self.tx_event.send(SolverEvent::CurrentFlaw(Some(flw_id)));
                 let _ = self.tx_event.send(SolverEvent::CurrentResolver(Some(res_id)));
             }
-            return Some(lit);
+            return Some(Decision::Agenda(lit));
         }
 
         #[cfg(feature = "server")]
@@ -694,7 +711,7 @@ impl SolverState {
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         let Planner { graph, search, heuristic, .. } = planner;
-        if search.cancel_until(graph, &vars_to_undo, &self.tx_event) {
+        if search.cancel_until(graph, bt_level, &vars_to_undo, &self.tx_event) {
             heuristic.invalidate();
         }
         smt.add_clause(lemma).is_ok()
@@ -706,7 +723,7 @@ impl SolverState {
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
         let Planner { graph, search, heuristic, .. } = &mut *planner;
-        if search.cancel_until(graph, &vars_to_undo, &self.tx_event) {
+        if search.cancel_until(graph, bt_level, &vars_to_undo, &self.tx_event) {
             heuristic.invalidate();
         }
     }

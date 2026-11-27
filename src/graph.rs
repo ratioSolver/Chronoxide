@@ -242,11 +242,6 @@ impl CausalGraph {
         self.flaws_by_lit(phi).iter().copied().filter(|&f| self.flaws[f].state == FlawState::Queued).collect()
     }
 
-    /// Returns `true` if every flaw sharing `phi` has finished expanding.
-    pub(crate) fn is_phi_fully_expanded(&self, phi: Lit) -> bool {
-        self.flaws_by_lit(phi).iter().all(|&f| self.flaws[f].state == FlawState::Expanded)
-    }
-
     /// Dereferences an optional causal link to `(effective_resolver, total_intrinsic_cost)`.
     #[inline]
     pub(crate) fn effective_resolver(&self, r: ResolverId) -> (ResolverId, f64) {

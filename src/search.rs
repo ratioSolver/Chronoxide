@@ -11,13 +11,19 @@ use tracing::trace;
 pub(crate) struct SearchState {
     flaw_val: Vec<Option<bool>>,
     res_val: Vec<Option<bool>>,
-    /// Active flaws (`flaw_val == Some(true)`) that do not yet have an active resolver.
     agenda: HashSet<FlawId>,
+    /// Frontier `(decision_level, phi)` literals actively decided false during bounded search.
+    decided_frontier: Vec<(usize, Lit)>,
 }
 
 impl SearchState {
     pub(crate) fn new() -> Self {
-        Self { flaw_val: Vec::new(), res_val: Vec::new(), agenda: HashSet::new() }
+        Self {
+            flaw_val: Vec::new(),
+            res_val: Vec::new(),
+            agenda: HashSet::new(),
+            decided_frontier: Vec::new(),
+        }
     }
 
     /// Registers a newly added flaw. Returns `true` if it entered the agenda.
@@ -101,9 +107,14 @@ impl SearchState {
         h2_dirty
     }
 
+    pub(crate) fn on_frontier_decision(&mut self, level: usize, phi: Lit) {
+        self.decided_frontier.push((level, phi));
+    }
+
     /// Undoes SAT literals on backtrack. Returns `true` if `H2` must be invalidated.
     #[cfg_attr(not(feature = "server"), allow(unused_variables))]
-    pub(crate) fn cancel_until(&mut self, graph: &CausalGraph, lits: &[Lit], tx_event: &broadcast::Sender<SolverEvent>) -> bool {
+    pub(crate) fn cancel_until(&mut self, graph: &CausalGraph, bt_level: usize, lits: &[Lit], tx_event: &broadcast::Sender<SolverEvent>) -> bool {
+        self.decided_frontier.retain(|&(lvl, _)| lvl <= bt_level);
         if lits.is_empty() {
             return false;
         }
@@ -195,12 +206,17 @@ impl SearchState {
         graph.frontier().iter().copied().find(|&f| self.flaw_val[f].is_none()).map(|f| (f, graph.flaw(f).phi))
     }
 
-    /// Returns distinct `phi` literals (in BFS order) of all queued frontier flaws touched by the current search.
+    /// Returns distinct `phi` literals of frontier flaws that were actively decided false or forced true.
     pub(crate) fn conflict_frontier_phis(&self, graph: &CausalGraph) -> Vec<Lit> {
         let mut seen = HashSet::new();
         let mut phis = Vec::new();
+        for &(_, phi) in &self.decided_frontier {
+            if graph.flaws_by_lit(phi).iter().any(|&f| !graph.is_expanded(f)) && seen.insert(phi) {
+                phis.push(phi);
+            }
+        }
         for &f in graph.frontier() {
-            if self.flaw_val[f].is_some() {
+            if self.flaw_val[f] == Some(true) {
                 let phi = graph.flaw(f).phi;
                 if seen.insert(phi) {
                     phis.push(phi);
