@@ -354,9 +354,9 @@ impl Graph {
         self.flaw_resolvers.push(Vec::new());
         self.flaw_pair_cost.push(vec![f64::INFINITY; flw_id.0 + 1]);
 
-        match causes.as_slice() {
-            &[r] => self.resolver_preconditions[r].push(flw_id),
-            &[r1, r2] => self.pair_preconditions.entry(Self::norm_res_pair(r1, r2)).or_default().push(flw_id),
+        match *causes.as_slice() {
+            [r] => self.resolver_preconditions[r].push(flw_id),
+            [r1, r2] => self.pair_preconditions.entry(Self::norm_res_pair(r1, r2)).or_default().push(flw_id),
             _ => {}
         }
 
