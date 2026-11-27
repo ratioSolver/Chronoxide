@@ -481,6 +481,10 @@ impl Flaw for LevelFlaw {
         let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding {} flaw {} with atoms {}", self.kind, flw_id, self.past.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
 
+        if smt.get_lit_val(phi) == Some(false) {
+            return Ok(());
+        }
+
         let mut candidates: Vec<(Lit, &'static str)> = Vec::new();
 
         for &atom_id in &self.past {
@@ -491,7 +495,7 @@ impl Flaw for LevelFlaw {
             if let Slot::Primitive(var) = tau {
                 let var = var.downcast::<EnumVar>().expect("Atom should have an EnumVar for 'tau'").var.clone();
                 let displace = slv.track_expr(&mut smt, &mut graph, !var.eq(usize::from(self.instance)))?;
-                if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
+                if smt.get_lit_val(displace) != Some(false) {
                     candidates.push((displace, "displace"));
                 }
             }
@@ -502,7 +506,7 @@ impl Flaw for LevelFlaw {
             for &past_id in &self.past {
                 let (past_start, _) = get_interval_vars(slv, past_id);
                 let order = slv.track_expr(&mut smt, &mut graph, future_end.clone().le(past_start))?;
-                if smt.probe(&[phi, order]).map_err(|_| SolverError::Inconsistent)? {
+                if smt.get_lit_val(order) != Some(false) {
                     candidates.push((order, "order"));
                 }
             }
@@ -517,7 +521,7 @@ impl Flaw for LevelFlaw {
             Kind::Underflow => (ArithExpr::Add(amounts(&self.past)), ArithExpr::Add(iter::once(self.initial_amount.clone()).chain(amounts(&self.settled)).collect())),
         };
         let compress = slv.track_expr(&mut smt, &mut graph, lhs.le(rhs))?;
-        if smt.probe(&[phi, compress]).map_err(|_| SolverError::Inconsistent)? {
+        if smt.get_lit_val(compress) != Some(false) {
             candidates.push((compress, "compress"));
         }
 

@@ -1,6 +1,6 @@
 use crate::{
     SolverError, SolverState, eq_to_bool,
-    graph::{Flaw, FlawId, Resolver},
+    graph::{Flaw, Resolver, ResolverId},
 };
 use riddle::{
     RiddleError,
@@ -47,7 +47,7 @@ impl Flaw for AtomFlaw {
 
         let mut valid_unifications = Vec::new();
 
-        if atom.resolution_constraint() != ResolutionConstraint::CannotUnify {
+        if atom.resolution_constraint() != ResolutionConstraint::CannotUnify && smt.get_lit_val(phi) != Some(false) {
             for target_atom in predicate.atoms() {
                 if target_atom == self.atom {
                     continue;
@@ -65,16 +65,23 @@ impl Flaw for AtomFlaw {
                 if graph.is_ancestor(target_sigma_res, flw_id) {
                     continue;
                 }
+                if graph.is_flaw_res_mutex(flw_id, target_sigma_res) {
+                    trace!("Skipping unification with {} for atom {} because target resolver {} is mutex with {}", target_atom, self.atom, target_sigma_res, flw_id);
+                    continue;
+                }
                 let target_sigma = graph.rho(target_sigma_res);
                 if smt.get_lit_val(target_sigma) == Some(false) {
                     trace!("Skipping unification with {} for atom {} because target resolver is false", target_atom, self.atom);
                     continue;
                 }
                 let unif_eqs = build_unification_equations(atom.as_ref(), slv.get_atom(target_atom).unwrap_or_else(|| panic!("Target atom {} not found", target_atom)).as_ref());
+                if unif_eqs.len() == 1 && unif_eqs[0] == ast::BoolExpr::False {
+                    trace!("Skipping unification with {} for atom {} due to statically unsatisfiable unification equations", target_atom, self.atom);
+                    continue;
+                }
                 let eq_lit = if unif_eqs.is_empty() { Lit::TRUE } else { slv.track_expr(&mut smt, &mut graph, And(unif_eqs))? };
 
                 if smt.get_lit_val(phi) == Some(false) {
-                    // ϕ is already false (as a consequence of `track_expr`), no need to continue checking candidates
                     valid_unifications.clear();
                     break;
                 }
@@ -82,22 +89,12 @@ impl Flaw for AtomFlaw {
                     trace!("Skipping unification with {} for atom {} due to false literal at level 0", target_atom, self.atom);
                     continue;
                 }
-                if smt.probe(&[phi, target_sigma, eq_lit]).map_err(|_| SolverError::Inconsistent)? {
-                    trace!("{} can unify with {}", self.atom, target_atom);
-                    valid_unifications.push((target_atom, target_sigma, target_flaw, eq_lit));
-                } else {
-                    trace!("Skipping unification with {} for atom {} due to unsatisfiable unification equations", target_atom, self.atom);
-                }
-                if smt.get_lit_val(phi) == Some(false) {
-                    // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
-                    valid_unifications.clear();
-                    break;
-                }
+                trace!("{} can unify with {}", self.atom, target_atom);
+                valid_unifications.push((target_atom, target_sigma_res, eq_lit));
             }
         }
 
         if smt.get_lit_val(phi) == Some(false) {
-            // ϕ is already false, no need to continue checking candidates
             return Ok(());
         }
 
@@ -105,9 +102,9 @@ impl Flaw for AtomFlaw {
         let total_resolvers = valid_unifications.len() + usize::from(can_expand);
         let sigma = can_expand.then(|| if total_resolvers == 1 { phi } else { smt.new_lit() });
 
-        for (target_atom, target_sigma, target_flaw, eq_lit) in valid_unifications {
+        for (target_atom, target_sigma_res, eq_lit) in valid_unifications {
             let rho = if total_resolvers == 1 { phi } else { smt.new_lit() };
-            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(UnificationResolver::new(self.atom, sigma, target_atom, target_sigma, target_flaw, eq_lit)))?;
+            slv.add_resolver(&mut smt, &mut graph, rho, Box::new(UnificationResolver::new(self.atom, target_atom, target_sigma_res, eq_lit)))?;
         }
 
         if let Some(rho) = sigma {
@@ -192,16 +189,14 @@ impl Resolver for FactResolver {
 
 struct UnificationResolver {
     atom: AtomId,
-    sigma: Option<Lit>,
     target_atom: AtomId,
-    target_sigma: Lit,
-    target_flaw: FlawId,
+    target_sigma_res: ResolverId,
     eq_lit: Lit,
 }
 
 impl UnificationResolver {
-    fn new(atom: AtomId, sigma: Option<Lit>, target_atom: AtomId, target_sigma: Lit, target_flaw: FlawId, eq_lit: Lit) -> Self {
-        Self { atom, sigma, target_atom, target_sigma, target_flaw, eq_lit }
+    fn new(atom: AtomId, target_atom: AtomId, target_sigma_res: ResolverId, eq_lit: Lit) -> Self {
+        Self { atom, target_atom, target_sigma_res, eq_lit }
     }
 }
 
@@ -216,16 +211,12 @@ impl Resolver for UnificationResolver {
         let mut graph = slv.graph.borrow_mut();
         let (_, rho) = graph.current_resolver().ok_or(SolverError::RuntimeError(String::from("No current resolver found")))?;
 
-        // ρ → target_sigma (if the current atom unifies, the target atom must be activated)
-        slv.add_clause(&mut smt, &mut graph, vec![!rho, self.target_sigma])?;
         // ρ → eq_lit (if the current atom unifies, the unification equations must hold)
         slv.add_clause(&mut smt, &mut graph, vec![!rho, self.eq_lit])?;
-        if let Some(sigma) = self.sigma {
-            // ρ → !sigma (if the current atom unifies, the current atom's resolver must be deactivated)
-            slv.add_clause(&mut smt, &mut graph, vec![!rho, !sigma])?;
-        }
 
-        slv.add_causal_link(&mut smt, &mut graph, self.target_flaw)
+        // Wires ρ → target_sigma, DL cost constraint, and unidirectional mutex inheritance.
+        // Note: `!rho ∨ !sigma` is handled by the pairwise AMO clauses in `expand_flaw`.
+        slv.add_causal_link(&mut smt, &mut graph, self.target_sigma_res)
     }
 
     fn to_json(&self) -> Value {

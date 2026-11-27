@@ -312,6 +312,10 @@ impl Flaw for Peak {
         let (flw_id, phi) = graph.current_flaw().ok_or(SolverError::RuntimeError(String::from("No current flaw found")))?;
         trace!("Expanding Peak flaw {} with atoms {} and {}", flw_id, self.a, self.b);
 
+        if smt.get_lit_val(phi) == Some(false) {
+            return Ok(());
+        }
+
         let mut candidates: Vec<(Lit, &'static str)> = Vec::with_capacity(3);
 
         let a_tau = get_tau(slv, self.a);
@@ -334,7 +338,7 @@ impl Flaw for Peak {
         };
         if let Some(expr) = displace_expr {
             let displace = slv.track_expr(&mut smt, &mut graph, expr)?;
-            if smt.probe(&[phi, displace]).map_err(|_| SolverError::Inconsistent)? {
+            if smt.get_lit_val(displace) != Some(false) {
                 candidates.push((displace, "displace"));
             }
         }
@@ -343,12 +347,16 @@ impl Flaw for Peak {
         let (b_start, b_end) = get_interval_vars(slv, self.b);
 
         let a_before_b = slv.track_expr(&mut smt, &mut graph, a_end.le(b_start))?;
-        if smt.probe(&[phi, a_before_b]).map_err(|_| SolverError::Inconsistent)? {
+        if smt.get_lit_val(a_before_b) != Some(false) {
             candidates.push((a_before_b, "order"));
         }
         let b_before_a = slv.track_expr(&mut smt, &mut graph, b_end.le(a_start))?;
-        if smt.probe(&[phi, b_before_a]).map_err(|_| SolverError::Inconsistent)? {
+        if smt.get_lit_val(b_before_a) != Some(false) {
             candidates.push((b_before_a, "order"));
+        }
+
+        if smt.get_lit_val(phi) == Some(false) {
+            return Ok(());
         }
 
         add_lit_candidates(slv, &mut smt, &mut graph, phi, candidates, |lit, kind| Box::new(LitResolver::new(lit, json!({ "kind": kind }))))

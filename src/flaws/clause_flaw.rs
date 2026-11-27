@@ -29,21 +29,13 @@ impl Flaw for ClauseFlaw {
             for literal in &self.literals {
                 let lit = slv.track_expr(&mut smt, &mut graph, literal)?;
                 if smt.get_lit_val(phi) == Some(false) {
-                    // ϕ is already false (as a consequence of `track_expr`), no need to continue checking candidates
                     candidates.clear();
                     break;
                 }
                 if smt.get_lit_val(lit) == Some(false) {
                     continue;
                 }
-                if smt.probe(&[phi, lit]).map_err(|_| SolverError::Inconsistent)? {
-                    candidates.push((lit, ()));
-                }
-                if smt.get_lit_val(phi) == Some(false) {
-                    // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
-                    candidates.clear();
-                    break;
-                }
+                candidates.push((lit, ()));
             }
         }
 

@@ -91,16 +91,25 @@ impl SolverState {
                     #[cfg(feature = "server")]
                     let _ = self.tx_event.send(SolverEvent::StateUpdate { json: self.to_json() });
 
-                    if !self.graph.borrow().has_estimated_solution() {
+                    let lvl = self.smt.borrow().decision_level();
+                    let need_expansion = {
+                        let mut graph = self.graph.borrow_mut();
+                        (lvl == 0 && !graph.has_estimated_solution()) || graph.has_active_unexpanded_flaw()
+                    };
+
+                    if need_expansion {
                         trace!("Expanding graph...");
                         self.cancel_until(0);
                         let flw_id = self.graph.borrow_mut().pop_flaw().ok_or(SolverError::Inconsistent)?;
                         self.expand_flaw(flw_id)?;
                     } else {
+                        if lvl == 0 && self.probe_agenda_mutexes()? {
+                            continue;
+                        }
+
                         trace!("Picking branching literal...");
-                        let decision = self.graph.borrow().pick_branching_literal();
+                        let decision = self.graph.borrow_mut().pick_branching_literal();
                         if let Some(decision_var) = decision {
-                            self.graph.borrow_mut().push();
                             self.smt.borrow_mut().decide(decision_var);
                         } else {
                             trace!("No more decisions to make, checking timelines for new flaws...");
@@ -110,16 +119,29 @@ impl SolverState {
                             }
                             if !extracted_flaws.is_empty() {
                                 trace!("Extracted {} new flaws from timelines", extracted_flaws.len());
-                                let mut smt = self.smt.borrow_mut();
-                                let mut graph = self.graph.borrow_mut();
-                                for (flaw, causes) in extracted_flaws {
-                                    self.add_flaw(&mut smt, &mut graph, causes, flaw)?;
+                                self.cancel_until(0);
+                                let mut new_flaws = Vec::with_capacity(extracted_flaws.len());
+                                {
+                                    let mut smt = self.smt.borrow_mut();
+                                    let mut graph = self.graph.borrow_mut();
+                                    for (flaw, causes) in extracted_flaws {
+                                        new_flaws.push(self.add_flaw(&mut smt, &mut graph, causes, flaw)?);
+                                    }
+                                    let current_len = smt.current_trail_len();
+                                    if current_len > self.notified_len.get() {
+                                        graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+                                    }
+                                    self.notified_len.set(current_len);
                                 }
-                                let current_len = smt.current_trail_len();
-                                if current_len > self.notified_len.get() {
-                                    graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+                                for flw_id in new_flaws {
+                                    let should_expand = {
+                                        let graph = self.graph.borrow();
+                                        !graph.flaw_expanded(flw_id) && graph.flaw_status(flw_id) != Some(false)
+                                    };
+                                    if should_expand {
+                                        self.expand_flaw(flw_id)?;
+                                    }
                                 }
-                                self.notified_len.set(current_len);
                                 continue;
                             }
 
@@ -140,21 +162,65 @@ impl SolverState {
         Ok(())
     }
 
-    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, causes: Vec<ResolverId>, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+    /// Probes unprobed resolver pairs across flaws in `agenda` at level 0.
+    /// Returns `true` if any new theory mutex or level-0 propagation occurred.
+    fn probe_agenda_mutexes(&self) -> Result<bool, SolverError> {
+        let pairs = self.graph.borrow().agenda_resolver_pairs();
+        if pairs.is_empty() {
+            return Ok(false);
+        }
+
+        let mut smt = self.smt.borrow_mut();
+        let mut graph = self.graph.borrow_mut();
+        let mut learned = false;
+
+        for (r1, r2) in pairs {
+            if graph.is_res_mutex(r1, r2) || graph.resolver_status(r1) == Some(false) || graph.resolver_status(r2) == Some(false) {
+                continue;
+            }
+            if !graph.mark_probed(r1, r2) {
+                continue;
+            }
+            let rho1 = graph.rho(r1);
+            let rho2 = graph.rho(r2);
+            match smt.probe(&[rho1, rho2]) {
+                Ok(true) => {}
+                Ok(false) => {
+                    trace!("Theory mutex detected via agenda probe: {} and {}", r1, r2);
+                    graph.add_res_mutex(r1, r2);
+                    self.add_clause(&mut smt, &mut graph, vec![!rho1, !rho2])?;
+                    learned = true;
+                }
+                Err(_) => return Err(SolverError::Inconsistent),
+            }
+        }
+
+        let current_len = smt.current_trail_len();
+        if current_len > self.notified_len.get() {
+            graph.propagate(smt.get_trail_delta(self.notified_len.get()));
+            self.notified_len.set(current_len);
+            learned = true;
+        }
+
+        Ok(learned)
+    }
+
+    pub fn add_flaw(&self, smt: &mut SeMiTONE, graph: &mut Graph, mut causes: Vec<ResolverId>, flw: Box<dyn Flaw>) -> Result<FlawId, SolverError> {
+        causes.sort_unstable();
+        causes.dedup();
+
         let mut cause_lits: Vec<Lit> = graph.rhos(&causes);
         cause_lits.sort_unstable();
         cause_lits.dedup();
 
         let phi = match cause_lits.as_slice() {
             [] => Lit::TRUE,
-            &[lit] => lit, // ϕ = ρ if there's only one cause
+            &[lit] => lit,
             _ => {
                 let phi = smt.new_lit();
-                // (ρ₁ ∧ ... ∧ ρₙ) → ϕ (the activation of all causes implies the activation of the flaw)
                 let mut clause: Vec<Lit> = cause_lits.iter().map(|&r| !r).collect();
                 clause.push(phi);
                 self.add_clause(smt, graph, clause)?;
-                // ϕ → ρᵢ for each cause ρᵢ (the flaw's activation implies the application of all of its causes)
                 for &rho in &cause_lits {
                     self.add_clause(smt, graph, vec![!phi, rho])?;
                 }
@@ -168,7 +234,6 @@ impl SolverState {
         for &res_id in &causes {
             let rho = graph.rho(res_id);
             let res_cost = graph.resolver_cost_var(res_id);
-            // ρ → (cost(ρ) >= cost(ϕ))
             let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, cost, rug::Rational::from(0)))?;
             self.add_clause(smt, graph, vec![!rho, dl_cnstr])?;
         }
@@ -194,16 +259,15 @@ impl SolverState {
 
     /// Adds a causal link from `flw_id` to the current resolver, wiring the ρ → ϕ clause
     /// and the DL cost constraint into `smt`.
-    pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, flw_id: FlawId) -> Result<(), SolverError> {
-        let (rho, phi) = graph.add_causal_link(flw_id)?;
-        // ρ → ϕ (the activation of the resolver implies the activation of the flaw)
-        self.add_clause(smt, graph, vec![!rho, phi])?;
+    pub(crate) fn add_causal_link(&self, smt: &mut SeMiTONE, graph: &mut Graph, target_res: ResolverId) -> Result<(), SolverError> {
+        let (rho, target_rho) = graph.add_causal_link(target_res)?;
+        self.add_clause(smt, graph, vec![!rho, target_rho])?;
 
         let (res_id, _) = graph.current_resolver().expect("No current resolver found");
         let res_cost = graph.resolver_cost_var(res_id);
-        let flw_cost = graph.flaw_cost_var(flw_id);
-        // ρ → (cost(ρ) >= cost(ϕ))
-        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, flw_cost, rug::Rational::from(0)))?;
+        let target_cost = graph.resolver_cost_var(target_res);
+        let target_intrinsic = graph.resolver_intrinsic_cost(target_res);
+        let dl_cnstr = self.track_expr(smt, graph, ast::BoolExpr::DlGe(res_cost, target_cost, target_intrinsic))?;
         self.add_clause(smt, graph, vec![!rho, dl_cnstr])
     }
 
@@ -214,12 +278,13 @@ impl SolverState {
         flaw.expand(self)?;
         let resolvers = self.graph.borrow().flaw_resolvers(flw_id).to_vec();
 
-        // ϕ → (ρ₁ ∨ ρ₂ ∨ ... ∨ ρₙ) (the activation of the flaw implies the application of at least one of its resolvers)
         let mut clause = Vec::with_capacity(resolvers.len() + 1);
+        let mut rhos = Vec::with_capacity(resolvers.len());
         clause.push(!phi);
         for res_id in resolvers {
             let rho = self.graph.borrow().rho(res_id);
             clause.push(rho);
+            rhos.push(rho);
             let resolver = self.graph.borrow_mut().take_resolver(res_id).expect("Resolver should exist in graph");
             resolver.apply(self)?;
             self.graph.borrow_mut().return_resolver(resolver);
@@ -231,12 +296,17 @@ impl SolverState {
         let mut smt = self.smt.borrow_mut();
         self.add_clause(&mut smt, &mut graph, clause)?;
 
+        for i in 0..rhos.len() {
+            for j in (i + 1)..rhos.len() {
+                self.add_clause(&mut smt, &mut graph, vec![!rhos[i], !rhos[j]])?;
+            }
+        }
+
         let current_len = smt.current_trail_len();
         if current_len > self.notified_len.get() {
             graph.propagate(smt.get_trail_delta(self.notified_len.get()));
         }
         self.notified_len.set(current_len);
-        graph.propagate_costs(&[flw_id]);
 
         Ok(())
     }
@@ -276,9 +346,12 @@ impl SolverState {
         if smt.decision_level() == 0 {
             return false;
         }
+        if lemma.len() == 2 {
+            graph.learn_binary_clause(lemma[0], lemma[1]);
+        }
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
-        graph.cancel_until(bt_level, &vars_to_undo);
+        graph.cancel_until(&vars_to_undo);
         smt.add_clause(lemma).is_ok()
     }
 
@@ -287,7 +360,7 @@ impl SolverState {
         let mut graph = self.graph.borrow_mut();
         let vars_to_undo = smt.cancel_until(bt_level);
         self.notified_len.set(smt.current_trail_len());
-        graph.cancel_until(bt_level, &vars_to_undo);
+        graph.cancel_until(&vars_to_undo);
     }
 
     fn to_json(&self) -> Value {

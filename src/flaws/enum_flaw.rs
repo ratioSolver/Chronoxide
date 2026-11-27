@@ -29,23 +29,17 @@ impl Flaw for EnumFlaw {
         trace!("Expanding EnumFlaw {} with expr: {} and domain: {:?}", flw_id, self.expr, self.domain.iter().map(|id| format!("{}", id)).collect::<Vec<_>>().join(", "));
 
         let mut candidates = Vec::with_capacity(self.domain.len());
-        for &val in &self.domain {
-            let val_lit = slv.track_expr(&mut smt, &mut graph, self.expr.eq(usize::from(val)))?;
-            if smt.get_lit_val(phi) == Some(false) {
-                // ϕ is already false (as a consequence of `track_expr`), no need to continue checking candidates
-                candidates.clear();
-                break;
-            }
-            if smt.get_lit_val(val_lit) == Some(false) {
-                continue;
-            }
-            if smt.probe(&[phi, val_lit]).map_err(|_| SolverError::Inconsistent)? {
+        if smt.get_lit_val(phi) != Some(false) {
+            for &val in &self.domain {
+                let val_lit = slv.track_expr(&mut smt, &mut graph, self.expr.eq(usize::from(val)))?;
+                if smt.get_lit_val(phi) == Some(false) {
+                    candidates.clear();
+                    break;
+                }
+                if smt.get_lit_val(val_lit) == Some(false) {
+                    continue;
+                }
                 candidates.push((val_lit, val));
-            }
-            if smt.get_lit_val(phi) == Some(false) {
-                // ϕ is already false (as a consequence of `probe`), no need to continue checking candidates
-                candidates.clear();
-                break;
             }
         }
 
