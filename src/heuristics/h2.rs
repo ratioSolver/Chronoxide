@@ -46,7 +46,7 @@ impl H2 {
     }
 
     /// Computes the joint `h^2` cost of applying `r1` and `r2`, pruning early against `cur_best`.
-    fn resolver_pair_cost(&self, graph: &CausalGraph, mutex: &MutexTable, r1: ResolverId, r2: ResolverId, p1_cost: f64, p2_cost: f64, cur_best: f64) -> f64 {
+    fn resolver_pair_cost(&self, graph: &CausalGraph, mutex: &MutexTable, (r1, p1_cost): (ResolverId, f64), (r2, p2_cost): (ResolverId, f64), cur_best: f64) -> f64 {
         if r1 != r2 && mutex.is_res_mutex(r1, r2) {
             return f64::INFINITY;
         }
@@ -177,7 +177,7 @@ impl Heuristic for H2 {
                         continue;
                     }
                     let cur = self.pair_cost(f1, f2);
-                    let c = self.resolver_pair_cost(graph, mutex, r1, r2, p1, p2, cur);
+                    let c = self.resolver_pair_cost(graph, mutex, (r1, p1), (r2, p2), cur);
                     if c < cur {
                         self.set_pair_cost(f1, f2, c);
                         changed = true;
@@ -325,7 +325,7 @@ impl Heuristic for H2 {
                         if p2 == f64::INFINITY {
                             continue;
                         }
-                        let c = self.resolver_pair_cost(graph, mutex, r1, r2, p1, p2, min_with_other);
+                        let c = self.resolver_pair_cost(graph, mutex, (r1, p1), (r2, p2), score);
                         if c < min_with_other {
                             min_with_other = c;
                         }

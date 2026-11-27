@@ -198,11 +198,6 @@ impl CausalGraph {
     }
 
     #[inline]
-    pub(crate) fn resolver_count(&self) -> usize {
-        self.resolvers.len()
-    }
-
-    #[inline]
     pub(crate) fn flaw(&self, id: FlawId) -> &FlawData {
         &self.flaws[id]
     }

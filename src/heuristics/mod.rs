@@ -83,6 +83,7 @@ pub(crate) fn finite_probe_resolvers<H: Heuristic>(h: &H, graph: &CausalGraph, m
 /// Collects non-mutex, alive, finite-cost resolver pairs across:
 /// 1) distinct flaws currently in the agenda, and
 /// 2) sibling preconditions of any alive, finite-cost, non-linked resolver.
+///
 /// Only includes resolvers whose parent `phi`-group is fully expanded.
 pub(crate) fn finite_probe_pairs<H: Heuristic>(h: &H, graph: &CausalGraph, mutex: &MutexTable, search: &SearchState) -> Vec<(ResolverId, ResolverId)> {
     let mut flaw_pairs: HashSet<(FlawId, FlawId)> = HashSet::new();
